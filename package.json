@@ -1,0 +1,25 @@
+{
+  "name": "ai-knowledge-base",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI 知识库问答平台 - Vue3 + NestJS + RAG",
+  "scripts": {
+    "dev:web": "pnpm --filter @app/web dev",
+    "dev:server": "pnpm --filter @app/server start:dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,vue,js,json,md}\"",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
