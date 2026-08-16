@@ -1,0 +1,109 @@
+<script setup lang="ts">
+import { ref, reactive } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { Brain, Loader2 } from 'lucide-vue-next';
+import { useAuthStore } from '@/stores/auth';
+import Card from '@/components/ui/Card.vue';
+import CardHeader from '@/components/ui/CardHeader.vue';
+import CardTitle from '@/components/ui/CardTitle.vue';
+import CardDescription from '@/components/ui/CardDescription.vue';
+import CardContent from '@/components/ui/CardContent.vue';
+import CardFooter from '@/components/ui/CardFooter.vue';
+import Input from '@/components/ui/Input.vue';
+import Label from '@/components/ui/Label.vue';
+import Button from '@/components/ui/Button.vue';
+
+const router = useRouter();
+const route = useRoute();
+const auth = useAuthStore();
+
+const form = reactive({
+  email: '',
+  password: '',
+});
+const loading = ref(false);
+const errorMsg = ref('');
+
+async function handleSubmit() {
+  errorMsg.value = '';
+
+  if (!form.email || !form.password) {
+    errorMsg.value = '请填写邮箱和密码';
+    return;
+  }
+
+  loading.value = true;
+  try {
+    await auth.login(form);
+    const redirect = (route.query.redirect as string) || '/';
+    router.push(redirect);
+  } catch (e) {
+    errorMsg.value = (e as Error).message;
+  } finally {
+    loading.value = false;
+  }
+}
+</script>
+
+<template>
+  <div
+    class="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4"
+  >
+    <Card class="w-full max-w-md">
+      <CardHeader class="text-center">
+        <div
+          class="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
+        >
+          <Brain class="h-6 w-6" />
+        </div>
+        <CardTitle class="text-2xl">欢迎回来</CardTitle>
+        <CardDescription>登录你的 AI 知识库账号</CardDescription>
+      </CardHeader>
+
+      <CardContent>
+        <form @submit.prevent="handleSubmit" class="space-y-4">
+          <div
+            v-if="errorMsg"
+            class="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            {{ errorMsg }}
+          </div>
+
+          <div class="space-y-2">
+            <Label for="email">邮箱</Label>
+            <Input
+              id="email"
+              v-model="form.email"
+              type="email"
+              placeholder="you@example.com"
+              autocomplete="email"
+            />
+          </div>
+
+          <div class="space-y-2">
+            <Label for="password">密码</Label>
+            <Input
+              id="password"
+              v-model="form.password"
+              type="password"
+              placeholder="••••••••"
+              autocomplete="current-password"
+            />
+          </div>
+
+          <Button type="submit" class="w-full" :disabled="loading">
+            <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
+            {{ loading ? '登录中...' : '登录' }}
+          </Button>
+        </form>
+      </CardContent>
+
+      <CardFooter class="justify-center">
+        <p class="text-sm text-muted-foreground">
+          还没有账号？
+          <RouterLink to="/register" class="text-primary hover:underline">立即注册</RouterLink>
+        </p>
+      </CardFooter>
+    </Card>
+  </div>
+</template>
