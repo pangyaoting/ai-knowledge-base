@@ -46,25 +46,43 @@ onMounted(async () => {
       </p>
     </div>
 
-    <!-- 功能卡片 -->
+    <!-- 功能入口卡片（点击可跳转到对应功能） -->
     <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-      <div class="rounded-lg border bg-card p-6">
+      <RouterLink
+        to="/knowledge"
+        class="group rounded-lg border bg-card p-6 transition-shadow hover:shadow-md"
+      >
         <Database class="h-8 w-8 text-primary" />
-        <h3 class="mt-4 font-semibold">向量存储</h3>
+        <h3 class="mt-4 font-semibold">知识库管理</h3>
         <p class="mt-2 text-sm text-muted-foreground">
-          PostgreSQL + pgvector，业务数据与向量一体化存储
+          PostgreSQL + pgvector，上传文档自动解析分块向量化
         </p>
-      </div>
-      <div class="rounded-lg border bg-card p-6">
+        <p class="mt-3 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+          进入知识库 →
+        </p>
+      </RouterLink>
+      <RouterLink
+        to="/knowledge"
+        class="group rounded-lg border bg-card p-6 transition-shadow hover:shadow-md"
+      >
         <Brain class="h-8 w-8 text-primary" />
         <h3 class="mt-4 font-semibold">RAG 引擎</h3>
         <p class="mt-2 text-sm text-muted-foreground">递归分块 + bge-m3 向量化 + 混合检索</p>
-      </div>
-      <div class="rounded-lg border bg-card p-6">
+        <p class="mt-3 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+          管理知识库 →
+        </p>
+      </RouterLink>
+      <RouterLink
+        to="/chat"
+        class="group rounded-lg border bg-card p-6 transition-shadow hover:shadow-md"
+      >
         <MessageSquare class="h-8 w-8 text-primary" />
         <h3 class="mt-4 font-semibold">流式对话</h3>
         <p class="mt-2 text-sm text-muted-foreground">SSE 逐字输出，Markdown 渲染，引用溯源</p>
-      </div>
+        <p class="mt-3 text-xs text-primary opacity-0 transition-opacity group-hover:opacity-100">
+          开始对话 →
+        </p>
+      </RouterLink>
       <div class="rounded-lg border bg-card p-6">
         <Cloud class="h-8 w-8 text-primary" />
         <h3 class="mt-4 font-semibold">容器部署</h3>
@@ -75,9 +93,12 @@ onMounted(async () => {
     <!-- 开发进度提示 -->
     <div class="mt-12 rounded-lg border border-dashed p-8 text-center">
       <p class="text-sm text-muted-foreground">
-        阶段 1（用户系统）+ 阶段 2（知识库管理 / 文档解析 / 向量化）已完成
-        <RouterLink to="/knowledge" class="ml-2 text-primary underline-offset-4 hover:underline">
-          去创建你的第一个知识库 →
+        阶段 1（用户系统）+ 阶段 2（知识库管理 / 文档解析 / 向量化）+ 阶段 3（RAG 流式问答）已完成；
+        阶段 4（联网检索 / 混合检索 / 数据看板）进行中
+      </p>
+      <p class="mt-3">
+        <RouterLink to="/knowledge" class="text-primary underline-offset-4 hover:underline">
+          去管理你的知识库 →
         </RouterLink>
       </p>
     </div>

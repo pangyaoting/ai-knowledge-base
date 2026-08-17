@@ -36,6 +36,14 @@ function onFileChange(e: Event) {
   selectedFile.value = input.files?.[0] ?? null;
 }
 
+/**
+ * 点击文件框时先清空 value：
+ * 浏览器对"未变化的 input"不触发 change 事件，清空后重复选同一个文件也能触发
+ */
+function onPickClick() {
+  if (fileInput.value) fileInput.value.value = '';
+}
+
 async function load() {
   loading.value = true;
   error.value = '';
@@ -163,6 +171,7 @@ onMounted(load);
           accept=".pdf,.docx,.md,.markdown,.txt"
           class="block w-full max-w-md text-sm file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-4 file:py-2 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
           @change="onFileChange"
+          @click="onPickClick"
         />
         <Button :disabled="!selectedFile || uploading" @click="handleUpload">
           <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
@@ -173,7 +182,10 @@ onMounted(load);
       <p v-if="uploading" class="mt-3 text-center text-xs text-muted-foreground">
         上传后需要解析、分块并调用 AI 向量化，大文档可能需要十几秒
       </p>
-      <p v-if="error" class="mt-3 flex items-center justify-center gap-1.5 text-center text-sm text-destructive">
+      <p
+        v-if="error"
+        class="mt-3 flex items-center justify-center gap-1.5 text-center text-sm text-destructive"
+      >
         <AlertCircle class="h-4 w-4" /> {{ error }}
       </p>
     </div>

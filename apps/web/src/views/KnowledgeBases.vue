@@ -29,6 +29,9 @@ async function load() {
   }
 }
 
+// 进入页面立即加载列表（之前漏了这行，导致要新建或点刷新才显示）
+onMounted(load);
+
 async function handleCreate() {
   const trimmed = name.value.trim();
   if (!trimmed) return;

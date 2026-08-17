@@ -10,7 +10,15 @@ import {
   askQuestion,
 } from '@/api/chat';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
-import type { ChatSession, ChatMessage, ChatSources, RetrievalSource, WebSource } from '@/types/chat';
+import { getKnowledgeBases } from '@/api/knowledge';
+import type { KnowledgeBase } from '@/types/knowledge';
+import type {
+  ChatSession,
+  ChatMessage,
+  ChatSources,
+  RetrievalSource,
+  WebSource,
+} from '@/types/chat';
 
 // ==================== 状态 ====================
 const sessions = ref<ChatSession[]>([]);
@@ -22,6 +30,12 @@ const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
+
+// 新建会话时选择问答范围（限定某个知识库，后端按会话绑定的库过滤检索）
+const kbs = ref<KnowledgeBase[]>([]);
+const showKbPicker = ref(false);
+const pickingKbId = ref(''); // '' = 全部知识库
+const kbMap = computed(() => new Map(kbs.value.map((k) => [k.id, k.name])));
 
 // 流式回答的中间状态（回答完成后并入 messages）
 const streamContent = ref('');
@@ -66,6 +80,33 @@ async function handleNewSession() {
   }
 }
 
+/** 点「新建对话」：先弹知识库范围选择器 */
+async function openNewSessionPicker() {
+  if (streaming.value) return;
+  try {
+    if (kbs.value.length === 0) kbs.value = await getKnowledgeBases();
+  } catch {
+    kbs.value = [];
+  }
+  pickingKbId.value = '';
+  showKbPicker.value = true;
+}
+
+/** 确认新建：按选择的范围创建会话（'' 表示全部知识库） */
+async function confirmCreateSession() {
+  showKbPicker.value = false;
+  if (streaming.value) return;
+  try {
+    const session = await createChatSession(
+      pickingKbId.value ? { knowledgeBaseId: pickingKbId.value } : {},
+    );
+    await loadSessions();
+    await selectSession(session.id);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+
 async function handleDeleteSession(id: string) {
   // eslint-disable-next-line no-alert
   if (!window.confirm('删除该会话及其全部消息？')) return;
@@ -83,7 +124,9 @@ async function handleDeleteSession(id: string) {
 
 // ==================== 提问与流式 ====================
 
-const canSend = computed(() => input.value.trim().length > 0 && !streaming.value && !!currentSessionId.value);
+const canSend = computed(
+  () => input.value.trim().length > 0 && !streaming.value && !!currentSessionId.value,
+);
 
 async function handleSend() {
   const question = input.value.trim();
@@ -208,7 +251,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
     <!-- 左侧：会话列表 -->
     <aside class="flex w-64 flex-col border-r bg-card/50">
       <div class="p-3">
-        <Button class="w-full" @click="handleNewSession">
+        <Button class="w-full" @click="openNewSessionPicker">
           <Plus class="h-4 w-4" />
           新建对话
         </Button>
@@ -230,6 +273,13 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         >
           <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0 flex-1 truncate">{{ s.title }}</span>
+          <span
+            v-if="s.knowledgeBaseId"
+            class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            :title="'问答范围：' + (kbMap.get(s.knowledgeBaseId) || '该知识库已删除')"
+          >
+            {{ kbMap.get(s.knowledgeBaseId) || '已删除库' }}
+          </span>
           <span class="shrink-0 text-xs text-muted-foreground">{{ s._count?.messages ?? 0 }}</span>
           <button
             class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
@@ -245,14 +295,22 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
     <main class="flex flex-1 flex-col">
       <!-- 消息区 -->
       <div ref="messageContainer" class="flex-1 overflow-y-auto">
-        <div v-if="!currentSessionId" class="flex h-full flex-col items-center justify-center text-center">
+        <div
+          v-if="!currentSessionId"
+          class="flex h-full flex-col items-center justify-center text-center"
+        >
           <BookOpen class="h-12 w-12 text-muted-foreground/40" />
           <p class="mt-3 text-sm text-muted-foreground">选择或新建一个会话开始提问</p>
         </div>
 
         <div v-else class="mx-auto max-w-3xl space-y-6 px-4 py-6">
           <!-- 历史消息 -->
-          <div v-for="(msg, i) in messages" :key="i" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+          <div
+            v-for="(msg, i) in messages"
+            :key="i"
+            class="flex"
+            :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
+          >
             <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'w-full'">
               <div
                 v-if="msg.role === 'assistant'"
@@ -279,7 +337,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 <details class="rounded-lg border bg-muted/40 px-3 py-2 text-xs">
                   <summary class="cursor-pointer font-medium text-muted-foreground">
                     引用来源（知识库 {{ sourcesKb(msg.sources).length }} 条
-                    <template v-if="sourcesWeb(msg.sources).length"> · 网络 {{ sourcesWeb(msg.sources).length }} 条</template>）
+                    <template v-if="sourcesWeb(msg.sources).length">
+                      · 网络 {{ sourcesWeb(msg.sources).length }} 条</template
+                    >）
                   </summary>
 
                   <!-- 知识库来源 -->
@@ -291,7 +351,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                         :key="'kb-' + si"
                         class="flex items-start gap-2 text-muted-foreground"
                       >
-                        <span class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                        <span
+                          class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
+                        >
                           来源{{ si + 1 }}
                         </span>
                         <span class="min-w-0">
@@ -312,7 +374,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                         :key="'web-' + wi"
                         class="flex items-start gap-2 text-muted-foreground"
                       >
-                        <span class="mt-0.5 shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">
+                        <span
+                          class="mt-0.5 shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600"
+                        >
                           网络{{ wi + 1 }}
                         </span>
                         <span class="min-w-0">
@@ -332,7 +396,10 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 </details>
               </div>
 
-              <div v-if="msg.role === 'user'" class="mt-1 text-right text-[11px] text-muted-foreground">
+              <div
+                v-if="msg.role === 'user'"
+                class="mt-1 text-right text-[11px] text-muted-foreground"
+              >
                 {{ formatTime(msg.createdAt) }}
               </div>
             </div>
@@ -351,13 +418,18 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 class="mt-2 text-xs text-muted-foreground"
               >
                 已检索到知识库 {{ streamSources.kb.length }} 条
-                <template v-if="streamSources.web.length"> + 网络 {{ streamSources.web.length }} 条</template>，正在生成回答...
+                <template v-if="streamSources.web.length">
+                  + 网络 {{ streamSources.web.length }} 条</template
+                >，正在生成回答...
               </div>
             </div>
           </div>
 
           <!-- 错误提示 -->
-          <p v-if="error" class="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <p
+            v-if="error"
+            class="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          >
             {{ error }}
           </p>
         </div>
@@ -374,11 +446,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             :disabled="!currentSessionId"
             @keydown.enter.exact.prevent="handleSend"
           />
-          <Button
-            v-if="!streaming"
-            :disabled="!canSend"
-            @click="handleSend"
-          >
+          <Button v-if="!streaming" :disabled="!canSend" @click="handleSend">
             <Send class="h-4 w-4" />
             发送
           </Button>
@@ -387,7 +455,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             停止
           </Button>
         </div>
-        <p class="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-4 text-[11px] text-muted-foreground">
+        <p
+          class="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
+        >
           <label class="flex cursor-pointer items-center gap-1.5 select-none">
             <input
               v-model="useWebSearch"
@@ -401,6 +471,59 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </p>
       </div>
     </main>
+
+    <!-- 新建对话：选择问答范围（知识库）弹窗 -->
+    <div
+      v-if="showKbPicker"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="showKbPicker = false"
+    >
+      <div class="w-full max-w-md rounded-lg border bg-card p-5 shadow-xl">
+        <h3 class="text-base font-semibold">新建对话</h3>
+        <p class="mt-1 text-xs text-muted-foreground">
+          选择本次问答的知识库范围（每个会话独立绑定，可随时新建切换）
+        </p>
+        <div class="mt-4 max-h-72 space-y-1.5 overflow-y-auto">
+          <label
+            class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
+            :class="pickingKbId === '' ? 'border-primary' : ''"
+          >
+            <input
+              type="radio"
+              class="h-3.5 w-3.5"
+              :checked="pickingKbId === ''"
+              @change="pickingKbId = ''"
+            />
+            <span class="font-medium">全部知识库</span>
+            <span class="ml-auto text-xs text-muted-foreground">搜索你所有知识库</span>
+          </label>
+          <label
+            v-for="kb in kbs"
+            :key="kb.id"
+            class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
+            :class="pickingKbId === kb.id ? 'border-primary' : ''"
+          >
+            <input
+              type="radio"
+              class="h-3.5 w-3.5"
+              :checked="pickingKbId === kb.id"
+              @change="pickingKbId = kb.id"
+            />
+            <span class="min-w-0 flex-1 truncate font-medium">{{ kb.name }}</span>
+            <span class="ml-2 shrink-0 text-xs text-muted-foreground">
+              {{ kb._count?.documents ?? 0 }} 个文档
+            </span>
+          </label>
+          <p v-if="kbs.length === 0" class="py-4 text-center text-xs text-muted-foreground">
+            还没有知识库，先去「知识库」页上传文档
+          </p>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" @click="showKbPicker = false">取消</Button>
+          <Button size="sm" @click="confirmCreateSession">开始对话</Button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -414,14 +537,31 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   line-height: 1.3;
   margin: 0.75em 0 0.4em;
 }
-.markdown-body :deep(h1) { font-size: 1.3em; }
-.markdown-body :deep(h2) { font-size: 1.15em; }
-.markdown-body :deep(h3) { font-size: 1.05em; }
-.markdown-body :deep(p) { margin: 0.5em 0; line-height: 1.7; }
+.markdown-body :deep(h1) {
+  font-size: 1.3em;
+}
+.markdown-body :deep(h2) {
+  font-size: 1.15em;
+}
+.markdown-body :deep(h3) {
+  font-size: 1.05em;
+}
+.markdown-body :deep(p) {
+  margin: 0.5em 0;
+  line-height: 1.7;
+}
 .markdown-body :deep(ul),
-.markdown-body :deep(ol) { margin: 0.5em 0; padding-left: 1.5em; }
-.markdown-body :deep(li) { margin: 0.25em 0; }
-.markdown-body :deep(a) { color: var(--primary); text-decoration: underline; }
+.markdown-body :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.markdown-body :deep(li) {
+  margin: 0.25em 0;
+}
+.markdown-body :deep(a) {
+  color: var(--primary);
+  text-decoration: underline;
+}
 .markdown-body :deep(blockquote) {
   border-left: 3px solid var(--border);
   padding-left: 0.75em;
