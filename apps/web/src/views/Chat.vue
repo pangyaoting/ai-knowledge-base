@@ -1,12 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue';
-import { MessageSquare, Plus, Send, Square, Trash2, Loader2, BookOpen } from 'lucide-vue-next';
+import {
+  MessageSquare,
+  Plus,
+  Send,
+  Square,
+  Trash2,
+  Loader2,
+  BookOpen,
+  Database,
+} from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import {
   getChatSessions,
   createChatSession,
   getChatMessages,
   deleteChatSession,
+  updateSessionKnowledgeBases,
   askQuestion,
 } from '@/api/chat';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
@@ -31,11 +41,37 @@ const error = ref('');
 const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
 
-// 新建会话时选择问答范围（限定某个知识库，后端按会话绑定的库过滤检索）
+// 新建会话时选择问答范围（可绑定多个知识库，空 = 检索全部）
 const kbs = ref<KnowledgeBase[]>([]);
 const showKbPicker = ref(false);
-const pickingKbId = ref(''); // '' = 全部知识库
-const kbMap = computed(() => new Map(kbs.value.map((k) => [k.id, k.name])));
+const pickerMode = ref<'create' | 'edit'>('create'); // create=新建会话 / edit=修改当前会话范围
+const pickingAll = ref(true); // 全部知识库
+const pickingKbIds = ref<string[]>([]);
+
+/** 当前会话绑定的知识库（用于顶部的"问答范围"标签） */
+const currentScope = computed<ChatSession['knowledgeBases']>(() => {
+  const s = sessions.value.find((x) => x.id === currentSessionId.value);
+  return s?.knowledgeBases ?? [];
+});
+
+function toggleAll() {
+  pickingAll.value = !pickingAll.value;
+  if (pickingAll.value) pickingKbIds.value = [];
+}
+
+function toggleKb(id: string) {
+  const i = pickingKbIds.value.indexOf(id);
+  if (i >= 0) pickingKbIds.value.splice(i, 1);
+  else pickingKbIds.value.push(id);
+  pickingAll.value = pickingKbIds.value.length === 0;
+}
+
+/** 会话绑定知识库的展示名（最多显示 2 个，多了折叠成"等N个"） */
+function kbNames(bound: ChatSession['knowledgeBases']): string {
+  const names = bound.map((k) => k.knowledgeBase.name);
+  if (names.length <= 2) return names.join('、');
+  return `${names.slice(0, 2).join('、')} 等${names.length}个`;
+}
 
 // 流式回答的中间状态（回答完成后并入 messages）
 const streamContent = ref('');
@@ -88,20 +124,41 @@ async function openNewSessionPicker() {
   } catch {
     kbs.value = [];
   }
-  pickingKbId.value = '';
+  pickingAll.value = true;
+  pickingKbIds.value = [];
+  pickerMode.value = 'create';
   showKbPicker.value = true;
 }
 
-/** 确认新建：按选择的范围创建会话（'' 表示全部知识库） */
+/** 点顶部"问答范围"标签：修改当前会话的绑定（不新建会话） */
+async function openEditScope() {
+  if (streaming.value || !currentSessionId.value) return;
+  try {
+    if (kbs.value.length === 0) kbs.value = await getKnowledgeBases();
+  } catch {
+    kbs.value = [];
+  }
+  const scope = currentScope.value.map((k) => k.knowledgeBase.id);
+  pickingAll.value = scope.length === 0;
+  pickingKbIds.value = [...scope];
+  pickerMode.value = 'edit';
+  showKbPicker.value = true;
+}
+
+/** 确认：新建会话 或 修改当前会话范围 */
 async function confirmCreateSession() {
   showKbPicker.value = false;
   if (streaming.value) return;
+  const ids = pickingAll.value ? [] : [...pickingKbIds.value];
   try {
-    const session = await createChatSession(
-      pickingKbId.value ? { knowledgeBaseId: pickingKbId.value } : {},
-    );
-    await loadSessions();
-    await selectSession(session.id);
+    if (pickerMode.value === 'edit' && currentSessionId.value) {
+      await updateSessionKnowledgeBases(currentSessionId.value, ids);
+      await loadSessions();
+    } else {
+      const session = await createChatSession(ids.length ? { knowledgeBaseIds: ids } : {});
+      await loadSessions();
+      await selectSession(session.id);
+    }
   } catch (e) {
     error.value = (e as Error).message;
   }
@@ -274,11 +331,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0 flex-1 truncate">{{ s.title }}</span>
           <span
-            v-if="s.knowledgeBaseId"
+            v-if="s.knowledgeBases.length"
             class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-            :title="'问答范围：' + (kbMap.get(s.knowledgeBaseId) || '该知识库已删除')"
+            :title="'问答范围：' + s.knowledgeBases.map((k) => k.knowledgeBase.name).join('、')"
           >
-            {{ kbMap.get(s.knowledgeBaseId) || '已删除库' }}
+            {{ kbNames(s.knowledgeBases) }}
           </span>
           <span class="shrink-0 text-xs text-muted-foreground">{{ s._count?.messages ?? 0 }}</span>
           <button
@@ -437,6 +494,30 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 
       <!-- 输入区 -->
       <div class="border-t bg-card/50 p-4">
+        <!-- 问答范围（常驻可见，点击可修改当前会话） -->
+        <div
+          v-if="currentSessionId"
+          class="mx-auto mb-2 flex max-w-3xl items-center gap-2 text-[11px]"
+        >
+          <span class="shrink-0 text-muted-foreground">问答范围</span>
+          <button
+            class="inline-flex max-w-[65%] items-center gap-1 rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
+            :title="
+              '点击修改问答范围（当前：' +
+              (currentScope.length
+                ? currentScope.map((k) => k.knowledgeBase.name).join('、')
+                : '全部知识库') +
+              '）'
+            "
+            @click="openEditScope"
+          >
+            <Database class="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span class="truncate">{{
+              currentScope.length ? kbNames(currentScope) : '全部知识库'
+            }}</span>
+            <span class="shrink-0 text-muted-foreground">修改</span>
+          </button>
+        </div>
         <div class="mx-auto flex max-w-3xl items-end gap-2">
           <textarea
             v-model="input"
@@ -479,21 +560,22 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
       @click.self="showKbPicker = false"
     >
       <div class="w-full max-w-md rounded-lg border bg-card p-5 shadow-xl">
-        <h3 class="text-base font-semibold">新建对话</h3>
+        <h3 class="text-base font-semibold">
+          {{ pickerMode === 'create' ? '新建对话' : '修改问答范围' }}
+        </h3>
         <p class="mt-1 text-xs text-muted-foreground">
-          选择本次问答的知识库范围（每个会话独立绑定，可随时新建切换）
+          {{
+            pickerMode === 'create'
+              ? '选择本次问答的知识库范围（每个会话独立绑定，可随时修改）'
+              : '修改后立即生效，之后的问题按新范围检索'
+          }}
         </p>
         <div class="mt-4 max-h-72 space-y-1.5 overflow-y-auto">
           <label
             class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
-            :class="pickingKbId === '' ? 'border-primary' : ''"
+            :class="pickingAll ? 'border-primary' : ''"
           >
-            <input
-              type="radio"
-              class="h-3.5 w-3.5"
-              :checked="pickingKbId === ''"
-              @change="pickingKbId = ''"
-            />
+            <input type="checkbox" class="h-3.5 w-3.5" :checked="pickingAll" @change="toggleAll" />
             <span class="font-medium">全部知识库</span>
             <span class="ml-auto text-xs text-muted-foreground">搜索你所有知识库</span>
           </label>
@@ -501,13 +583,13 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             v-for="kb in kbs"
             :key="kb.id"
             class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
-            :class="pickingKbId === kb.id ? 'border-primary' : ''"
+            :class="pickingKbIds.includes(kb.id) ? 'border-primary' : ''"
           >
             <input
-              type="radio"
+              type="checkbox"
               class="h-3.5 w-3.5"
-              :checked="pickingKbId === kb.id"
-              @change="pickingKbId = kb.id"
+              :checked="pickingKbIds.includes(kb.id)"
+              @change="toggleKb(kb.id)"
             />
             <span class="min-w-0 flex-1 truncate font-medium">{{ kb.name }}</span>
             <span class="ml-2 shrink-0 text-xs text-muted-foreground">
@@ -520,7 +602,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <Button variant="ghost" size="sm" @click="showKbPicker = false">取消</Button>
-          <Button size="sm" @click="confirmCreateSession">开始对话</Button>
+          <Button size="sm" @click="confirmCreateSession">
+            {{ pickerMode === 'create' ? '开始对话' : '保存修改' }}
+          </Button>
         </div>
       </div>
     </div>

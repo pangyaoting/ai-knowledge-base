@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Res,
   UseGuards,
@@ -15,6 +16,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ChatService } from './chat.service';
 import { CreateSessionDto } from './dto/create-session.dto';
+import { UpdateSessionKbsDto } from './dto/update-session-kbs.dto';
 import { AskDto } from './dto/ask.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -42,20 +44,28 @@ export class ChatController {
 
   @Get('sessions/:id/messages')
   @ApiOperation({ summary: '会话历史消息' })
-  getMessages(
-    @CurrentUser('id') userId: string,
-    @Param('id', ParseUUIDPipe) sessionId: string,
-  ) {
+  getMessages(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) sessionId: string) {
     return this.chatService.getMessages(userId, sessionId);
   }
 
   @Delete('sessions/:id')
   @ApiOperation({ summary: '删除会话' })
-  removeSession(
+  removeSession(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) sessionId: string) {
+    return this.chatService.removeSession(userId, sessionId);
+  }
+
+  @Patch('sessions/:id/knowledge-bases')
+  @ApiOperation({ summary: '修改会话绑定的知识库（问答范围）' })
+  updateKnowledgeBases(
     @CurrentUser('id') userId: string,
     @Param('id', ParseUUIDPipe) sessionId: string,
+    @Body() dto: UpdateSessionKbsDto,
   ) {
-    return this.chatService.removeSession(userId, sessionId);
+    return this.chatService.updateSessionKnowledgeBases(
+      userId,
+      sessionId,
+      dto.knowledgeBaseIds ?? [],
+    );
   }
 
   // ==================== RAG 问答（SSE 流式） ====================

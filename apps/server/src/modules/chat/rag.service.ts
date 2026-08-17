@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from '../knowledge/embedding.service';
-import { KnowledgeService } from '../knowledge/knowledge.service';
 
 /** 检索命中的来源片段 */
 export interface RetrievalSource {
@@ -13,41 +13,67 @@ export interface RetrievalSource {
   similarity: number;
 }
 
+/** 混合检索参数（RRF 融合常量） */
+const RRF_K = 60; // RRF 平滑常数（论文默认值）
+
 /**
- * RAG 检索服务：问题 → 向量化 → pgvector Top-K 余弦检索 → 来源片段
- * 这是"先查资料再回答"的"查资料"环节
+ * RAG 检索服务：问题 → 向量化 → pgvector 余弦检索（语义）
+ *                   + pg_trgm 关键词检索（精确词命中）
+ *                   → RRF 排名融合 → Top-K 来源片段
+ *
+ * 为什么混合：向量检索擅长"语义相近"，但精确关键词（专有名词、型号、代码片段）
+ * 会被 embedding 打散进语义空间而漏掉；pg_trgm 按子串命中补上这一路。
+ * 为什么 RRF：只比较两路结果的【排名】而非分数，无需归一化、无需调权重。
  */
 @Injectable()
 export class RagService {
   constructor(
     private prisma: PrismaService,
     private embeddingService: EmbeddingService,
-    private knowledgeService: KnowledgeService,
+    private configService: ConfigService,
   ) {}
 
+  /** 向量相似度下限（.env 可配 MIN_SIMILARITY，默认 0.35）低于它的片段视为噪声丢弃 */
+  private get minSimilarity(): number {
+    const v = Number(this.configService.get<string>('MIN_SIMILARITY', '0.35'));
+    return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.35;
+  }
+
   /**
-   * 检索与问题语义最相似的 Top-K 个 chunk
+   * 混合检索：向量 + 关键词两路并行，RRF 融合后返回 Top-K
    * @param question 用户问题
-   * @param knowledgeBaseId 可选：限定某个知识库范围
+   * @param kbIds 可选：限定多个知识库范围（空 = 检索该用户全部知识库）
    * @param topK 返回条数，默认 5
    */
   async retrieve(
     userId: string,
     question: string,
-    knowledgeBaseId?: string,
+    kbIds?: string[],
     topK = 5,
   ): Promise<RetrievalSource[]> {
-    // 如果指定了知识库，先校验归属（不属于当前用户 → 404）
-    if (knowledgeBaseId) {
-      await this.knowledgeService.findOne(userId, knowledgeBaseId);
+    // 归属校验：绑定的知识库必须都属于当前用户（不存在或他人的 → 404）
+    let kbLiteral: string | undefined;
+    if (kbIds?.length) {
+      const owned = await this.prisma.knowledgeBase.findMany({
+        where: { id: { in: kbIds }, ownerId: userId },
+        select: { id: true },
+      });
+      if (owned.length !== new Set(kbIds).size) {
+        throw new NotFoundException('知识库不存在');
+      }
+      // owned 全部来自数据库（真实 UUID），拼成 PG 数组字面量作为参数，安全
+      // 注意：id 列是 text 类型（Prisma String → TEXT），数组也要转 text[]，转 uuid[] 会报 text = uuid 不匹配
+      kbLiteral = `{${owned.map((k) => `"${k.id}"`).join(',')}}`;
     }
+
+    // 每路多取一些（RRF 合并后截断到 topK，多路候选重合时不会漏）
+    const limit = Math.max(topK * 3, 15);
 
     // 1. 问题向量化（与入库用同一个模型，语义空间一致）
     const [vector] = await this.embeddingService.embedTexts([question]);
     const vectorStr = `[${vector.join(',')}]`;
+    const minSim = this.minSimilarity;
 
-    // 2. pgvector 余弦距离 Top-K（<=> 是 cosine 距离算子，越小越相似）
-    // 按是否限定知识库写两条完整 SQL：所有值都用 $queryRaw 参数绑定（不拼接字符串，防注入）
     type RawRow = {
       chunk_id: string;
       content: string;
@@ -57,15 +83,19 @@ export class RagService {
       similarity: number;
     };
 
-    const rows: RawRow[] = knowledgeBaseId
+    // 2a. 向量检索（语义）：1 - cosine距离 = 余弦相似度，低于阈值的直接丢弃（不硬凑条数）
+    // 按是否限定知识库写两条完整 SQL：所有值都用 $queryRaw 参数绑定（不拼接字符串，防注入）
+    const vectorRows: RawRow[] = kbLiteral
       ? await this.prisma.$queryRaw<RawRow[]>`
           SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
                  1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
-          WHERE c.embedding IS NOT NULL AND d.knowledge_base_id = ${knowledgeBaseId}
+          WHERE c.embedding IS NOT NULL
+            AND d.knowledge_base_id = ANY(${kbLiteral}::text[])
+            AND 1 - (c.embedding <=> ${vectorStr}::vector) >= ${minSim}
           ORDER BY c.embedding <=> ${vectorStr}::vector
-          LIMIT ${topK}
+          LIMIT ${limit}
         `
       : await this.prisma.$queryRaw<RawRow[]>`
           SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
@@ -73,11 +103,37 @@ export class RagService {
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
           WHERE c.embedding IS NOT NULL
+            AND 1 - (c.embedding <=> ${vectorStr}::vector) >= ${minSim}
           ORDER BY c.embedding <=> ${vectorStr}::vector
-          LIMIT ${topK}
+          LIMIT ${limit}
         `;
 
-    return rows.map((r) => ({
+    // 2b. 关键词检索（精确命中）：pg_trgm 三元组相似度，content % question 走 GIN 索引
+    const keywordRows: RawRow[] = kbLiteral
+      ? await this.prisma.$queryRaw<RawRow[]>`
+          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+                 similarity(c.content, ${question}) AS similarity
+          FROM chunks c
+          JOIN documents d ON d.id = c.document_id
+          WHERE c.embedding IS NOT NULL
+            AND d.knowledge_base_id = ANY(${kbLiteral}::text[])
+            AND c.content % ${question}
+          ORDER BY similarity(c.content, ${question}) DESC
+          LIMIT ${limit}
+        `
+      : await this.prisma.$queryRaw<RawRow[]>`
+          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+                 similarity(c.content, ${question}) AS similarity
+          FROM chunks c
+          JOIN documents d ON d.id = c.document_id
+          WHERE c.embedding IS NOT NULL
+            AND c.content % ${question}
+          ORDER BY similarity(c.content, ${question}) DESC
+          LIMIT ${limit}
+        `;
+
+    // 3. RRF 融合：score = Σ 1/(k + rank)，按融合分排序取 Top-K
+    return rrfMerge(vectorRows, keywordRows, topK).map((r) => ({
       chunkId: r.chunk_id,
       content: r.content,
       chunkIndex: r.chunk_index,
@@ -87,3 +143,38 @@ export class RagService {
     }));
   }
 }
+
+/**
+ * RRF（Reciprocal Rank Fusion）：把两路按排名合并为总分
+ * 只依赖排名，不依赖分数量纲 → 向量相似度(0~1)和关键词相似度(0~1)可直接融合，无需归一化
+ */
+function rrfMerge(vectorRows: RawRow[], keywordRows: RawRow[], topK: number): RawRow[] {
+  const scores = new Map<string, { score: number; row: RawRow }>();
+  const add = (rows: RawRow[]) => {
+    rows.forEach((row, i) => {
+      const rank = i + 1;
+      const contribution = 1 / (RRF_K + rank);
+      const cur = scores.get(row.chunk_id);
+      if (cur) {
+        cur.score += contribution;
+      } else {
+        scores.set(row.chunk_id, { score: contribution, row });
+      }
+    });
+  };
+  add(vectorRows); // 先加向量：融合分相同时，语义命中优先展示
+  add(keywordRows);
+  return [...scores.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+    .map((x) => x.row);
+}
+
+type RawRow = {
+  chunk_id: string;
+  content: string;
+  chunk_index: number;
+  document_id: string;
+  filename: string;
+  similarity: number;
+};

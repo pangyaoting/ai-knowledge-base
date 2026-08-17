@@ -36,32 +36,50 @@ export class ChatService {
   // ==================== 会话管理 ====================
 
   async createSession(userId: string, dto: CreateSessionDto) {
+    const kbIds = dto.knowledgeBaseIds?.length ? dto.knowledgeBaseIds : undefined;
+    // 校验归属：绑定的知识库必须都属于当前用户（防止绑定他人知识库），否则 404
+    if (kbIds) {
+      const owned = await this.prisma.knowledgeBase.findMany({
+        where: { id: { in: kbIds }, ownerId: userId },
+        select: { id: true },
+      });
+      if (owned.length !== new Set(kbIds).size) {
+        throw new NotFoundException('知识库不存在');
+      }
+    }
     return this.prisma.chatSession.create({
       data: {
         ownerId: userId,
         title: dto.title || '新对话',
-        knowledgeBaseId: dto.knowledgeBaseId || null,
+        ...(kbIds
+          ? { knowledgeBases: { create: kbIds.map((id) => ({ knowledgeBaseId: id })) } }
+          : {}),
+      },
+      include: {
+        knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
       },
     });
   }
 
-  /** 我的会话列表（带消息数和最后一条消息预览） */
+  /** 我的会话列表（带消息数、最后一条消息预览、绑定的知识库） */
   async listSessions(userId: string) {
     const sessions = await this.prisma.chatSession.findMany({
       where: { ownerId: userId },
       include: {
         _count: { select: { messages: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true } },
+        knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
       },
       orderBy: { updatedAt: 'desc' },
     });
     return sessions;
   }
 
-  /** 获取会话并校验归属 */
+  /** 获取会话并校验归属（带绑定的知识库 id，供检索范围使用） */
   async getSession(userId: string, sessionId: string) {
     const session = await this.prisma.chatSession.findFirst({
       where: { id: sessionId, ownerId: userId },
+      include: { knowledgeBases: { select: { knowledgeBaseId: true } } },
     });
     if (!session) {
       throw new NotFoundException('会话不存在');
@@ -83,6 +101,32 @@ export class ChatService {
     return { success: true };
   }
 
+  /** 修改会话绑定的知识库（问答范围）：先删旧绑定，再写新绑定（全量替换） */
+  async updateSessionKnowledgeBases(userId: string, sessionId: string, knowledgeBaseIds: string[]) {
+    await this.getSession(userId, sessionId);
+    const kbIds = [...new Set(knowledgeBaseIds)]; // 去重
+    if (kbIds.length) {
+      const owned = await this.prisma.knowledgeBase.findMany({
+        where: { id: { in: kbIds }, ownerId: userId },
+        select: { id: true },
+      });
+      if (owned.length !== kbIds.length) {
+        throw new NotFoundException('知识库不存在');
+      }
+    }
+    await this.prisma.$transaction([
+      this.prisma.sessionKnowledgeBase.deleteMany({ where: { sessionId } }),
+      ...(kbIds.length
+        ? [
+            this.prisma.sessionKnowledgeBase.createMany({
+              data: kbIds.map((knowledgeBaseId) => ({ sessionId, knowledgeBaseId })),
+            }),
+          ]
+        : []),
+    ]);
+    return this.getSession(userId, sessionId);
+  }
+
   // ==================== RAG 问答（SSE 流式） ====================
 
   /**
@@ -100,10 +144,12 @@ export class ChatService {
     signal: AbortSignal,
   ) {
     const session = await this.getSession(userId, sessionId);
+    // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
+    const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
-    // ① 双路检索（并行）：知识库向量检索 + 可选联网搜索
+    // ① 双路检索（并行）：知识库向量+关键词混合检索 + 可选联网搜索
     const [kbSources, webSources] = await Promise.all([
-      this.ragService.retrieve(userId, question, session.knowledgeBaseId ?? undefined),
+      this.ragService.retrieve(userId, question, kbIds.length ? kbIds : undefined),
       useWebSearch ? this.webSearchService.search(question) : Promise.resolve([]),
     ]);
     writer('sources', { kb: kbSources, web: webSources });

@@ -3,7 +3,8 @@
 export interface ChatSession {
   id: string;
   title: string;
-  knowledgeBaseId: string | null;
+  /** 会话绑定的知识库（空数组 = 检索全部知识库） */
+  knowledgeBases: Array<{ knowledgeBase: { id: string; name: string } }>;
   createdAt: string;
   updatedAt: string;
   _count?: { messages: number };
