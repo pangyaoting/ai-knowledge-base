@@ -25,6 +25,7 @@ model User {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   knowledgeBases KnowledgeBase[]
+  chatSessions   ChatSession[]
 
   @@map("users")
 }
@@ -37,6 +38,7 @@ model KnowledgeBase {
   description String?
   ownerId     String     @map("owner_id")
   documents   Document[]
+  chatSessions ChatSession[]
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
 
@@ -83,4 +85,39 @@ model Chunk {
 
   @@index([documentId])
   @@map("chunks")
+}
+
+// ==================== 对话会话 ====================
+
+model ChatSession {
+  id              String        @id @default(uuid())
+  ownerId         String        @map("owner_id")
+  title           String        @default("新对话")
+  knowledgeBaseId String?       @map("knowledge_base_id") // 可选：限定检索范围
+  messages        ChatMessage[]
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  knowledgeBase KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId])
+  @@map("chat_sessions")
+}
+
+// ==================== 对话消息 ====================
+// 流式回答结束后才落库（中间态不写库），sources 存引用来源 JSON
+
+model ChatMessage {
+  id        String    @id @default(uuid())
+  sessionId String    @map("session_id")
+  role      String // user / assistant
+  content   String // 完整消息内容
+  sources   Json? // 引用来源：[{ documentId, filename, chunkIndex, content, similarity }]
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("chat_messages")
 }

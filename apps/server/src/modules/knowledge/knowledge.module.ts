@@ -8,5 +8,6 @@ import { EmbeddingService } from './embedding.service';
 @Module({
   controllers: [KnowledgeController, DocumentsController],
   providers: [KnowledgeService, DocumentsService, EmbeddingService],
+  exports: [KnowledgeService, EmbeddingService], // 供 ChatModule 的 RagService 注入
 })
 export class KnowledgeModule {}

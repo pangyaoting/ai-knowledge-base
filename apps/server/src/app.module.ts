@@ -8,6 +8,7 @@ import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UserModule } from './modules/user/user.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
@@ -23,6 +24,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     AuthModule,
     UserModule,
     KnowledgeModule,
+    ChatModule,
   ],
   providers: [
     // 全局 JWT 守卫：所有接口默认需要登录，用 @Public() 标记公开接口

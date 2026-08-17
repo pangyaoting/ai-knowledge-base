@@ -40,6 +40,9 @@ async function handleLogout() {
             <RouterLink to="/knowledge">
               <Button variant="ghost" size="sm">知识库</Button>
             </RouterLink>
+            <RouterLink to="/chat">
+              <Button variant="ghost" size="sm">对话</Button>
+            </RouterLink>
           </nav>
 
           <div class="flex items-center gap-2 text-sm text-muted-foreground">
