@@ -1,0 +1,129 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { BookOpen, FileText, Plus, Trash2, Loader2 } from 'lucide-vue-next';
+import Button from '@/components/ui/Button.vue';
+import Input from '@/components/ui/Input.vue';
+import { getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase } from '@/api/knowledge';
+import type { KnowledgeBase } from '@/types/knowledge';
+
+const router = useRouter();
+
+const list = ref<KnowledgeBase[]>([]);
+const loading = ref(false);
+const creating = ref(false);
+const error = ref('');
+
+const name = ref('');
+const description = ref('');
+
+async function load() {
+  loading.value = true;
+  error.value = '';
+  try {
+    list.value = await getKnowledgeBases();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleCreate() {
+  const trimmed = name.value.trim();
+  if (!trimmed) return;
+  creating.value = true;
+  error.value = '';
+  try {
+    await createKnowledgeBase({
+      name: trimmed,
+      description: description.value.trim() || undefined,
+    });
+    name.value = '';
+    description.value = '';
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    creating.value = false;
+  }
+}
+
+async function handleDelete(id: string) {
+  // eslint-disable-next-line no-alert
+  if (!window.confirm('删除知识库将同时删除其中所有文档和向量数据，确定要删除吗？')) return;
+  try {
+    await deleteKnowledgeBase(id);
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+</script>
+
+<template>
+  <div class="container py-10">
+    <!-- 页头 -->
+    <div class="mb-8">
+      <h1 class="text-2xl font-bold tracking-tight">知识库</h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        上传你的文档，系统会自动解析、分块并向量化，之后就能进行语义问答
+      </p>
+    </div>
+
+    <!-- 创建表单 -->
+    <div class="mb-8 rounded-lg border bg-card p-5">
+      <div class="grid gap-3 sm:grid-cols-[1fr_1.5fr_auto]">
+        <Input v-model="name" placeholder="知识库名称（必填）" :disabled="creating" />
+        <Input v-model="description" placeholder="描述（可选）" :disabled="creating" />
+        <Button :disabled="creating || !name.trim()" @click="handleCreate">
+          <Plus v-if="!creating" class="h-4 w-4" />
+          <Loader2 v-else class="h-4 w-4 animate-spin" />
+          {{ creating ? '创建中...' : '创建知识库' }}
+        </Button>
+      </div>
+      <p v-if="error" class="mt-3 text-sm text-destructive">{{ error }}</p>
+    </div>
+
+    <!-- 列表 -->
+    <div v-if="loading" class="flex justify-center py-16">
+      <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+
+    <div v-else-if="list.length === 0" class="rounded-lg border border-dashed py-16 text-center">
+      <BookOpen class="mx-auto h-10 w-10 text-muted-foreground/50" />
+      <p class="mt-3 text-sm text-muted-foreground">还没有知识库，先创建一个吧</p>
+    </div>
+
+    <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        v-for="kb in list"
+        :key="kb.id"
+        class="flex flex-col rounded-lg border bg-card p-5 transition-shadow hover:shadow-md"
+      >
+        <div class="flex items-start justify-between gap-2">
+          <h3 class="font-semibold line-clamp-1">{{ kb.name }}</h3>
+          <button
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            :title="'删除 ' + kb.name"
+            @click="handleDelete(kb.id)"
+          >
+            <Trash2 class="h-4 w-4" />
+          </button>
+        </div>
+        <p class="mt-1 flex-1 text-sm text-muted-foreground line-clamp-2">
+          {{ kb.description || '暂无描述' }}
+        </p>
+        <div class="mt-4 flex items-center justify-between">
+          <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <FileText class="h-3.5 w-3.5" />
+            {{ kb._count?.documents ?? 0 }} 个文档
+          </span>
+          <Button variant="outline" size="sm" @click="router.push(`/knowledge/${kb.id}`)">
+            管理文档
+          </Button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>

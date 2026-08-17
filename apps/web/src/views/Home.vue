@@ -75,7 +75,10 @@ onMounted(async () => {
     <!-- 开发进度提示 -->
     <div class="mt-12 rounded-lg border border-dashed p-8 text-center">
       <p class="text-sm text-muted-foreground">
-        阶段 1（用户系统）已完成 · 下一阶段：知识库管理与文档解析
+        阶段 1（用户系统）+ 阶段 2（知识库管理 / 文档解析 / 向量化）已完成
+        <RouterLink to="/knowledge" class="ml-2 text-primary underline-offset-4 hover:underline">
+          去创建你的第一个知识库 →
+        </RouterLink>
       </p>
     </div>
   </div>

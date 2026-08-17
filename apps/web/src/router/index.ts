@@ -25,6 +25,16 @@ const router = createRouter({
           name: 'home',
           component: () => import('@/views/Home.vue'),
         },
+        {
+          path: 'knowledge',
+          name: 'knowledge',
+          component: () => import('@/views/KnowledgeBases.vue'),
+        },
+        {
+          path: 'knowledge/:id',
+          name: 'knowledge-documents',
+          component: () => import('@/views/KnowledgeDocuments.vue'),
+        },
       ],
     },
   ],

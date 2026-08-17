@@ -35,6 +35,13 @@ async function handleLogout() {
         </RouterLink>
 
         <div class="flex items-center gap-3">
+          <!-- 导航 -->
+          <nav class="mr-2 flex items-center gap-1">
+            <RouterLink to="/knowledge">
+              <Button variant="ghost" size="sm">知识库</Button>
+            </RouterLink>
+          </nav>
+
           <div class="flex items-center gap-2 text-sm text-muted-foreground">
             <UserIcon class="h-4 w-4" />
             <span>{{ auth.user?.nickname || auth.user?.email }}</span>
