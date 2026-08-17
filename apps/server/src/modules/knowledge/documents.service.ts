@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { KnowledgeService } from './knowledge.service';
+import { EmbeddingService } from './embedding.service';
 import { cleanText, detectFileType, extractText } from './utils/document-parser';
 import { splitText } from './utils/text-splitter';
 
@@ -24,6 +25,7 @@ export class DocumentsService {
   constructor(
     private prisma: PrismaService,
     private knowledgeService: KnowledgeService,
+    private embeddingService: EmbeddingService,
   ) {}
 
   /**
@@ -86,7 +88,25 @@ export class DocumentsService {
         })),
       });
 
-      // 8. 状态 → done，返回带 chunk 数量
+      // 8. 向量化：取回刚插入的 chunk → 批量调 bge-m3 → 写回 embedding 列
+      const created = await this.prisma.chunk.findMany({
+        where: { documentId: document.id },
+        select: { id: true, content: true },
+        orderBy: { chunkIndex: 'asc' },
+      });
+      const vectors = await this.embeddingService.embedTexts(created.map((c) => c.content));
+      await this.prisma.$transaction(async (tx) => {
+        for (let i = 0; i < created.length; i++) {
+          await tx.$executeRaw`
+            UPDATE "chunks" SET "embedding" = ${toPgVector(vectors[i])}::vector WHERE "id" = ${created[i].id}
+          `;
+        }
+      });
+      this.logger.log(
+        `向量化完成: ${file.originalname} → ${created.length} 个向量(1024维)`,
+      );
+
+      // 9. 状态 → done，返回带 chunk 数量
       const updated = await this.prisma.document.update({
         where: { id: document.id },
         data: { status: 'done' },
@@ -97,12 +117,14 @@ export class DocumentsService {
       );
       return updated;
     } catch (err) {
-      // 失败：删掉已存的文件（不留垃圾），Document 保留并标记 failed 供前端展示原因
+      // 失败：删掉已存的文件和已写入的 chunk（不留孤儿数据），
+      // Document 保留并标记 failed 供前端展示原因
       try {
         unlinkSync(join(UPLOAD_DIR, storedName));
       } catch {
         /* 文件可能不存在，忽略 */
       }
+      await this.prisma.chunk.deleteMany({ where: { documentId: document.id } });
       const message = (err as Error).message || '解析失败';
       await this.prisma.document.update({
         where: { id: document.id },
@@ -140,4 +162,9 @@ export class DocumentsService {
     }
     return { success: true };
   }
+}
+
+/** 数字数组 → pgvector 字面量字符串，如 [0.1,0.2,...] → "[0.1,0.2,...]" */
+function toPgVector(vector: number[]): string {
+  return `[${vector.join(',')}]`;
 }

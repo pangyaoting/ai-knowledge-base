@@ -68,14 +68,16 @@ model Document {
 }
 
 // ==================== 文本块（Chunk） ====================
-// 说明：embedding 向量列在 Step 5 用原始 SQL 迁移添加（vector(1024) 类型 Prisma 不支持）
+// embedding 列类型是 pgvector 的 vector(1024)，Prisma 不支持，
+// 用 Unsupported() 占位（列由原始 SQL 迁移创建，读写走 $executeRaw/$queryRaw）
 
 model Chunk {
-  id         String   @id @default(uuid())
-  documentId String   @map("document_id")
+  id         String                    @id @default(uuid())
+  documentId String                    @map("document_id")
   content    String // 文本块原文
-  chunkIndex Int      @map("chunk_index") // 第几块（保证顺序）
-  createdAt  DateTime @default(now()) @map("created_at")
+  chunkIndex Int                       @map("chunk_index") // 第几块（保证顺序）
+  embedding  Unsupported("vector(1024)")? // 向量（bge-m3 1024 维），Step 5 写入
+  createdAt  DateTime                  @default(now()) @map("created_at")
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
