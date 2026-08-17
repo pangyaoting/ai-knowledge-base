@@ -93,6 +93,7 @@ export class ChatController {
         userId,
         sessionId,
         dto.content,
+        dto.useWebSearch ?? false,
         (event, data) => write(event, data),
         abortController.signal,
       );

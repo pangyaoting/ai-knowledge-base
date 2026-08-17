@@ -15,7 +15,7 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
-  sources: RetrievalSource[] | null;
+  sources: ChatSources | null;
   createdAt: string;
 }
 
@@ -26,6 +26,20 @@ export interface RetrievalSource {
   documentId: string;
   filename: string;
   similarity: number;
+}
+
+/** 联网检索结果 */
+export interface WebSource {
+  title: string;
+  url: string;
+  content: string;
+  score?: number;
+}
+
+/** 引用来源：知识库片段 + 网络资料 */
+export interface ChatSources {
+  kb: RetrievalSource[];
+  web: WebSource[];
 }
 
 /** SSE 事件协议（后端按此格式推送） */

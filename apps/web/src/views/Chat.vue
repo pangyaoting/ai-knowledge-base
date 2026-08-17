@@ -10,7 +10,7 @@ import {
   askQuestion,
 } from '@/api/chat';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
-import type { ChatSession, ChatMessage, RetrievalSource } from '@/types/chat';
+import type { ChatSession, ChatMessage, ChatSources, RetrievalSource, WebSource } from '@/types/chat';
 
 // ==================== 状态 ====================
 const sessions = ref<ChatSession[]>([]);
@@ -21,10 +21,11 @@ const input = ref('');
 const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
+const useWebSearch = ref(false); // 联网检索开关
 
 // 流式回答的中间状态（回答完成后并入 messages）
 const streamContent = ref('');
-const streamSources = ref<RetrievalSource[]>([]);
+const streamSources = ref<ChatSources>({ kb: [], web: [] });
 
 const abortController = ref<AbortController | null>(null);
 const messageContainer = ref<HTMLElement | null>(null);
@@ -92,7 +93,7 @@ async function handleSend() {
   error.value = '';
   streaming.value = true;
   streamContent.value = '';
-  streamSources.value = [];
+  streamSources.value = { kb: [], web: [] };
 
   // 乐观渲染：用户消息立即上屏
   messages.value.push({
@@ -109,6 +110,7 @@ async function handleSend() {
     await askQuestion(
       currentSessionId.value,
       question,
+      useWebSearch.value,
       abortController.value.signal,
       {
         onSources: (sources) => {
@@ -128,7 +130,7 @@ async function handleSend() {
             createdAt: new Date().toISOString(),
           });
           streamContent.value = '';
-          streamSources.value = [];
+          streamSources.value = { kb: [], web: [] };
           loadSessions(); // 刷新标题/消息数
         },
         onError: (message) => {
@@ -187,6 +189,17 @@ function formatTime(iso: string): string {
 
 function similarityPercent(s: number): string {
   return `${Math.round(s * 100)}%`;
+}
+
+/** 兼容新旧数据：旧消息 sources 是数组（纯知识库），新消息是 { kb, web } */
+function sourcesKb(sources: ChatSources | RetrievalSource[] | null): RetrievalSource[] {
+  if (!sources) return [];
+  return Array.isArray(sources) ? sources : sources.kb;
+}
+
+function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[] {
+  if (!sources || Array.isArray(sources)) return [];
+  return sources.web;
 }
 </script>
 
@@ -254,28 +267,68 @@ function similarityPercent(s: number): string {
                 {{ msg.content }}
               </div>
 
-              <!-- 引用来源 -->
-              <div v-if="msg.role === 'assistant' && msg.sources && msg.sources.length" class="mt-2">
+              <!-- 引用来源（兼容旧数据：旧消息 sources 是数组，新消息是 { kb, web }） -->
+              <div
+                v-if="
+                  msg.role === 'assistant' &&
+                  msg.sources &&
+                  (sourcesKb(msg.sources).length > 0 || sourcesWeb(msg.sources).length > 0)
+                "
+                class="mt-2"
+              >
                 <details class="rounded-lg border bg-muted/40 px-3 py-2 text-xs">
                   <summary class="cursor-pointer font-medium text-muted-foreground">
-                    引用来源（{{ msg.sources.length }} 条）
+                    引用来源（知识库 {{ sourcesKb(msg.sources).length }} 条
+                    <template v-if="sourcesWeb(msg.sources).length"> · 网络 {{ sourcesWeb(msg.sources).length }} 条</template>）
                   </summary>
-                  <ul class="mt-2 space-y-1.5">
-                    <li
-                      v-for="(src, si) in msg.sources"
-                      :key="si"
-                      class="flex items-start gap-2 text-muted-foreground"
-                    >
-                      <span class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                        来源{{ si + 1 }}
-                      </span>
-                      <span class="min-w-0">
-                        <span class="font-medium text-foreground">{{ src.filename }}</span>
-                        <span class="ml-1.5">相似度 {{ similarityPercent(src.similarity) }}</span>
-                        <p class="mt-0.5 line-clamp-2">{{ src.content }}</p>
-                      </span>
-                    </li>
-                  </ul>
+
+                  <!-- 知识库来源 -->
+                  <div v-if="sourcesKb(msg.sources).length" class="mt-2">
+                    <p class="font-medium text-muted-foreground">📚 知识库</p>
+                    <ul class="mt-1.5 space-y-1.5">
+                      <li
+                        v-for="(src, si) in sourcesKb(msg.sources)"
+                        :key="'kb-' + si"
+                        class="flex items-start gap-2 text-muted-foreground"
+                      >
+                        <span class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                          来源{{ si + 1 }}
+                        </span>
+                        <span class="min-w-0">
+                          <span class="font-medium text-foreground">{{ src.filename }}</span>
+                          <span class="ml-1.5">相似度 {{ similarityPercent(src.similarity) }}</span>
+                          <p class="mt-0.5 line-clamp-2">{{ src.content }}</p>
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <!-- 网络来源 -->
+                  <div v-if="sourcesWeb(msg.sources).length" class="mt-3">
+                    <p class="font-medium text-muted-foreground">🌐 网络</p>
+                    <ul class="mt-1.5 space-y-1.5">
+                      <li
+                        v-for="(src, wi) in sourcesWeb(msg.sources)"
+                        :key="'web-' + wi"
+                        class="flex items-start gap-2 text-muted-foreground"
+                      >
+                        <span class="mt-0.5 shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600">
+                          网络{{ wi + 1 }}
+                        </span>
+                        <span class="min-w-0">
+                          <a
+                            :href="src.url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="font-medium text-primary underline-offset-2 hover:underline"
+                          >
+                            {{ src.title }}
+                          </a>
+                          <p class="mt-0.5 line-clamp-2">{{ src.content }}</p>
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
                 </details>
               </div>
 
@@ -293,8 +346,12 @@ function similarityPercent(s: number): string {
                 @click="handleMessageClick"
                 v-html="renderMarkdown(streamContent || '…')"
               />
-              <div v-if="streamSources.length" class="mt-2 text-xs text-muted-foreground">
-                已检索到 {{ streamSources.length }} 条相关片段，正在生成回答...
+              <div
+                v-if="streamSources.kb.length || streamSources.web.length"
+                class="mt-2 text-xs text-muted-foreground"
+              >
+                已检索到知识库 {{ streamSources.kb.length }} 条
+                <template v-if="streamSources.web.length"> + 网络 {{ streamSources.web.length }} 条</template>，正在生成回答...
               </div>
             </div>
           </div>
@@ -330,8 +387,17 @@ function similarityPercent(s: number): string {
             停止
           </Button>
         </div>
-        <p class="mx-auto mt-2 max-w-3xl text-center text-[11px] text-muted-foreground">
-          回答基于你上传到知识库的资料生成，引用来源可点击查看
+        <p class="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-4 text-[11px] text-muted-foreground">
+          <label class="flex cursor-pointer items-center gap-1.5 select-none">
+            <input
+              v-model="useWebSearch"
+              type="checkbox"
+              class="h-3.5 w-3.5 rounded border-input"
+              :disabled="streaming"
+            />
+            <span :class="{ 'text-primary': useWebSearch }">🌐 联网检索</span>
+          </label>
+          <span>回答基于知识库资料生成，开启联网可同时检索最新网页</span>
         </p>
       </div>
     </main>

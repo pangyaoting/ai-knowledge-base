@@ -8,6 +8,7 @@ import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import { RagService, RetrievalSource } from './rag.service';
+import { WebSearchService, WebSource } from './web-search.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 
 interface StreamWriter {
@@ -28,6 +29,7 @@ export class ChatService {
   constructor(
     private prisma: PrismaService,
     private ragService: RagService,
+    private webSearchService: WebSearchService,
     private configService: ConfigService,
   ) {
     this.client = new OpenAI({
@@ -90,6 +92,7 @@ export class ChatService {
 
   /**
    * 提问并流式回答
+   * @param useWebSearch 是否启用联网检索（并行搜知识库 + 搜网页）
    * @param writer 回调：把事件写进 SSE 响应
    * @param signal 客户端断开时 abort（不浪费 token）
    */
@@ -97,18 +100,18 @@ export class ChatService {
     userId: string,
     sessionId: string,
     question: string,
+    useWebSearch: boolean,
     writer: StreamWriter,
     signal: AbortSignal,
   ) {
     const session = await this.getSession(userId, sessionId);
 
-    // ① 检索：问题向量化 → Top-K 来源片段
-    const sources = await this.ragService.retrieve(
-      userId,
-      question,
-      session.knowledgeBaseId ?? undefined,
-    );
-    writer('sources', sources);
+    // ① 双路检索（并行）：知识库向量检索 + 可选联网搜索
+    const [kbSources, webSources] = await Promise.all([
+      this.ragService.retrieve(userId, question, session.knowledgeBaseId ?? undefined),
+      useWebSearch ? this.webSearchService.search(question) : Promise.resolve([]),
+    ]);
+    writer('sources', { kb: kbSources, web: webSources });
 
     // ② 保存用户消息
     await this.prisma.chatMessage.create({
@@ -122,8 +125,8 @@ export class ChatService {
       take: HISTORY_ROUNDS,
     });
 
-    // ④ 组装 Prompt
-    const { system, messages } = this.buildPrompt(question, sources, history);
+    // ④ 组装 Prompt（知识库资料 + 网络资料一起注入）
+    const { system, messages } = this.buildPrompt(question, kbSources, webSources, history);
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
     const abortController = new AbortController();
@@ -159,13 +162,16 @@ export class ChatService {
       signal.removeEventListener('abort', onAbort);
     }
 
-    // ⑥ 流式结束：落库助手消息 + 引用来源
+    // ⑥ 流式结束：落库助手消息 + 引用来源（知识库 + 网络）
     await this.prisma.chatMessage.create({
       data: {
         sessionId,
         role: 'assistant',
         content: answer,
-        sources: sources as unknown as Prisma.InputJsonValue,
+        sources: {
+          kb: kbSources,
+          web: webSources,
+        } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -186,26 +192,40 @@ export class ChatService {
 
   private buildPrompt(
     question: string,
-    sources: RetrievalSource[],
+    kbSources: RetrievalSource[],
+    webSources: WebSource[],
     history: Array<{ role: string; content: string }>,
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     const system = [
-      '你是一个严谨的 AI 知识库问答助手。',
-      '请仅根据提供的【参考资料】回答用户问题。',
-      '如果参考资料中没有相关信息，请明确说明"资料库中未找到相关内容"，不要编造。',
-      '回答中引用资料时请标注 [来源1]、[来源2] 等编号（编号与参考资料一致）。',
+      '你是一个严谨的 AI 问答助手，具备两个知识来源：私有知识库资料和联网搜索到的网络资料。',
+      '回答时请结合两者：优先以【参考资料】中的知识库内容为准；知识库没有的、但【网络资料】中有的事实，可以引用网络资料。',
+      '如果两类资料都没有相关信息，请明确说明"未找到相关内容"，不要编造。',
+      '回答中引用资料时请标注 [来源1]、[来源2] 等编号（编号与资料一致），网络资料请附上对应链接。',
       '回答使用简洁、结构化的中文。',
     ].join('\n');
 
-    // 检索到的资料（带编号和文档来源）
-    const sourceText = sources.length
-      ? sources
-          .map(
-            (s, i) =>
-              `[${i + 1}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`,
-          )
+    let number = 0;
+    // 知识库检索到的资料
+    const kbText = kbSources.length
+      ? kbSources
+          .map((s) => {
+            number += 1;
+            return `[${number}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`;
+          })
           .join('\n\n')
-      : '（本次没有检索到任何资料）';
+      : '（知识库中没有检索到相关资料）';
+
+    // 联网搜索到的网页资料
+    const webText = webSources.length
+      ? webSources
+          .map((w) => {
+            number += 1;
+            return `[${number}]（来自网页：${w.title}\n链接：${w.url}）\n${w.content}`;
+          })
+          .join('\n\n')
+      : '';
+
+    const sourceText = [kbText, webText].filter(Boolean).join('\n\n');
 
     // 历史对话（最近几轮）
     const historyText = history

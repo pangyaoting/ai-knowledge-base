@@ -1,6 +1,6 @@
 import request from './request';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
-import type { ChatSession, ChatMessage, RetrievalSource } from '@/types/chat';
+import type { ChatSession, ChatMessage, ChatSources } from '@/types/chat';
 
 // ==================== 会话管理 ====================
 
@@ -23,7 +23,7 @@ export function deleteChatSession(sessionId: string) {
 // ==================== 提问（SSE 流式） ====================
 
 export interface AskCallbacks {
-  onSources?: (sources: RetrievalSource[]) => void;
+  onSources?: (sources: ChatSources) => void;
   onDelta?: (content: string) => void;
   onDone?: () => void;
   onError?: (message: string) => void;
@@ -37,6 +37,7 @@ export interface AskCallbacks {
 export function askQuestion(
   sessionId: string,
   content: string,
+  useWebSearch: boolean,
   signal: AbortSignal,
   callbacks: AskCallbacks,
 ): Promise<void> {
@@ -46,14 +47,14 @@ export function askQuestion(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, useWebSearch }),
     signal,
     onmessage(ev) {
       // 事件类型在后端写进了 data 的 JSON 里：{ event, data }
       const msg = JSON.parse(ev.data) as { event: string; data: unknown };
       switch (msg.event) {
         case 'sources':
-          callbacks.onSources?.(msg.data as RetrievalSource[]);
+          callbacks.onSources?.(msg.data as ChatSources);
           break;
         case 'delta':
           callbacks.onDelta?.((msg.data as { content: string }).content);
