@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
@@ -13,6 +13,7 @@ export class RegisterDto {
   password!: string;
 
   @ApiProperty({ example: '张三', description: '昵称', required: false })
+  @IsOptional() // 不传昵称时跳过校验（否则不带 nickname 注册会 400）
   @IsString()
   @MaxLength(20, { message: '昵称最多20个字符' })
   nickname?: string;
