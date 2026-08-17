@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { MulterError } from 'multer';
 
 /**
  * 全局异常过滤器：统一错误响应格式
@@ -34,6 +35,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
           : (res as Record<string, unknown>).message instanceof Array
             ? ((res as Record<string, unknown>).message as string[]).join('; ')
             : ((res as Record<string, unknown>).message as string) || exception.message;
+    } else if (exception instanceof MulterError) {
+      // 文件上传错误（multer 抛的），给友好提示而不是 500
+      status = HttpStatus.BAD_REQUEST;
+      message =
+        exception.code === 'LIMIT_FILE_SIZE'
+          ? '文件过大，不能超过 10MB'
+          : `上传错误: ${exception.message}`;
     } else if (exception instanceof Error) {
       message = exception.message;
       this.logger.error(`未处理的异常: ${exception.stack}`);

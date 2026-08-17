@@ -35,7 +35,7 @@ model KnowledgeBase {
   id          String     @id @default(uuid())
   name        String
   description String?
-  ownerId     String
+  ownerId     String     @map("owner_id")
   documents   Document[]
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
@@ -50,18 +50,35 @@ model KnowledgeBase {
 
 model Document {
   id              String   @id @default(uuid())
-  knowledgeBaseId String
+  knowledgeBaseId String   @map("knowledge_base_id")
   filename        String // 原始文件名
   filepath        String // 服务器上存储路径
-  fileSize        Int // 字节数
-  fileType        String // pdf / docx / md / txt
+  fileSize        Int      @map("file_size") // 字节数
+  fileType        String   @map("file_type") // pdf / docx / md / txt
   status          String   @default("pending") // pending / processing / done / failed
   error           String? // 失败原因
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  chunks        Chunk[]
 
   @@index([knowledgeBaseId])
   @@map("documents")
+}
+
+// ==================== 文本块（Chunk） ====================
+// 说明：embedding 向量列在 Step 5 用原始 SQL 迁移添加（vector(1024) 类型 Prisma 不支持）
+
+model Chunk {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  content    String // 文本块原文
+  chunkIndex Int      @map("chunk_index") // 第几块（保证顺序）
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("chunks")
 }
