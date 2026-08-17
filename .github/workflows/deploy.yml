@@ -15,11 +15,11 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11 # 与本地 pnpm 版本保持一致，避免 lockfile 兼容问题
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24 # 与本地 Node 版本保持一致
           cache: pnpm
 
       - name: Install dependencies
