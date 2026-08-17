@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from '../knowledge/embedding.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -48,30 +47,35 @@ export class RagService {
     const vectorStr = `[${vector.join(',')}]`;
 
     // 2. pgvector 余弦距离 Top-K（<=> 是 cosine 距离算子，越小越相似）
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        chunk_id: string;
-        content: string;
-        chunk_index: number;
-        document_id: string;
-        filename: string;
-        similarity: number;
-      }>
-    >`
-      SELECT
-        c.id AS chunk_id,
-        c.content,
-        c.chunk_index,
-        d.id AS document_id,
-        d.filename,
-        1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
-      FROM chunks c
-      JOIN documents d ON d.id = c.document_id
-      WHERE c.embedding IS NOT NULL
-        ${knowledgeBaseId ? Prisma.sql`AND d.knowledge_base_id = ${knowledgeBaseId}` : Prisma.empty}
-      ORDER BY c.embedding <=> ${vectorStr}::vector
-      LIMIT ${topK}
-    `;
+    // 按是否限定知识库写两条完整 SQL：所有值都用 $queryRaw 参数绑定（不拼接字符串，防注入）
+    type RawRow = {
+      chunk_id: string;
+      content: string;
+      chunk_index: number;
+      document_id: string;
+      filename: string;
+      similarity: number;
+    };
+
+    const rows: RawRow[] = knowledgeBaseId
+      ? await this.prisma.$queryRaw<RawRow[]>`
+          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+                 1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
+          FROM chunks c
+          JOIN documents d ON d.id = c.document_id
+          WHERE c.embedding IS NOT NULL AND d.knowledge_base_id = ${knowledgeBaseId}
+          ORDER BY c.embedding <=> ${vectorStr}::vector
+          LIMIT ${topK}
+        `
+      : await this.prisma.$queryRaw<RawRow[]>`
+          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+                 1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
+          FROM chunks c
+          JOIN documents d ON d.id = c.document_id
+          WHERE c.embedding IS NOT NULL
+          ORDER BY c.embedding <=> ${vectorStr}::vector
+          LIMIT ${topK}
+        `;
 
     return rows.map((r) => ({
       chunkId: r.chunk_id,

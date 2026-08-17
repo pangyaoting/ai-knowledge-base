@@ -6,7 +6,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 import { RagService, RetrievalSource } from './rag.service';
 import { WebSearchService, WebSource } from './web-search.service';
 import { CreateSessionDto } from './dto/create-session.dto';
@@ -168,10 +167,8 @@ export class ChatService {
         sessionId,
         role: 'assistant',
         content: answer,
-        sources: {
-          kb: kbSources,
-          web: webSources,
-        } as unknown as Prisma.InputJsonValue,
+        // JSON.parse(JSON.stringify()) 转成纯 JSON，兼容各版本 Prisma 客户端类型
+        sources: JSON.parse(JSON.stringify({ kb: kbSources, web: webSources })),
       },
     });
 

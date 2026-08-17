@@ -44,9 +44,22 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      # secrets 只能在 step 级条件里使用（job 级 if 不支持 secrets 上下文）
+      # 判断是否配置了服务器密钥（secrets 不能用在 if 表达式里，只能放 env 给脚本读）
+      - name: Check deploy config
+        id: deploy-check
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SERVER_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "未配置服务器密钥，跳过部署（CI 仍算通过）"
+            echo "deploy_enabled=false"
+          else
+            echo "deploy_enabled=true"
+          fi
+
       - name: Deploy to server
-        if: ${{ secrets.SERVER_HOST != '' && secrets.SSH_PRIVATE_KEY != '' }}
+        if: steps.deploy-check.outputs.deploy_enabled == 'true'
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
