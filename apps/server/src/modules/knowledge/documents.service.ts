@@ -49,6 +49,7 @@ export class DocumentsService {
     }
 
     // 3. 存盘：UUID 改名防重名/防路径注入，扩展名保留
+    const originalName = fixMojibakeFilename(file.originalname); // 修复中文文件名乱码
     const storedName = `${randomUUID()}.${fileType}`;
     if (!existsSync(UPLOAD_DIR)) {
       mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -60,7 +61,7 @@ export class DocumentsService {
     const document = await this.prisma.document.create({
       data: {
         knowledgeBaseId,
-        filename: file.originalname,
+        filename: originalName,
         filepath,
         fileSize: file.size,
         fileType,
@@ -167,4 +168,19 @@ export class DocumentsService {
 /** 数字数组 → pgvector 字面量字符串，如 [0.1,0.2,...] → "[0.1,0.2,...]" */
 function toPgVector(vector: number[]): string {
   return `[${vector.join(',')}]`;
+}
+
+/**
+ * 修复 multipart 上传中文文件名乱码
+ * 根因：busboy（multer 底层）默认把文件名按 latin1 解码，UTF-8 字节变成乱码字符（如 新→æ°）
+ * 修复：latin1 字符还原成字节，再按 UTF-8 解码
+ * 安全性：纯 ASCII 文件名不受影响；已经是正确 UTF-8 的文件名会还原出替换符，自动保持原样
+ */
+function fixMojibakeFilename(name: string): string {
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  // 还原出 U+FFFD 说明原字符串不是 latin1 乱码（可能是已正确的 UTF-8），保持原样
+  if (decoded.includes('\uFFFD')) {
+    return name;
+  }
+  return decoded;
 }

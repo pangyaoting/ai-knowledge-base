@@ -1,5 +1,8 @@
--- DropIndex
-DROP INDEX "chunks_embedding_idx";
+-- ⚠️ 此处原本有一句 Prisma 自动生成的 DROP INDEX "chunks_embedding_idx"
+-- 原因：chunks 的 HNSW 索引是手写迁移（20260817070000）创建的，时间戳晚于本迁移（06:13 < 07:00），
+-- 而 Prisma 不认识这个手写索引，生成本迁移时把它当成"多余对象"要删掉，
+-- 导致 shadow 数据库重放顺序（先 06:13 后 07:00）下 DROP 先于 CREATE 执行而报错。
+-- 修复：删除该 DROP 语句（索引由 add_chunk_embedding 迁移负责创建）。
 
 -- CreateTable
 CREATE TABLE "chat_sessions" (
