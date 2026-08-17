@@ -34,10 +34,10 @@ jobs:
       - name: Build server
         run: pnpm --filter @app/server build
 
-  # 自动部署（只在 push 到 main 时跑）
+  # 自动部署（只在 push 到 main 且服务器密钥已配置时跑；没买服务器/没配密钥会自动跳过，不影响 CI 通过）
   deploy:
     needs: check
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && secrets.SERVER_HOST != '' && secrets.SSH_PRIVATE_KEY != ''
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to server
