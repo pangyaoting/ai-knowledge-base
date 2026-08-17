@@ -55,13 +55,13 @@ NestJS 后端（模块化 + 依赖注入）
 # 方式二：分别启动
 docker compose up -d          # 数据库（PostgreSQL + Redis）
 pnpm install                  # 安装依赖
-cd apps/server && npx prisma migrate deploy   # 初始化数据库
+npx prisma migrate deploy --schema apps/server/prisma/schema.prisma   # 初始化数据库（在根目录跑，读根目录 .env）
 pnpm dev:server               # 后端 http://localhost:3000/api
 pnpm dev:web                  # 前端 http://localhost:5173
 ```
 
 - Swagger 接口文档：`http://localhost:3000/api/docs`
-- 需要 `.env` 配置 DeepSeek 与硅基流动 API Key（见 `docs/05-AI服务申请指南.md`）
+- 所有配置放在**根目录 `.env`**（唯一配置源，参考 `.env.example`）：DeepSeek、硅基流动、Tavily 等 API Key（见 `docs/05-AI服务申请指南.md`）
 
 ## 📁 项目结构
 

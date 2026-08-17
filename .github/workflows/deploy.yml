@@ -69,9 +69,10 @@ jobs:
             cd /opt/ai-knowledge-base
             git pull origin main
             pnpm install --frozen-lockfile
+            # 应用数据库迁移：从根目录跑，读取根目录 .env 的 DATABASE_URL（.env 是唯一配置源）
+            npx prisma migrate deploy --schema apps/server/prisma/schema.prisma
             cd apps/server
             npx prisma generate
-            npx prisma migrate deploy
             pnpm build
             pm2 restart kb-server
             cd ../web

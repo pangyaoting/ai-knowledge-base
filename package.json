@@ -9,14 +9,18 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "format": "prettier --write \"**/*.{ts,vue,js,json,md}\"",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "prisma:migrate": "prisma migrate dev --schema apps/server/prisma/schema.prisma",
+    "prisma:deploy": "prisma migrate deploy --schema apps/server/prisma/schema.prisma",
+    "prisma:studio": "prisma studio --schema apps/server/prisma/schema.prisma"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.5.0",
     "@commitlint/config-conventional": "^19.5.0",
     "husky": "^9.1.6",
     "lint-staged": "^15.2.10",
-    "prettier": "^3.3.3"
+    "prettier": "^3.3.3",
+    "prisma": "5.20.0"
   },
   "engines": {
     "node": ">=20.0.0",
