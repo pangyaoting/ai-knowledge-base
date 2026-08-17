@@ -29,12 +29,22 @@ export function getDocuments(knowledgeBaseId: string) {
 /**
  * 上传文档（后端同步完成 解析→分块→向量化，可能耗时较长）
  * 单独放宽超时到 120 秒，避免大文档被默认 15s 超时打断
+ * @param onProgress 上传进度回调（0-100，只反映 HTTP 传输阶段）
  */
-export function uploadDocument(knowledgeBaseId: string, file: File) {
+export function uploadDocument(
+  knowledgeBaseId: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+) {
   const form = new FormData();
   form.append('file', file);
   return request.post<unknown, Document>(`/knowledge/${knowledgeBaseId}/documents`, form, {
     timeout: 120_000,
+    onUploadProgress: onProgress
+      ? (e) => {
+          if (e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      : undefined,
   });
 }
 

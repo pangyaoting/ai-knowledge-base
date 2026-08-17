@@ -27,6 +27,7 @@ const knowledgeBaseId = route.params.id as string;
 const list = ref<Document[]>([]);
 const loading = ref(false);
 const uploading = ref(false);
+const uploadPercent = ref<number | null>(null); // 上传进度（0-100）
 const error = ref('');
 const fileInput = ref<HTMLInputElement | null>(null);
 const selectedFile = ref<File | null>(null);
@@ -57,11 +58,31 @@ async function load() {
 }
 
 async function handleUpload() {
-  if (!selectedFile.value) return;
+  const file = selectedFile.value;
+  if (!file) return;
+
+  // 空文件直接拦截（后端也会拦，这里提前给出友好提示）
+  if (file.size === 0) {
+    error.value = '文件内容为空，无法解析';
+    return;
+  }
+  // 同名文件 → 后端会替换旧版，先确认避免误操作
+  const dup = list.value.find((d) => d.filename === file.name);
+  if (
+    dup &&
+    // eslint-disable-next-line no-alert
+    !window.confirm(
+      `已存在同名文件「${file.name}」，上传后将替换旧版（旧文档及其向量数据将被删除）。继续？`,
+    )
+  ) {
+    return;
+  }
+
   uploading.value = true;
   error.value = '';
+  uploadPercent.value = 0;
   try {
-    await uploadDocument(knowledgeBaseId, selectedFile.value);
+    await uploadDocument(knowledgeBaseId, file, (p) => (uploadPercent.value = p));
     selectedFile.value = null;
     if (fileInput.value) fileInput.value.value = '';
     await load();
@@ -69,6 +90,7 @@ async function handleUpload() {
     error.value = (e as Error).message;
   } finally {
     uploading.value = false;
+    uploadPercent.value = null;
   }
 }
 
@@ -179,9 +201,17 @@ onMounted(load);
           {{ uploading ? '解析向量化中...' : '上传并解析' }}
         </Button>
       </div>
-      <p v-if="uploading" class="mt-3 text-center text-xs text-muted-foreground">
-        上传后需要解析、分块并调用 AI 向量化，大文档可能需要十几秒
-      </p>
+      <div v-if="uploading" class="mt-3 w-full max-w-md">
+        <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            class="h-full bg-primary transition-all duration-200"
+            :style="{ width: (uploadPercent ?? 0) + '%' }"
+          />
+        </div>
+        <p class="mt-2 text-center text-xs text-muted-foreground">
+          上传 {{ uploadPercent ?? 0 }}% · 解析分块向量化中（大文档可能需要十几秒）
+        </p>
+      </div>
       <p
         v-if="error"
         class="mt-3 flex items-center justify-center gap-1.5 text-center text-sm text-destructive"

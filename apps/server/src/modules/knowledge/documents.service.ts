@@ -51,13 +51,22 @@ export class DocumentsService {
       const mb = Math.round(this.maxFileSize / 1024 / 1024);
       throw new BadRequestException(`文件不能超过 ${mb}MB`);
     }
+    if (file.size === 0) {
+      throw new BadRequestException('文件内容为空，无法解析');
+    }
     const fileType = detectFileType(file.originalname);
     if (!fileType || !ALLOWED_TYPES.includes(fileType)) {
       throw new BadRequestException('仅支持 PDF / Word(.docx) / Markdown / TXT 文件');
     }
+    const originalName = fixMojibakeFilename(file.originalname); // 修复中文文件名乱码
+
+    // 2.5 同名文件替换：先记住旧文档，等新文档全部处理成功后再删旧版
+    //（避免新上传失败时旧版也丢了；成功前不打扰旧文档）
+    const existing = await this.prisma.document.findFirst({
+      where: { knowledgeBaseId, filename: originalName },
+    });
 
     // 3. 存盘：UUID 改名防重名/防路径注入，扩展名保留
-    const originalName = fixMojibakeFilename(file.originalname); // 修复中文文件名乱码
     const storedName = `${randomUUID()}.${fileType}`;
     if (!existsSync(UPLOAD_DIR)) {
       mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -111,9 +120,7 @@ export class DocumentsService {
           `;
         }
       });
-      this.logger.log(
-        `向量化完成: ${file.originalname} → ${created.length} 个向量(1024维)`,
-      );
+      this.logger.log(`向量化完成: ${file.originalname} → ${created.length} 个向量(1024维)`);
 
       // 9. 状态 → done，返回带 chunk 数量
       const updated = await this.prisma.document.update({
@@ -121,26 +128,34 @@ export class DocumentsService {
         data: { status: 'done' },
         include: { _count: { select: { chunks: true } } },
       });
+
+      // 9.5 新文档成功 → 删除旧版（chunk 由外键级联删除，磁盘文件手动删）
+      if (existing) {
+        await this.prisma.document.delete({ where: { id: existing.id } });
+        try {
+          unlinkSync(join(process.cwd(), existing.filepath));
+        } catch {
+          /* 文件可能已不存在，忽略 */
+        }
+        this.logger.log(`同名文件替换: ${originalName}（旧文档 ${existing.id} 已删除）`);
+      }
+
       this.logger.log(
         `文档处理完成: ${file.originalname} (${file.size} bytes) → ${chunks.length} 个 chunk`,
       );
       return updated;
     } catch (err) {
-      // 失败：删掉已存的文件和已写入的 chunk（不留孤儿数据），
-      // Document 保留并标记 failed 供前端展示原因
+      // 失败：全量清理（磁盘文件 + chunk + Document 行），不留"解析失败"的残渣记录
       try {
         unlinkSync(join(UPLOAD_DIR, storedName));
       } catch {
         /* 文件可能不存在，忽略 */
       }
       await this.prisma.chunk.deleteMany({ where: { documentId: document.id } });
+      await this.prisma.document.delete({ where: { id: document.id } }).catch(() => undefined);
       const message = (err as Error).message || '解析失败';
-      await this.prisma.document.update({
-        where: { id: document.id },
-        data: { status: 'failed', error: message },
-      });
-      this.logger.warn(`文档解析失败: ${file.originalname} → ${message}`);
-      throw new BadRequestException(`文档解析失败: ${message}`);
+      this.logger.warn(`文档处理失败（已全量清理）: ${file.originalname} → ${message}`);
+      throw new BadRequestException(`文档解析失败：${message}`);
     }
   }
 

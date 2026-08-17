@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { BookOpen, FileText, Plus, Trash2, Loader2, RefreshCw } from 'lucide-vue-next';
+import { BookOpen, FileText, Plus, Trash2, Loader2, RefreshCw, Pencil } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
-import { getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase } from '@/api/knowledge';
+import Label from '@/components/ui/Label.vue';
+import {
+  getKnowledgeBases,
+  createKnowledgeBase,
+  updateKnowledgeBase,
+  deleteKnowledgeBase,
+} from '@/api/knowledge';
 import type { KnowledgeBase } from '@/types/knowledge';
 
 const router = useRouter();
@@ -65,6 +71,39 @@ async function handleDelete(id: string) {
     error.value = (e as Error).message;
   }
 }
+
+// ==================== 编辑（改名/改描述） ====================
+const editing = ref<KnowledgeBase | null>(null);
+const editName = ref('');
+const editDesc = ref('');
+const saving = ref(false);
+
+function openEdit(kb: KnowledgeBase) {
+  editing.value = kb;
+  editName.value = kb.name;
+  editDesc.value = kb.description ?? '';
+}
+
+async function saveEdit() {
+  const kb = editing.value;
+  if (!kb) return;
+  const trimmed = editName.value.trim();
+  if (!trimmed) return;
+  saving.value = true;
+  error.value = '';
+  try {
+    await updateKnowledgeBase(kb.id, {
+      name: trimmed,
+      description: editDesc.value.trim() || undefined,
+    });
+    editing.value = null;
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    saving.value = false;
+  }
+}
 </script>
 
 <template>
@@ -115,13 +154,22 @@ async function handleDelete(id: string) {
       >
         <div class="flex items-start justify-between gap-2">
           <h3 class="font-semibold line-clamp-1">{{ kb.name }}</h3>
-          <button
-            class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-            :title="'删除 ' + kb.name"
-            @click="handleDelete(kb.id)"
-          >
-            <Trash2 class="h-4 w-4" />
-          </button>
+          <div class="flex shrink-0 items-center gap-0.5">
+            <button
+              class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              :title="'编辑 ' + kb.name"
+              @click="openEdit(kb)"
+            >
+              <Pencil class="h-4 w-4" />
+            </button>
+            <button
+              class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              :title="'删除 ' + kb.name"
+              @click="handleDelete(kb.id)"
+            >
+              <Trash2 class="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <p class="mt-1 flex-1 text-sm text-muted-foreground line-clamp-2">
           {{ kb.description || '暂无描述' }}
@@ -133,6 +181,35 @@ async function handleDelete(id: string) {
           </span>
           <Button variant="outline" size="sm" @click="router.push(`/knowledge/${kb.id}`)">
             管理文档
+          </Button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 编辑知识库弹窗 -->
+    <div
+      v-if="editing"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="editing = null"
+    >
+      <div class="w-full max-w-md rounded-lg border bg-card p-5 shadow-xl">
+        <h3 class="text-base font-semibold">编辑知识库</h3>
+        <div class="mt-4 space-y-3">
+          <div class="space-y-1.5">
+            <Label>名称</Label>
+            <Input v-model="editName" placeholder="知识库名称" />
+          </div>
+          <div class="space-y-1.5">
+            <Label>描述</Label>
+            <Input v-model="editDesc" placeholder="描述（可选）" />
+          </div>
+        </div>
+        <p v-if="error" class="mt-3 text-sm text-destructive">{{ error }}</p>
+        <div class="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" @click="editing = null">取消</Button>
+          <Button size="sm" :disabled="saving || !editName.trim()" @click="saveEdit">
+            <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
+            {{ saving ? '保存中...' : '保存' }}
           </Button>
         </div>
       </div>

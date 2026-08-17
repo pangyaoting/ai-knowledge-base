@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -117,12 +113,14 @@ export class ChatService {
       data: { sessionId, role: 'user', content: question },
     });
 
-    // ③ 历史对话（最近 3 轮）
+    // ③ 历史对话（最近 3 轮）：先按时间倒序取最近 N 条，再反转回时间正序
+    //（注意：不能 orderBy asc + take，那会取到【最早】的 N 条——上下文会越聊越旧）
     const history = await this.prisma.chatMessage.findMany({
       where: { sessionId },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
       take: HISTORY_ROUNDS,
     });
+    history.reverse();
 
     // ④ 组装 Prompt（知识库资料 + 网络资料一起注入）
     const { system, messages } = this.buildPrompt(question, kbSources, webSources, history);

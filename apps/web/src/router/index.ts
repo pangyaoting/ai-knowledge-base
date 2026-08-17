@@ -42,6 +42,13 @@ const router = createRouter({
         },
       ],
     },
+    {
+      // 兜底：未匹配的路径 → 404 页
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('@/views/NotFound.vue'),
+      meta: { public: true },
+    },
   ],
 });
 
@@ -49,8 +56,8 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore();
 
-  // 已登录用户访问登录/注册页，重定向到首页
-  if (to.meta.public && auth.isLoggedIn) {
+  // 已登录用户访问登录/注册页，重定向到首页（404 页除外：任何状态下都应展示 404）
+  if (to.meta.public && auth.isLoggedIn && to.name !== 'not-found') {
     return { name: 'home' };
   }
 
