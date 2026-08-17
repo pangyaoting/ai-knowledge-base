@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { BookOpen, FileText, Plus, Trash2, Loader2 } from 'lucide-vue-next';
+import { BookOpen, FileText, Plus, Trash2, Loader2, RefreshCw } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import { getKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase } from '@/api/knowledge';
@@ -35,13 +35,16 @@ async function handleCreate() {
   creating.value = true;
   error.value = '';
   try {
-    await createKnowledgeBase({
+    const created = await createKnowledgeBase({
       name: trimmed,
       description: description.value.trim() || undefined,
     });
     name.value = '';
     description.value = '';
-    await load();
+    // 乐观插入：立即显示新知识库，不依赖第二次请求（避免后端偶发抖动时"创建了但看不到"）
+    list.value.unshift(created);
+    // 后台刷新拿完整数据（文档数统计等）；失败不影响已显示的新条目
+    load().catch(() => undefined);
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -64,11 +67,17 @@ async function handleDelete(id: string) {
 <template>
   <div class="container py-10">
     <!-- 页头 -->
-    <div class="mb-8">
-      <h1 class="text-2xl font-bold tracking-tight">知识库</h1>
-      <p class="mt-1 text-sm text-muted-foreground">
-        上传你的文档，系统会自动解析、分块并向量化，之后就能进行语义问答
-      </p>
+    <div class="mb-8 flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">知识库</h1>
+        <p class="mt-1 text-sm text-muted-foreground">
+          上传你的文档，系统会自动解析、分块并向量化，之后就能进行语义问答
+        </p>
+      </div>
+      <Button variant="outline" size="sm" :disabled="loading" @click="load">
+        <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+        刷新
+      </Button>
     </div>
 
     <!-- 创建表单 -->

@@ -1,4 +1,5 @@
 import request from './request';
+import axios from 'axios';
 import type { KnowledgeBase, Document } from '@/types/knowledge';
 
 // ==================== 知识库 ====================
@@ -41,4 +42,21 @@ export function deleteDocument(knowledgeBaseId: string, documentId: string) {
   return request.delete<unknown, { success: boolean }>(
     `/knowledge/${knowledgeBaseId}/documents/${documentId}`,
   );
+}
+
+/**
+ * 下载文档原文件
+ * 注意：返回的是文件二进制（Blob），不能用统一响应拦截器（它只解包 JSON），
+ * 所以这里用原生 axios + 手动带 token
+ */
+export async function downloadDocumentFile(
+  knowledgeBaseId: string,
+  documentId: string,
+): Promise<Blob> {
+  const res = await axios.get(`/api/knowledge/${knowledgeBaseId}/documents/${documentId}/file`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` },
+    responseType: 'blob',
+    timeout: 60_000,
+  });
+  return res.data;
 }

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +10,6 @@ import { cleanText, detectFileType, extractText } from './utils/document-parser'
 import { splitText } from './utils/text-splitter';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_TYPES = ['pdf', 'docx', 'md', 'txt'];
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
 const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
@@ -26,7 +26,14 @@ export class DocumentsService {
     private prisma: PrismaService,
     private knowledgeService: KnowledgeService,
     private embeddingService: EmbeddingService,
+    private configService: ConfigService,
   ) {}
+
+  /** 单文件大小上限（.env 可配 MAX_FILE_SIZE_MB，默认 20MB） */
+  private get maxFileSize(): number {
+    const mb = Number(this.configService.get<string>('MAX_FILE_SIZE_MB', '20'));
+    return (Number.isFinite(mb) && mb > 0 ? mb : 20) * 1024 * 1024;
+  }
 
   /**
    * 上传并处理文档（multipart/form-data，字段名 file）
@@ -40,8 +47,9 @@ export class DocumentsService {
     if (!file) {
       throw new BadRequestException('未收到文件（multipart 字段名应为 file）');
     }
-    if (file.size > MAX_FILE_SIZE) {
-      throw new BadRequestException('文件不能超过 10MB');
+    if (file.size > this.maxFileSize) {
+      const mb = Math.round(this.maxFileSize / 1024 / 1024);
+      throw new BadRequestException(`文件不能超过 ${mb}MB`);
     }
     const fileType = detectFileType(file.originalname);
     if (!fileType || !ALLOWED_TYPES.includes(fileType)) {
@@ -144,6 +152,22 @@ export class DocumentsService {
       include: { _count: { select: { chunks: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /** 获取文档文件（校验归属后返回文件名和绝对路径，供下载/预览） */
+  async getFile(userId: string, knowledgeBaseId: string, documentId: string) {
+    await this.knowledgeService.findOne(userId, knowledgeBaseId);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, knowledgeBaseId },
+    });
+    if (!doc) {
+      throw new NotFoundException('文档不存在');
+    }
+    const absPath = join(process.cwd(), doc.filepath);
+    if (!existsSync(absPath)) {
+      throw new NotFoundException('文件已不存在（可能被清理）');
+    }
+    return { filename: doc.filename, absPath };
   }
 
   /** 删除文档：chunk 由外键级联删除，磁盘文件手动删 */

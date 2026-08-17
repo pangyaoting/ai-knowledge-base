@@ -1,9 +1,23 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ArrowLeft, FileText, Loader2, Trash2, Upload, AlertCircle } from 'lucide-vue-next';
+import {
+  ArrowLeft,
+  FileText,
+  Loader2,
+  Trash2,
+  Upload,
+  AlertCircle,
+  Download,
+  RefreshCw,
+} from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
-import { getDocuments, uploadDocument, deleteDocument } from '@/api/knowledge';
+import {
+  getDocuments,
+  uploadDocument,
+  deleteDocument,
+  downloadDocumentFile,
+} from '@/api/knowledge';
 import { formatFileSize, type Document } from '@/types/knowledge';
 
 const route = useRoute();
@@ -61,6 +75,50 @@ async function handleDelete(docId: string, filename: string) {
   }
 }
 
+/** 下载原文件（axios blob 带 token，绕开 JSON 拦截器） */
+async function handleDownload(doc: Document) {
+  try {
+    const blob = await downloadDocumentFile(knowledgeBaseId, doc.id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = doc.filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+
+// ==================== 更新（重新上传替换） ====================
+// 本地修改文件后，重新上传会替换旧文档（删除旧文档及其向量，再入库新内容）
+const updatingId = ref<string | null>(null);
+
+function onReplaceFileChange(e: Event, docId: string) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(`用「${file.name}」替换当前文档？旧文档及其向量数据将被删除。`)) return;
+  handleReplace(docId, file);
+}
+
+async function handleReplace(docId: string, file: File) {
+  updatingId.value = docId;
+  error.value = '';
+  try {
+    // 先上传新版本（成功后新文档已入库），再删旧文档——失败不会丢失旧数据
+    await uploadDocument(knowledgeBaseId, file);
+    await deleteDocument(knowledgeBaseId, docId);
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    updatingId.value = null;
+  }
+}
+
 const statusText: Record<string, string> = {
   pending: '排队中',
   processing: '解析中',
@@ -91,7 +149,7 @@ onMounted(load);
       <div>
         <h1 class="text-2xl font-bold tracking-tight">文档管理</h1>
         <p class="mt-0.5 text-sm text-muted-foreground">
-          支持 PDF / Word(.docx) / Markdown / TXT，单个文件 ≤ 10MB
+          支持 PDF / Word(.docx) / Markdown / TXT，单个文件 ≤ 20MB；本地修改文件后可「更新」重新入库
         </p>
       </div>
     </div>
@@ -164,13 +222,39 @@ onMounted(load);
             </td>
             <td class="px-4 py-3 text-muted-foreground">{{ doc._count?.chunks ?? 0 }}</td>
             <td class="px-4 py-3 text-right">
-              <button
-                class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                :title="'删除 ' + doc.filename"
-                @click="handleDelete(doc.id, doc.filename)"
-              >
-                <Trash2 class="h-4 w-4" />
-              </button>
+              <div class="flex items-center justify-end gap-1">
+                <!-- 下载原文件 -->
+                <button
+                  class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  :title="'下载 ' + doc.filename"
+                  @click="handleDownload(doc)"
+                >
+                  <Download class="h-4 w-4" />
+                </button>
+                <!-- 更新（重新上传替换） -->
+                <label
+                  class="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  :title="'更新（重新上传替换）'"
+                >
+                  <Loader2 v-if="updatingId === doc.id" class="h-4 w-4 animate-spin" />
+                  <RefreshCw v-else class="h-4 w-4" />
+                  <input
+                    type="file"
+                    accept=".pdf,.docx,.md,.markdown,.txt"
+                    class="hidden"
+                    :disabled="updatingId !== null"
+                    @change="onReplaceFileChange($event, doc.id)"
+                  />
+                </label>
+                <!-- 删除 -->
+                <button
+                  class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  :title="'删除 ' + doc.filename"
+                  @click="handleDelete(doc.id, doc.filename)"
+                >
+                  <Trash2 class="h-4 w-4" />
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
