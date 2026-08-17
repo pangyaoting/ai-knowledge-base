@@ -25,6 +25,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 先生成 Prisma 客户端再类型检查（全新环境不会自动生成，缺了它 tsc 会报 Prisma.sql 等不存在）
+      - name: Generate Prisma client
+        run: cd apps/server && npx prisma generate
+
       - name: Type check server
         run: cd apps/server && npx tsc --noEmit
 
@@ -34,13 +38,15 @@ jobs:
       - name: Build server
         run: pnpm --filter @app/server build
 
-  # 自动部署（只在 push 到 main 且服务器密钥已配置时跑；没买服务器/没配密钥会自动跳过，不影响 CI 通过）
+  # 自动部署（只在 push 到 main 时跑；没配服务器密钥时部署步骤自动跳过，不影响 CI 通过）
   deploy:
     needs: check
-    if: github.ref == 'refs/heads/main' && secrets.SERVER_HOST != '' && secrets.SSH_PRIVATE_KEY != ''
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      # secrets 只能在 step 级条件里使用（job 级 if 不支持 secrets 上下文）
       - name: Deploy to server
+        if: ${{ secrets.SERVER_HOST != '' && secrets.SSH_PRIVATE_KEY != '' }}
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
