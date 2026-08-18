@@ -13,6 +13,9 @@ import { cleanText, detectFileType, extractText, type DocType } from './utils/do
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const ALLOWED_TYPES = ['pdf', 'docx', 'md', 'txt'];
 
+// 供其他模块（如示例数据导入）复用
+export { UPLOAD_DIR };
+
 /**
  * 文档服务：上传 → 入队（异步处理）→ 状态轮询；列表/下载/编辑/删除
  * 解析、分块、向量化已移到 DocumentProcessor（BullMQ worker 后台执行）

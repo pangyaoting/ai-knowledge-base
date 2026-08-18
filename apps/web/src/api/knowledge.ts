@@ -20,6 +20,13 @@ export function deleteKnowledgeBase(id: string) {
   return request.delete<unknown, { success: boolean }>(`/knowledge/${id}`);
 }
 
+/** 一键导入示例知识库（幂等：已存在则返回现有） */
+export function seedDemoData() {
+  return request.post<unknown, { knowledgeBaseId: string; created: boolean; documents: number }>(
+    '/demo/seed',
+  );
+}
+
 // ==================== 文档 ====================
 
 export function getDocuments(knowledgeBaseId: string) {

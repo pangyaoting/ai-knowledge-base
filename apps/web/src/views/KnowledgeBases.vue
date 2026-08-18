@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { BookOpen, FileText, Plus, Trash2, Loader2, RefreshCw, Pencil } from 'lucide-vue-next';
+import {
+  BookOpen,
+  FileText,
+  Plus,
+  Trash2,
+  Loader2,
+  RefreshCw,
+  Pencil,
+  Sparkles,
+} from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
@@ -10,6 +19,7 @@ import {
   createKnowledgeBase,
   updateKnowledgeBase,
   deleteKnowledgeBase,
+  seedDemoData,
 } from '@/api/knowledge';
 import type { KnowledgeBase } from '@/types/knowledge';
 
@@ -18,6 +28,7 @@ const router = useRouter();
 const list = ref<KnowledgeBase[]>([]);
 const loading = ref(false);
 const creating = ref(false);
+const seeding = ref(false);
 const error = ref('');
 
 const name = ref('');
@@ -37,6 +48,20 @@ async function load() {
 
 // 进入页面立即加载列表（之前漏了这行，导致要新建或点刷新才显示）
 onMounted(load);
+
+/** 一键导入示例数据 */
+async function handleSeed() {
+  seeding.value = true;
+  error.value = '';
+  try {
+    await seedDemoData();
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    seeding.value = false;
+  }
+}
 
 async function handleCreate() {
   const trimmed = name.value.trim();
@@ -144,6 +169,30 @@ async function saveEdit() {
     <div v-else-if="list.length === 0" class="rounded-lg border border-dashed py-16 text-center">
       <BookOpen class="mx-auto h-10 w-10 text-muted-foreground/50" />
       <p class="mt-3 text-sm text-muted-foreground">还没有知识库，先创建一个吧</p>
+      <!-- 三步引导 -->
+      <div class="mx-auto mt-6 flex max-w-lg flex-col gap-3 text-left sm:flex-row">
+        <div class="flex-1 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+          <p class="font-medium text-foreground">① 创建知识库</p>
+          <p class="mt-1">在上方输入名称创建</p>
+        </div>
+        <div class="flex-1 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+          <p class="font-medium text-foreground">② 上传文档</p>
+          <p class="mt-1">PDF/Word/Markdown/TXT 自动解析向量化</p>
+        </div>
+        <div class="flex-1 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+          <p class="font-medium text-foreground">③ 对话提问</p>
+          <p class="mt-1">回答附带引用来源</p>
+        </div>
+      </div>
+      <!-- 一键示例数据 -->
+      <Button class="mt-6" :disabled="seeding" @click="handleSeed">
+        <Loader2 v-if="seeding" class="h-4 w-4 animate-spin" />
+        <Sparkles v-else class="h-4 w-4" />
+        {{ seeding ? '导入中，正在向量化示例文档...' : '一键导入示例数据' }}
+      </Button>
+      <p class="mt-2 text-xs text-muted-foreground">
+        导入包含 RAG 概念、AI 基础与使用指南的示例知识库，快速体验完整流程
+      </p>
     </div>
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
