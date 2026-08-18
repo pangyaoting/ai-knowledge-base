@@ -1,9 +1,11 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Res,
   UploadedFile,
@@ -15,6 +17,7 @@ import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nes
 import { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { DocumentsService } from './documents.service';
+import { UpdateDocumentDto } from './dto/update-document.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -45,7 +48,8 @@ export class DocumentsController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'PDF/Word/Markdown/TXT（大小限制由 .env 的 MAX_FILE_SIZE_MB 控制，默认 20MB）',
+          description:
+            'PDF/Word/Markdown/TXT（大小限制由 .env 的 MAX_FILE_SIZE_MB 控制，默认 20MB）',
         },
       },
     },
@@ -60,10 +64,7 @@ export class DocumentsController {
 
   @Get(':id/documents')
   @ApiOperation({ summary: '知识库的文档列表' })
-  findAll(
-    @CurrentUser('id') userId: string,
-    @Param('id', ParseUUIDPipe) knowledgeBaseId: string,
-  ) {
+  findAll(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) knowledgeBaseId: string) {
     return this.documentsService.findAll(userId, knowledgeBaseId);
   }
 
@@ -86,6 +87,27 @@ export class DocumentsController {
       `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
     );
     res.sendFile(absPath);
+  }
+
+  @Get(':id/documents/:documentId/content')
+  @ApiOperation({ summary: '获取文档可编辑文本内容（重新解析原文件）' })
+  getContent(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) knowledgeBaseId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ) {
+    return this.documentsService.getContent(userId, knowledgeBaseId, documentId);
+  }
+
+  @Patch(':id/documents/:documentId')
+  @ApiOperation({ summary: '编辑文档（改名 / 改内容后重新分块向量化）' })
+  updateContent(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) knowledgeBaseId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Body() dto: UpdateDocumentDto,
+  ) {
+    return this.documentsService.updateContent(userId, knowledgeBaseId, documentId, dto);
   }
 
   @Delete(':id/documents/:documentId')

@@ -54,6 +54,25 @@ export function deleteDocument(knowledgeBaseId: string, documentId: string) {
   );
 }
 
+/** 获取文档可编辑文本内容（重新解析原文件） */
+export function getDocumentContent(knowledgeBaseId: string, documentId: string) {
+  return request.get<unknown, { id: string; filename: string; fileType: string; content: string }>(
+    `/knowledge/${knowledgeBaseId}/documents/${documentId}/content`,
+  );
+}
+
+/** 编辑文档：改名 / 改内容（传 content 会重新分块向量化） */
+export function updateDocument(
+  knowledgeBaseId: string,
+  documentId: string,
+  data: { filename?: string; content?: string },
+) {
+  return request.patch<unknown, Document>(
+    `/knowledge/${knowledgeBaseId}/documents/${documentId}`,
+    data,
+  );
+}
+
 /**
  * 下载文档原文件
  * 注意：返回的是文件二进制（Blob），不能用统一响应拦截器（它只解包 JSON），

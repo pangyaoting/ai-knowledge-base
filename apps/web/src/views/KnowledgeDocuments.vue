@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   ArrowLeft,
@@ -10,13 +10,18 @@ import {
   AlertCircle,
   Download,
   RefreshCw,
+  Pencil,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
+import Input from '@/components/ui/Input.vue';
+import Label from '@/components/ui/Label.vue';
 import {
   getDocuments,
   uploadDocument,
   deleteDocument,
   downloadDocumentFile,
+  getDocumentContent,
+  updateDocument,
 } from '@/api/knowledge';
 import { formatFileSize, type Document } from '@/types/knowledge';
 
@@ -149,6 +154,81 @@ async function handleReplace(docId: string, file: File) {
   }
 }
 
+// ==================== 在线编辑（改名 / 改内容后重新向量化） ====================
+const editingDoc = ref<Document | null>(null);
+const editFilename = ref('');
+const editContent = ref('');
+const loadingContent = ref(false);
+const savingEdit = ref(false);
+
+async function openDocEdit(doc: Document) {
+  editingDoc.value = doc;
+  editFilename.value = doc.filename;
+  editContent.value = '';
+  loadingContent.value = true;
+  error.value = '';
+  try {
+    const data = await getDocumentContent(knowledgeBaseId, doc.id);
+    editContent.value = data.content;
+  } catch (e) {
+    error.value = (e as Error).message;
+    editingDoc.value = null;
+  } finally {
+    loadingContent.value = false;
+  }
+}
+
+async function saveDocEdit() {
+  const doc = editingDoc.value;
+  if (!doc) return;
+  savingEdit.value = true;
+  error.value = '';
+  try {
+    await updateDocument(knowledgeBaseId, doc.id, {
+      filename: editFilename.value.trim(),
+      content: editContent.value,
+    });
+    editingDoc.value = null;
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    savingEdit.value = false;
+  }
+}
+
+// ==================== 上传前编辑文本（txt / md 可先改再传） ====================
+const showDraftEditor = ref(false);
+const draftContent = ref('');
+const loadingDraft = ref(false);
+
+/** 纯文本类文件支持上传前在线编辑 */
+const selectedIsText = computed(() => {
+  const name = selectedFile.value?.name ?? '';
+  return /\.(txt|md|markdown)$/i.test(name);
+});
+
+async function openDraftEditor() {
+  const file = selectedFile.value;
+  if (!file) return;
+  loadingDraft.value = true;
+  draftContent.value = '';
+  showDraftEditor.value = true;
+  try {
+    draftContent.value = await file.text();
+  } finally {
+    loadingDraft.value = false;
+  }
+}
+
+/** 用编辑后的文本替换待上传文件（内容变了，文件名保持不变） */
+async function saveDraft() {
+  const file = selectedFile.value;
+  if (!file) return;
+  selectedFile.value = new File([draftContent.value], file.name, { type: 'text/plain' });
+  showDraftEditor.value = false;
+}
+
 const statusText: Record<string, string> = {
   pending: '排队中',
   processing: '解析中',
@@ -199,6 +279,16 @@ onMounted(load);
           <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
           <Upload v-else class="h-4 w-4" />
           {{ uploading ? '解析向量化中...' : '上传并解析' }}
+        </Button>
+        <!-- txt/md 支持上传前在线编辑 -->
+        <Button
+          v-if="selectedIsText && !uploading"
+          variant="outline"
+          :disabled="!selectedFile"
+          @click="openDraftEditor"
+        >
+          <Pencil class="h-4 w-4" />
+          编辑文本
         </Button>
       </div>
       <div v-if="uploading" class="mt-3 w-full max-w-md">
@@ -265,6 +355,14 @@ onMounted(load);
             <td class="px-4 py-3 text-muted-foreground">{{ doc._count?.chunks ?? 0 }}</td>
             <td class="px-4 py-3 text-right">
               <div class="flex items-center justify-end gap-1">
+                <!-- 在线编辑（改名 / 改内容后重新向量化） -->
+                <button
+                  class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  :title="'编辑 ' + doc.filename"
+                  @click="openDocEdit(doc)"
+                >
+                  <Pencil class="h-4 w-4" />
+                </button>
                 <!-- 下载原文件 -->
                 <button
                   class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -301,6 +399,85 @@ onMounted(load);
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 在线编辑文档弹窗（改名 / 改内容 → 重新分块向量化） -->
+    <div
+      v-if="editingDoc"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="editingDoc = null"
+    >
+      <div
+        class="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border bg-card p-5 shadow-xl"
+      >
+        <h3 class="text-base font-semibold">编辑文档</h3>
+        <p class="mt-1 text-xs text-muted-foreground">
+          修改后自动重新分块并向量化，之后的问题按新内容检索
+        </p>
+        <div class="mt-4 space-y-3">
+          <div class="space-y-1.5">
+            <Label>文件名</Label>
+            <Input v-model="editFilename" placeholder="文件名" />
+          </div>
+          <div class="space-y-1.5">
+            <Label>内容</Label>
+            <div v-if="loadingContent" class="flex justify-center py-10">
+              <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+            <textarea
+              v-else
+              v-model="editContent"
+              rows="14"
+              class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm font-mono leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="文档文本内容..."
+            />
+          </div>
+        </div>
+        <p v-if="error" class="mt-3 text-sm text-destructive">{{ error }}</p>
+        <div class="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" @click="editingDoc = null">取消</Button>
+          <Button
+            size="sm"
+            :disabled="savingEdit || loadingContent || !editFilename.trim()"
+            @click="saveDocEdit"
+          >
+            <Loader2 v-if="savingEdit" class="h-4 w-4 animate-spin" />
+            {{ savingEdit ? '保存并重新向量化...' : '保存' }}
+          </Button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上传前编辑文本弹窗（txt / md） -->
+    <div
+      v-if="showDraftEditor"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      @click.self="showDraftEditor = false"
+    >
+      <div
+        class="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg border bg-card p-5 shadow-xl"
+      >
+        <h3 class="text-base font-semibold">编辑文本</h3>
+        <p class="mt-1 text-xs text-muted-foreground">
+          修改完成后点击「保存草稿」，再用编辑后的内容上传入库
+        </p>
+        <div class="mt-4 flex-1 overflow-y-auto">
+          <div v-if="loadingDraft" class="flex justify-center py-10">
+            <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+          <textarea
+            v-else
+            v-model="draftContent"
+            rows="16"
+            class="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm font-mono leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            placeholder="文本内容..."
+          />
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" @click="showDraftEditor = false">取消</Button>
+          <Button size="sm" @click="saveDraft">保存草稿</Button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
