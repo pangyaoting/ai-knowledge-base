@@ -74,6 +74,9 @@ async function handleLogout() {
             <RouterLink to="/chat">
               <Button variant="ghost" size="sm">对话</Button>
             </RouterLink>
+            <RouterLink to="/research">
+              <Button variant="ghost" size="sm">研究报告</Button>
+            </RouterLink>
             <RouterLink to="/dashboard">
               <Button variant="ghost" size="sm">数据看板</Button>
             </RouterLink>
@@ -91,6 +94,9 @@ async function handleLogout() {
             </RouterLink>
             <RouterLink to="/chat" @click="mobileNavOpen = false">
               <Button variant="ghost" size="sm" class="w-full justify-start">对话</Button>
+            </RouterLink>
+            <RouterLink to="/research" @click="mobileNavOpen = false">
+              <Button variant="ghost" size="sm" class="w-full justify-start">研究报告</Button>
             </RouterLink>
             <RouterLink to="/dashboard" @click="mobileNavOpen = false">
               <Button variant="ghost" size="sm" class="w-full justify-start">数据看板</Button>

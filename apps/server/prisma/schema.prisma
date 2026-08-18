@@ -26,6 +26,7 @@ model User {
 
   knowledgeBases KnowledgeBase[]
   chatSessions   ChatSession[]
+  reports        Report[]
 
   @@map("users")
 }
@@ -118,6 +119,29 @@ model SessionKnowledgeBase {
   @@id([sessionId, knowledgeBaseId])
   @@index([knowledgeBaseId])
   @@map("session_knowledge_bases")
+}
+
+// ==================== 研究报告 ====================
+// 研究报告：丢主题 → 自动拆解子问题 → 检索知识库 → 分节撰写 → 汇总成 Markdown。
+// 异步生成：创建任务立即返回，worker 后台执行，前端轮询 status/step 展示进度。
+
+model Report {
+  id        String   @id @default(uuid())
+  ownerId   String   @map("owner_id")
+  topic     String // 研究主题
+  status    String   @default("pending") // pending / processing / done / failed
+  step      Int      @default(0) // 进度步骤：1=拆解子问题 2=检索撰写章节 3=汇总成报告
+  content   String? // 最终 Markdown 报告
+  sections  Json? // [{ index, question, content }]
+  sources   Json? // [{ number, documentId, chunkIndex, filename, similarity }]
+  error     String? // 失败原因
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("reports")
 }
 
 // ==================== 对话消息 ====================

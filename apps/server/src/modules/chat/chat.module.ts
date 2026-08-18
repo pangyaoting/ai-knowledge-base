@@ -9,5 +9,6 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
   imports: [KnowledgeModule], // RagService 依赖 KnowledgeService（校验知识库归属）
   controllers: [ChatController],
   providers: [ChatService, RagService, WebSearchService],
+  exports: [RagService], // 研究报告模块复用混合检索
 })
 export class ChatModule {}

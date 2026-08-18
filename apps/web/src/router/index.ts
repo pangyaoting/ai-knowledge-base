@@ -41,6 +41,11 @@ const router = createRouter({
           component: () => import('@/views/Chat.vue'),
         },
         {
+          path: 'research',
+          name: 'research',
+          component: () => import('@/views/Research.vue'),
+        },
+        {
           path: 'dashboard',
           name: 'dashboard',
           component: () => import('@/views/Dashboard.vue'),
