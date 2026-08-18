@@ -32,3 +32,19 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+// ==================== 文档预览（文本块） ====================
+
+/** 文档的一个文本块（检索与引用的最小单元） */
+export interface DocumentChunk {
+  id: string;
+  chunkIndex: number; // 第几块（0 起）
+  content: string;
+}
+
+/** 文档预览接口返回：文件名 + 全部文本块（按 chunkIndex 升序） */
+export interface DocumentChunksResult {
+  filename: string;
+  fileType: string;
+  chunks: DocumentChunk[];
+}

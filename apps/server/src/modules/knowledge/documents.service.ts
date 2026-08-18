@@ -116,6 +116,27 @@ export class DocumentsService {
     });
   }
 
+  /**
+   * 文档文本块列表（预览 + 引用定位）
+   * 按 documentId 直接取全部切块（chunkIndex 升序），前端渲染"第 N 段"，
+   * 聊天引用定位时按 chunkIndex 滚动高亮。归属校验：文档 → 知识库 → 当前用户。
+   */
+  async getChunks(userId: string, documentId: string) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      include: { knowledgeBase: { select: { ownerId: true } } },
+    });
+    if (!doc || doc.knowledgeBase.ownerId !== userId) {
+      throw new NotFoundException('文档不存在');
+    }
+    const chunks = await this.prisma.chunk.findMany({
+      where: { documentId },
+      orderBy: { chunkIndex: 'asc' },
+      select: { id: true, chunkIndex: true, content: true },
+    });
+    return { filename: doc.filename, fileType: doc.fileType, chunks };
+  }
+
   /** 获取文档文件（校验归属后返回文件名和绝对路径，供下载/预览） */
   async getFile(userId: string, knowledgeBaseId: string, documentId: string) {
     await this.knowledgeService.findOne(userId, knowledgeBaseId);

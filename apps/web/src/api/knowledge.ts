@@ -1,6 +1,6 @@
 import request from './request';
 import axios from 'axios';
-import type { KnowledgeBase, Document } from '@/types/knowledge';
+import type { KnowledgeBase, Document, DocumentChunksResult } from '@/types/knowledge';
 
 // ==================== 知识库 ====================
 
@@ -72,6 +72,14 @@ export function getDocumentContent(knowledgeBaseId: string, documentId: string) 
   return request.get<unknown, { id: string; filename: string; fileType: string; content: string }>(
     `/knowledge/${knowledgeBaseId}/documents/${documentId}/content`,
   );
+}
+
+/**
+ * 获取文档全部文本块（预览 + 引用定位）
+ * 按 documentId 直接取（聊天引用来源里只有 documentId），后端内部解析归属
+ */
+export function getDocumentChunks(documentId: string) {
+  return request.get<unknown, DocumentChunksResult>(`/knowledge/documents/${documentId}/chunks`);
 }
 
 /** 编辑文档：改名 / 改内容（传 content 会重新分块向量化） */

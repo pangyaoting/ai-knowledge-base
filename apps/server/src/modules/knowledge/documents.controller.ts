@@ -101,6 +101,15 @@ export class DocumentsController {
     return this.documentsService.getContent(userId, knowledgeBaseId, documentId);
   }
 
+  @Get('documents/:documentId/chunks')
+  @ApiOperation({ summary: '获取文档文本块列表（预览 + 引用定位，按 documentId 直接取）' })
+  getChunks(
+    @CurrentUser('id') userId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ) {
+    return this.documentsService.getChunks(userId, documentId);
+  }
+
   @Patch(':id/documents/:documentId')
   @ApiOperation({ summary: '编辑文档（改名 / 改内容后重新分块向量化）' })
   updateContent(

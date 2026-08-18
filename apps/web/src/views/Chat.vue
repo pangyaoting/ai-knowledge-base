@@ -12,6 +12,7 @@ import {
   Download,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
+import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import {
   getChatSessions,
   createChatSession,
@@ -141,6 +142,15 @@ const streamSources = ref<ChatSources>({ kb: [], web: [] });
 
 const abortController = ref<AbortController | null>(null);
 const messageContainer = ref<HTMLElement | null>(null);
+
+// 文档预览抽屉（点击引用来源 → 定位到原文文本块）
+const previewDocId = ref<string | null>(null);
+const previewChunkIndex = ref<number | null>(null);
+
+function openSource(src: RetrievalSource) {
+  previewDocId.value = src.documentId;
+  previewChunkIndex.value = src.chunkIndex;
+}
 
 // ==================== 会话管理 ====================
 
@@ -507,14 +517,16 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                     >）
                   </summary>
 
-                  <!-- 知识库来源 -->
+                  <!-- 知识库来源（点击可定位到原文文本块） -->
                   <div v-if="sourcesKb(msg.sources).length" class="mt-2">
                     <p class="font-medium text-muted-foreground">📚 知识库</p>
                     <ul class="mt-1.5 space-y-1.5">
                       <li
                         v-for="(src, si) in sourcesKb(msg.sources)"
                         :key="'kb-' + si"
-                        class="flex items-start gap-2 text-muted-foreground"
+                        class="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/60"
+                        :title="'点击定位到原文第 ' + (src.chunkIndex + 1) + ' 段'"
+                        @click="openSource(src)"
                       >
                         <span
                           class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
@@ -528,6 +540,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                         </span>
                       </li>
                     </ul>
+                    <p class="mt-1.5 text-[11px] text-muted-foreground/70">
+                      💡 点击来源可定位到文档原文位置
+                    </p>
                   </div>
 
                   <!-- 网络来源 -->
@@ -738,6 +753,16 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </div>
       </div>
     </div>
+
+    <!-- 文档预览抽屉：点击引用来源定位到原文文本块 -->
+    <DocPreviewDrawer
+      :document-id="previewDocId"
+      :highlight-chunk-index="previewChunkIndex"
+      @close="
+        previewDocId = null;
+        previewChunkIndex = null;
+      "
+    />
   </div>
 </template>
 

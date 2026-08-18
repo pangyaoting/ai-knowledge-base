@@ -89,6 +89,7 @@ export class RagService {
 
     // 2a. 向量检索（语义）：1 - cosine距离 = 余弦相似度，低于阈值的直接丢弃（不硬凑条数）
     // 按是否限定知识库写两条完整 SQL：所有值都用 $queryRaw 参数绑定（不拼接字符串，防注入）
+    // 注意：未限定知识库（检索全部）时必须以 owner_id 过滤，否则会搜到其他用户的知识库（数据隔离）
     const vectorRows: RawRow[] = kbLiteral
       ? await this.prisma.$queryRaw<RawRow[]>`
           SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
@@ -106,7 +107,9 @@ export class RagService {
                  1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
+          JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
           WHERE c.embedding IS NOT NULL
+            AND kb.owner_id = ${userId}
             AND 1 - (c.embedding <=> ${vectorStr}::vector) >= ${minSim}
           ORDER BY c.embedding <=> ${vectorStr}::vector
           LIMIT ${limit}
@@ -130,7 +133,9 @@ export class RagService {
                  similarity(c.content, ${question}) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
+          JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
           WHERE c.embedding IS NOT NULL
+            AND kb.owner_id = ${userId}
             AND c.content % ${question}
           ORDER BY similarity(c.content, ${question}) DESC
           LIMIT ${limit}
