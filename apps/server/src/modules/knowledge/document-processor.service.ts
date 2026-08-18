@@ -3,6 +3,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from './embedding.service';
+import { GraphService } from './graph.service';
 import { cleanText, extractText, type DocType } from './utils/document-parser';
 import { splitText } from './utils/text-splitter';
 
@@ -30,6 +31,7 @@ export class DocumentProcessor {
   constructor(
     private prisma: PrismaService,
     private embeddingService: EmbeddingService,
+    private graphService: GraphService,
   ) {}
 
   async processDocument(data: DocumentJobData): Promise<void> {
@@ -55,6 +57,13 @@ export class DocumentProcessor {
 
       // 分块 + 向量化
       const chunkCount = await this.indexText(documentId, cleaned);
+
+      // 知识图谱抽取（增强环节：失败不影响文档主流程）
+      await this.graphService
+        .extractFromDocument(documentId)
+        .catch((err) =>
+          this.logger.warn(`图谱抽取失败 ${originalName}: ${(err as Error).message}`),
+        );
 
       // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
       const existing = await this.prisma.document.findFirst({

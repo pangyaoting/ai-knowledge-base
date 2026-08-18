@@ -94,7 +94,7 @@ export class ReportProcessor {
                 documentId: s.documentId,
                 chunkIndex: s.chunkIndex,
                 filename: s.filename,
-                similarity: s.similarity,
+                similarity: s.similarity ?? 0, // 检索片段必有相似度（null 仅出现在聊天的图谱扩展）
               });
             }
             return { ...s, num };

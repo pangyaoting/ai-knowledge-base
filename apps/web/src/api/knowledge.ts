@@ -1,6 +1,12 @@
 import request from './request';
 import axios from 'axios';
-import type { KnowledgeBase, Document, DocumentChunksResult } from '@/types/knowledge';
+import type {
+  KnowledgeBase,
+  Document,
+  DocumentChunksResult,
+  GraphData,
+  EntityChunk,
+} from '@/types/knowledge';
 
 // ==================== 知识库 ====================
 
@@ -109,4 +115,23 @@ export async function downloadDocumentFile(
     timeout: 60_000,
   });
   return res.data;
+}
+
+// ==================== 知识图谱（知识网络） ====================
+
+/** 知识库图谱（节点 + 边，聚合后渲染） */
+export function getKnowledgeGraph(knowledgeBaseId: string) {
+  return request.get<unknown, GraphData>(`/knowledge/${knowledgeBaseId}/graph`);
+}
+
+/** 某实体的原文片段（节点详情面板） */
+export function getEntityChunks(knowledgeBaseId: string, name: string) {
+  return request.get<unknown, EntityChunk[]>(`/knowledge/${knowledgeBaseId}/graph/entity-chunks`, {
+    params: { name },
+  });
+}
+
+/** 重建知识库图谱（对全部已完成文档重新抽取，异步） */
+export function rebuildKnowledgeGraph(knowledgeBaseId: string) {
+  return request.post<unknown, { success: boolean }>(`/knowledge/${knowledgeBaseId}/graph/rebuild`);
 }

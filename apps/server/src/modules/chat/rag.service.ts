@@ -4,14 +4,14 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from '../knowledge/embedding.service';
 import { RerankService } from '../knowledge/rerank.service';
 
-/** 检索命中的来源片段 */
+/** 检索命中的来源片段（similarity 为 null 表示来自知识图谱扩展的关联片段，无向量相似度） */
 export interface RetrievalSource {
   chunkId: string;
   content: string;
   chunkIndex: number;
   documentId: string;
   filename: string;
-  similarity: number;
+  similarity: number | null;
 }
 
 /** 混合检索参数（RRF 融合常量） */

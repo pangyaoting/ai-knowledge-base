@@ -28,7 +28,8 @@ export interface RetrievalSource {
   chunkIndex: number;
   documentId: string;
   filename: string;
-  similarity: number;
+  /** 向量相似度；null = 来自知识图谱扩展的关联片段 */
+  similarity: number | null;
 }
 
 /** 联网检索结果 */

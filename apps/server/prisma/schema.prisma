@@ -40,6 +40,8 @@ model KnowledgeBase {
   ownerId     String     @map("owner_id")
   documents   Document[]
   sessionLinks SessionKnowledgeBase[]
+  entities    GraphEntity[]
+  relations   GraphRelation[]
   createdAt   DateTime   @default(now()) @map("created_at")
   updatedAt   DateTime   @updatedAt @map("updated_at")
 
@@ -47,6 +49,46 @@ model KnowledgeBase {
 
   @@index([ownerId])
   @@map("knowledge_bases")
+}
+
+// ==================== 知识图谱（GraphRAG-lite） ====================
+// 入库时用 LLM 从文档抽取"实体 + 关系"，构成私有知识网络；
+// 多跳问答时沿关系扩展召回（解决普通 RAG 答不了"A 和 B 什么关系"的问题）；
+// 实体按 知识库+文档+名称 去重，chunkIds 记录实体出现的文本块（供取回原文）。
+
+model GraphEntity {
+  id              String   @id @default(uuid())
+  knowledgeBaseId String   @map("knowledge_base_id")
+  documentId      String   @map("document_id")
+  name            String // 实体名（文档原词）
+  type            String   @default("概念") // 概念 / 技术 / 人物 / 组织 / 产品
+  chunkIds        Json     @default("[]") @map("chunk_ids") // 该实体出现的文本块 id 列表
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  document      Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeBaseId, documentId, name])
+  @@index([knowledgeBaseId])
+  @@index([name])
+  @@map("graph_entities")
+}
+
+model GraphRelation {
+  id              String   @id @default(uuid())
+  knowledgeBaseId String   @map("knowledge_base_id")
+  documentId      String   @map("document_id")
+  sourceName      String   @map("source_name")
+  relation        String // 如 "使用" "属于" "包含"
+  targetName      String   @map("target_name")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  document      Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeBaseId, documentId, sourceName, relation, targetName])
+  @@index([knowledgeBaseId])
+  @@map("graph_relations")
 }
 
 // ==================== 文档 ====================
@@ -65,6 +107,8 @@ model Document {
 
   knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
   chunks        Chunk[]
+  entities      GraphEntity[]
+  relations     GraphRelation[]
 
   @@index([knowledgeBaseId])
   @@map("documents")
