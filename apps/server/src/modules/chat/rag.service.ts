@@ -44,6 +44,16 @@ export class RagService {
   }
 
   /**
+   * 重排相关性门控下限（.env 可配 RERANK_MIN_SCORE，默认 0.1）。
+   * bge-reranker 分数实测：相关≈0.9+，无关≈0.00x——低于阈值的片段直接丢弃，
+   * 宁可返回空（触发"未检索到相关内容"兜底），也不拿无关片段误导回答。
+   */
+  private get rerankMinScore(): number {
+    const v = Number(this.configService.get<string>('RERANK_MIN_SCORE', '0.1'));
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.1;
+  }
+
+  /**
    * 混合检索：向量 + 关键词两路并行，RRF 融合后返回 Top-K
    * @param question 用户问题
    * @param kbIds 可选：限定多个知识库范围（空 = 检索该用户全部知识库）
@@ -144,7 +154,9 @@ export class RagService {
     // 3. RRF 融合：召回粗排 Top-N（多取一些，给精排留余地）
     const merged = rrfMerge(vectorRows, keywordRows, Math.max(topK * 3, 15));
 
-    // 4. 两阶段精排：交叉编码器重排 → 截断 Top-K（重排不可用/失败时回退 RRF 顺序）
+    // 4. 两阶段精排：交叉编码器重排 → 相关性门控 → 截断 Top-K
+    // 重排分数是"问题↔片段"的精确相关性分，低于 RERANK_MIN_SCORE 的片段直接丢弃；
+    // 重排不可用/失败时回退 RRF 顺序（降级模式，相关性把关较松但检索仍可用）。
     const toSource = (r: RawRow) => ({
       chunkId: r.chunk_id,
       content: r.content,
@@ -153,22 +165,31 @@ export class RagService {
       filename: r.filename,
       similarity: Number(r.similarity),
     });
-    if (merged.length <= topK) {
-      return merged.map(toSource);
-    }
-    const order = await this.rerankService.rerank(
+
+    const ranked = await this.rerankService.rerank(
       question,
       merged.map((r) => r.content),
-      topK,
+      Math.max(topK * 2, 10),
     );
-    if (!order) {
+    if (!ranked) {
       return merged.slice(0, topK).map(toSource);
     }
-    this.logger.log(`两阶段检索: 召回 ${merged.length} 条 → 重排截断 ${order.length} 条`);
-    return order
-      .map((i) => merged[i])
+
+    const minScore = this.rerankMinScore;
+    const gated = ranked
+      .filter((r) => r.score >= minScore)
+      .slice(0, topK)
+      .map((r) => merged[r.index])
       .filter((r): r is RawRow => !!r)
       .map(toSource);
+    if (gated.length === 0) {
+      this.logger.log(
+        `两阶段检索: 召回 ${merged.length} 条 → 重排后全部低于相关性阈值 ${minScore}，判定无相关内容`,
+      );
+    } else {
+      this.logger.log(`两阶段检索: 召回 ${merged.length} 条 → 重排截断 ${gated.length} 条`);
+    }
+    return gated;
   }
 }
 

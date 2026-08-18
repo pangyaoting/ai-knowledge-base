@@ -530,6 +530,20 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 {{ msg.content }}
               </div>
 
+              <!-- 知识库模式但没有任何引用：回答来自模型自身知识，明示来源 -->
+              <p
+                v-if="
+                  msg.role === 'assistant' &&
+                  msg.sources &&
+                  sourcesKb(msg.sources).length === 0 &&
+                  sourcesWeb(msg.sources).length === 0 &&
+                  useKnowledgeBase
+                "
+                class="mt-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
+              >
+                ⚠️ 未检索到知识库资料，以上回答基于模型自身知识（可在知识库补充相关文档后重问）
+              </p>
+
               <!-- 引用来源（兼容旧数据：旧消息 sources 是数组，新消息是 { kb, web }） -->
               <div
                 v-if="

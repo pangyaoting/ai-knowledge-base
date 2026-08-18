@@ -31,11 +31,17 @@ export class RerankService {
   }
 
   /**
-   * 对候选片段重排：返回按相关性降序的【原数组下标】；任何异常返回 null
+   * 对候选片段重排：返回按相关性降序的 { index, score } 列表；任何异常返回 null
+   * score 是交叉编码器的相关性分（实测 bge-reranker-v2-m3：相关≈0.9+，无关≈0.00x），
+   * 调用方用分数做"相关性门控"，把噪声片段拦在回答之外。
    * @param documents 候选片段内容（与来源数组一一对应）
    * @param topN 要返回的最相关条数
    */
-  async rerank(query: string, documents: string[], topN: number): Promise<number[] | null> {
+  async rerank(
+    query: string,
+    documents: string[],
+    topN: number,
+  ): Promise<Array<{ index: number; score: number }> | null> {
     if (!this.enabled || documents.length === 0) {
       return null;
     }
@@ -62,7 +68,7 @@ export class RerankService {
         results?: Array<{ index: number; relevance_score: number }>;
       };
       const results = (data.results ?? []).sort((a, b) => b.relevance_score - a.relevance_score);
-      return results.map((r) => r.index);
+      return results.map((r) => ({ index: r.index, score: r.relevance_score }));
     } catch (err) {
       this.logger.warn(`重排失败，回退 RRF: ${(err as Error).message}`);
       return null;

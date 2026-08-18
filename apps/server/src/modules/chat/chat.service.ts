@@ -278,6 +278,7 @@ export class ChatService {
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
     // - 使用知识库：强调以知识库资料为准，标注 [来源N]
+    // - 使用知识库但完全没检索到资料：允许用自身知识回答，但必须明确披露，不许假装有资料可引
     // - 纯对话 + 联网：只允许引用网络资料
     // - 纯对话：普通助手
     const systemParts: string[] = [];
@@ -285,9 +286,16 @@ export class ChatService {
       systemParts.push(
         '你是一个严谨的 AI 问答助手，具备两个知识来源：私有知识库资料和联网搜索到的网络资料。',
         '回答时请结合两者：优先以【参考资料】中的知识库内容为准；知识库没有的、但【网络资料】中有的事实，可以引用网络资料。',
-        '如果两类资料都没有相关信息，请明确说明"未找到相关内容"，不要编造。',
         '回答中引用资料时请标注 [来源1]、[来源2] 等编号（编号与资料一致），网络资料请附上对应链接。',
       );
+      if (kbSources.length === 0 && webSources.length === 0) {
+        systemParts.push(
+          '本次未检索到任何知识库与网络资料：你可以基于自身知识回答，但必须在回答开头明确标注"（未检索到知识库资料，以下为模型自身知识）"。',
+          '严禁编造来源编号或假装引用了资料。',
+        );
+      } else {
+        systemParts.push('如果【参考资料】中没有相关信息，请明确说明"未找到相关内容"，不要编造。');
+      }
     } else if (webSources.length) {
       systemParts.push(
         '你是一个严谨的中文 AI 助手。',
@@ -301,17 +309,16 @@ export class ChatService {
     const system = systemParts.join('\n');
 
     let number = 0;
-    // 知识库检索到的资料（纯对话模式不注入知识库段落）
-    const kbText = useKnowledgeBase
-      ? kbSources.length
+    // 有资料才写【参考资料】；完全没检索到就不写这一节（避免"假装有资料"的观感）
+    const kbText =
+      useKnowledgeBase && kbSources.length
         ? kbSources
             .map((s) => {
               number += 1;
               return `[${number}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`;
             })
             .join('\n\n')
-        : '（知识库中没有检索到相关资料）'
-      : '';
+        : '';
 
     // 联网搜索到的网页资料
     const webText = webSources.length
