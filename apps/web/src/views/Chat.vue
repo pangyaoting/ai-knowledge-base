@@ -43,50 +43,54 @@ const error = ref('');
 const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
 
-// 新建会话时选择问答范围（可绑定多个知识库，空 = 检索全部）
+// 新建会话时选择问答来源：三种模式
+// none = 不使用知识库（纯对话）/ all = 全部知识库 / specific = 指定若干库
 const kbs = ref<KnowledgeBase[]>([]);
 const showKbPicker = ref(false);
 const pickerMode = ref<'create' | 'edit'>('create'); // create=新建会话 / edit=修改当前会话范围
-const pickingAll = ref(true); // 全部知识库（后端语义：空列表 = 全部）
+const pickerScope = ref<'none' | 'all' | 'specific'>('all');
 const pickingKbIds = ref<string[]>([]);
 
-/**
- * "全部知识库"与每个库勾选状态双向联动：
- * - 勾"全部" → 每个库都显示为已勾选
- * - 手动勾满所有库 → "全部"自动勾上
- * - 在"全部"下取消某个库 → 退出全部模式，其余保持勾选
- */
-const allSelected = computed(
-  () =>
-    pickingAll.value || (kbs.value.length > 0 && pickingKbIds.value.length === kbs.value.length),
-);
-
+/** 知识库勾选态：全部模式全显示已勾选；纯对话模式全不勾；指定模式按勾选 */
 function kbChecked(id: string): boolean {
-  return pickingAll.value || pickingKbIds.value.includes(id);
+  if (pickerScope.value === 'all') return true;
+  if (pickerScope.value === 'specific') return pickingKbIds.value.includes(id);
+  return false;
 }
 
-function toggleAll() {
-  if (allSelected.value) {
-    // 取消"全部"：进入指定模式并清空勾选（空 = 检索全部，界面有提示）
-    pickingAll.value = false;
-    pickingKbIds.value = [];
-  } else {
-    pickingAll.value = true;
-    pickingKbIds.value = [];
-  }
+/** 切换模式（radio 互斥）；勾选具体库会自动切到"指定"模式 */
+function setPickerScope(scope: 'none' | 'all' | 'specific') {
+  pickerScope.value = scope;
 }
 
 function toggleKb(id: string) {
-  if (pickingAll.value) {
-    // 在"全部"模式下取消某个库 → 退出全部模式，改为"除它之外全部"
-    pickingAll.value = false;
+  if (pickerScope.value === 'all') {
+    // 在"全部"模式下取消某个库 → 切到"指定"模式，勾选其余全部（与"全部已勾选"的视觉一致）
+    pickerScope.value = 'specific';
     pickingKbIds.value = kbs.value.map((k) => k.id).filter((x) => x !== id);
+    return;
+  }
+  if (pickerScope.value !== 'specific') {
+    // 从"不使用"模式勾选某个库 → 切到"指定"模式
+    pickerScope.value = 'specific';
+    pickingKbIds.value = [id];
     return;
   }
   const i = pickingKbIds.value.indexOf(id);
   if (i >= 0) pickingKbIds.value.splice(i, 1);
   else pickingKbIds.value.push(id);
 }
+
+/** 指定模式下至少要选一个库才允许提交（none/all 模式始终可提交） */
+const canSubmitPicker = computed(
+  () => pickerScope.value !== 'specific' || pickingKbIds.value.length > 0,
+);
+
+/** 当前会话对象（读 useKnowledgeBase 判断是否纯对话模式） */
+const currentSession = computed(
+  () => sessions.value.find((x) => x.id === currentSessionId.value) ?? null,
+);
+const useKnowledgeBase = computed(() => currentSession.value?.useKnowledgeBase ?? true);
 
 /** 当前会话绑定的知识库（用于顶部的"问答范围"标签） */
 const currentScope = computed<ChatSession['knowledgeBases']>(() => {
@@ -106,6 +110,30 @@ function kbNames(bound: ChatSession['knowledgeBases']): string {
   if (names.length <= 2) return names.join('、');
   return `${names.slice(0, 2).join('、')} 等${names.length}个`;
 }
+
+/** 范围标签：纯聊天 / 全部知识库 / 指定库名 */
+function scopeLabel(bound: ChatSession['knowledgeBases'], useKb: boolean): string {
+  if (!useKb) return '纯聊天';
+  if (bound.length) return kbNames(bound);
+  return '全部知识库';
+}
+
+const scopeTitle = computed(() => {
+  if (!useKnowledgeBase.value) return '当前会话不使用知识库（纯对话模式），点击可修改';
+  if (currentScope.value.length) {
+    return (
+      '问答范围：' + currentScope.value.map((k) => k.knowledgeBase.name).join('、') + '，点击可修改'
+    );
+  }
+  return '问答范围：全部知识库，点击可修改';
+});
+
+/** 输入区下方提示文案（跟随是否纯对话模式） */
+const inputHint = computed(() =>
+  useKnowledgeBase.value
+    ? '回答基于知识库资料生成，开启联网可同时检索最新网页'
+    : '当前为纯对话模式（不检索知识库），开启联网可检索最新网页',
+);
 
 // 流式回答的中间状态（回答完成后并入 messages）
 const streamContent = ref('');
@@ -150,7 +178,7 @@ async function handleNewSession() {
   }
 }
 
-/** 点「新建对话」：先弹知识库范围选择器 */
+/** 点「新建对话」：先弹知识来源选择器 */
 async function openNewSessionPicker() {
   if (streaming.value) return;
   try {
@@ -158,7 +186,7 @@ async function openNewSessionPicker() {
   } catch {
     kbs.value = [];
   }
-  pickingAll.value = true;
+  pickerScope.value = 'all'; // 默认全部知识库
   pickingKbIds.value = [];
   pickerMode.value = 'create';
   showKbPicker.value = true;
@@ -173,23 +201,24 @@ async function openEditScope() {
     kbs.value = [];
   }
   const scope = currentScope.value.map((k) => k.knowledgeBase.id);
-  pickingAll.value = scope.length === 0;
+  pickerScope.value = useKnowledgeBase.value === false ? 'none' : scope.length ? 'specific' : 'all';
   pickingKbIds.value = [...scope];
   pickerMode.value = 'edit';
   showKbPicker.value = true;
 }
 
-/** 确认：新建会话 或 修改当前会话范围（空勾选 = 检索全部） */
+/** 确认：新建会话 或 修改当前会话范围（none=纯对话 / all=全部 / specific=指定库） */
 async function confirmCreateSession() {
   showKbPicker.value = false;
   if (streaming.value) return;
-  const ids = pickingAll.value || pickingKbIds.value.length === 0 ? [] : [...pickingKbIds.value];
+  const ids = pickerScope.value === 'specific' ? [...pickingKbIds.value] : [];
+  const useKb = pickerScope.value !== 'none';
   try {
     if (pickerMode.value === 'edit' && currentSessionId.value) {
-      await updateSessionKnowledgeBases(currentSessionId.value, ids);
+      await updateSessionKnowledgeBases(currentSessionId.value, ids, useKb);
       await loadSessions();
     } else {
-      const session = await createChatSession(ids.length ? { knowledgeBaseIds: ids } : {});
+      const session = await createChatSession({ knowledgeBaseIds: ids, useKnowledgeBase: useKb });
       await loadSessions();
       await selectSession(session.id);
     }
@@ -383,7 +412,14 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0 flex-1 truncate">{{ s.title }}</span>
           <span
-            v-if="s.knowledgeBases.length"
+            v-if="s.useKnowledgeBase === false"
+            class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            title="纯对话模式，不检索知识库"
+          >
+            纯聊天
+          </span>
+          <span
+            v-else-if="s.knowledgeBases.length"
             class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
             :title="'问答范围：' + s.knowledgeBases.map((k) => k.knowledgeBase.name).join('、')"
           >
@@ -407,11 +443,10 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
       <div v-if="currentSessionId" class="flex items-center gap-2 border-b bg-card/50 px-4 py-2">
         <h2 class="min-w-0 flex-1 truncate text-sm font-semibold">{{ currentTitle }}</h2>
         <span
-          v-if="currentScope.length"
           class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-          :title="currentScope.map((k) => k.knowledgeBase.name).join('、')"
+          :title="scopeTitle"
         >
-          {{ kbNames(currentScope) }}
+          {{ scopeLabel(currentScope, useKnowledgeBase) }}
         </span>
         <Button
           variant="ghost"
@@ -575,19 +610,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <span class="shrink-0 text-muted-foreground">问答范围</span>
           <button
             class="inline-flex max-w-[65%] items-center gap-1 rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
-            :title="
-              '点击修改问答范围（当前：' +
-              (currentScope.length
-                ? currentScope.map((k) => k.knowledgeBase.name).join('、')
-                : '全部知识库') +
-              '）'
-            "
+            :title="scopeTitle"
             @click="openEditScope"
           >
             <Database class="h-3 w-3 shrink-0 text-muted-foreground" />
-            <span class="truncate">{{
-              currentScope.length ? kbNames(currentScope) : '全部知识库'
-            }}</span>
+            <span class="truncate">{{ scopeLabel(currentScope, useKnowledgeBase) }}</span>
             <span class="shrink-0 text-muted-foreground">修改</span>
           </button>
         </div>
@@ -621,7 +648,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             />
             <span :class="{ 'text-primary': useWebSearch }">🌐 联网检索</span>
           </label>
-          <span>回答基于知识库资料生成，开启联网可同时检索最新网页</span>
+          <span>{{ inputHint }}</span>
         </p>
       </div>
     </main>
@@ -639,19 +666,43 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <p class="mt-1 text-xs text-muted-foreground">
           {{
             pickerMode === 'create'
-              ? '选择本次问答的知识库范围（每个会话独立绑定，可随时修改）'
+              ? '选择本次问答的知识来源（可随时修改）'
               : '修改后立即生效，之后的问题按新范围检索'
           }}
         </p>
         <div class="mt-4 max-h-72 space-y-1.5 overflow-y-auto">
+          <!-- 模式：不使用知识库（纯对话） -->
           <label
             class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
-            :class="allSelected ? 'border-primary' : ''"
+            :class="pickerScope === 'none' ? 'border-primary' : ''"
           >
-            <input type="checkbox" class="h-3.5 w-3.5" :checked="allSelected" @change="toggleAll" />
+            <input
+              type="radio"
+              class="h-3.5 w-3.5"
+              :checked="pickerScope === 'none'"
+              @change="setPickerScope('none')"
+            />
+            <span class="font-medium">不使用知识库</span>
+            <span class="ml-auto text-xs text-muted-foreground">纯对话，不检索资料</span>
+          </label>
+          <!-- 模式：全部知识库 -->
+          <label
+            class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
+            :class="pickerScope === 'all' ? 'border-primary' : ''"
+          >
+            <input
+              type="radio"
+              class="h-3.5 w-3.5"
+              :checked="pickerScope === 'all'"
+              @change="setPickerScope('all')"
+            />
             <span class="font-medium">全部知识库</span>
             <span class="ml-auto text-xs text-muted-foreground">搜索你所有知识库</span>
           </label>
+
+          <p v-if="kbs.length" class="px-1 pt-2 text-xs text-muted-foreground">
+            或勾选指定知识库（点击即切换到指定模式）：
+          </p>
           <label
             v-for="kb in kbs"
             :key="kb.id"
@@ -670,22 +721,18 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </span>
           </label>
           <p v-if="kbs.length === 0" class="py-4 text-center text-xs text-muted-foreground">
-            还没有知识库，先去「知识库」页上传文档
+            还没有知识库，可先选「不使用知识库」开始纯对话，或去「知识库」页上传文档
           </p>
           <p
-            v-else-if="!allSelected && pickingKbIds.length === 0"
+            v-if="pickerScope === 'specific' && pickingKbIds.length === 0"
             class="py-2 text-center text-xs text-destructive"
           >
-            还没有选任何知识库，请勾选「全部知识库」或至少一个库再提交
+            请至少勾选一个知识库，或改用「全部知识库 / 不使用知识库」
           </p>
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <Button variant="ghost" size="sm" @click="showKbPicker = false">取消</Button>
-          <Button
-            size="sm"
-            :disabled="!allSelected && pickingKbIds.length === 0"
-            @click="confirmCreateSession"
-          >
+          <Button size="sm" :disabled="!canSubmitPicker" @click="confirmCreateSession">
             {{ pickerMode === 'create' ? '开始对话' : '保存修改' }}
           </Button>
         </div>

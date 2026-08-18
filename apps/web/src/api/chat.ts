@@ -9,7 +9,11 @@ export function getChatSessions() {
   return request.get<unknown, ChatSession[]>('/chat/sessions');
 }
 
-export function createChatSession(data: { title?: string; knowledgeBaseIds?: string[] }) {
+export function createChatSession(data: {
+  title?: string;
+  knowledgeBaseIds?: string[];
+  useKnowledgeBase?: boolean;
+}) {
   return request.post<unknown, ChatSession>('/chat/sessions', data);
 }
 
@@ -21,10 +25,15 @@ export function deleteChatSession(sessionId: string) {
   return request.delete<unknown, { success: boolean }>(`/chat/sessions/${sessionId}`);
 }
 
-/** 修改会话绑定的知识库（问答范围），空数组 = 全部 */
-export function updateSessionKnowledgeBases(sessionId: string, knowledgeBaseIds: string[]) {
+/** 修改会话绑定的知识库（问答范围）：空数组 + useKnowledgeBase=true = 全部；false = 纯对话 */
+export function updateSessionKnowledgeBases(
+  sessionId: string,
+  knowledgeBaseIds: string[],
+  useKnowledgeBase: boolean,
+) {
   return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/knowledge-bases`, {
     knowledgeBaseIds,
+    useKnowledgeBase,
   });
 }
 

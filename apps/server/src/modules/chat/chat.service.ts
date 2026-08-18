@@ -37,6 +37,7 @@ export class ChatService {
 
   async createSession(userId: string, dto: CreateSessionDto) {
     const kbIds = dto.knowledgeBaseIds?.length ? dto.knowledgeBaseIds : undefined;
+    const useKnowledgeBase = dto.useKnowledgeBase ?? true; // 默认使用知识库
     // 校验归属：绑定的知识库必须都属于当前用户（防止绑定他人知识库），否则 404
     if (kbIds) {
       const owned = await this.prisma.knowledgeBase.findMany({
@@ -51,6 +52,7 @@ export class ChatService {
       data: {
         ownerId: userId,
         title: dto.title || '新对话',
+        useKnowledgeBase,
         ...(kbIds
           ? { knowledgeBases: { create: kbIds.map((id) => ({ knowledgeBaseId: id })) } }
           : {}),
@@ -102,7 +104,12 @@ export class ChatService {
   }
 
   /** 修改会话绑定的知识库（问答范围）：先删旧绑定，再写新绑定（全量替换） */
-  async updateSessionKnowledgeBases(userId: string, sessionId: string, knowledgeBaseIds: string[]) {
+  async updateSessionKnowledgeBases(
+    userId: string,
+    sessionId: string,
+    knowledgeBaseIds: string[],
+    useKnowledgeBase = true,
+  ) {
     await this.getSession(userId, sessionId);
     const kbIds = [...new Set(knowledgeBaseIds)]; // 去重
     if (kbIds.length) {
@@ -115,6 +122,11 @@ export class ChatService {
       }
     }
     await this.prisma.$transaction([
+      // 同时更新"是否使用知识库"开关（false = 纯对话）
+      this.prisma.chatSession.update({
+        where: { id: sessionId },
+        data: { useKnowledgeBase },
+      }),
       this.prisma.sessionKnowledgeBase.deleteMany({ where: { sessionId } }),
       ...(kbIds.length
         ? [
@@ -144,6 +156,8 @@ export class ChatService {
     signal: AbortSignal,
   ) {
     const session = await this.getSession(userId, sessionId);
+    // 是否使用知识库（false = 纯对话模式，不检索知识库）
+    const useKnowledgeBase = session.useKnowledgeBase !== false; // 兼容旧数据（列默认 true）
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
     const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
@@ -159,11 +173,16 @@ export class ChatService {
     // ② 多轮查询改写（指代消解）：有历史时，先把问题改写为"独立完整"的问法再检索。
     //    例如第二问"它的原理是什么" → "【上一轮主题】的原理是什么"。
     //    改写只影响【检索】，回答仍用用户的原问题（不改变对话语义）。
-    const searchQuery = history.length ? await this.rewriteQuery(question, history) : question;
+    //    纯对话模式（不用知识库也不联网）不需要检索 → 跳过改写，省一次 LLM 调用。
+    const needRetrieval = useKnowledgeBase || useWebSearch;
+    const searchQuery =
+      history.length && needRetrieval ? await this.rewriteQuery(question, history) : question;
 
-    // ③ 双路检索（并行）：知识库向量+关键词混合检索 + 可选联网搜索（用改写后的查询）
+    // ③ 检索（并行）：知识库向量+关键词混合检索（纯对话模式跳过）+ 可选联网搜索（用改写后的查询）
     const [kbSources, webSources] = await Promise.all([
-      this.ragService.retrieve(userId, searchQuery, kbIds.length ? kbIds : undefined),
+      useKnowledgeBase
+        ? this.ragService.retrieve(userId, searchQuery, kbIds.length ? kbIds : undefined)
+        : Promise.resolve([] as RetrievalSource[]),
       useWebSearch ? this.webSearchService.search(searchQuery) : Promise.resolve([]),
     ]);
     writer('sources', { kb: kbSources, web: webSources });
@@ -174,7 +193,13 @@ export class ChatService {
     });
 
     // ⑤ 组装 Prompt（知识库资料 + 网络资料一起注入；LLM 看到的是用户原问题）
-    const { system, messages } = this.buildPrompt(question, kbSources, webSources, history);
+    const { system, messages } = this.buildPrompt(
+      question,
+      kbSources,
+      webSources,
+      history,
+      useKnowledgeBase,
+    );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
     const abortController = new AbortController();
@@ -249,25 +274,44 @@ export class ChatService {
     kbSources: RetrievalSource[],
     webSources: WebSource[],
     history: Array<{ role: string; content: string }>,
+    useKnowledgeBase: boolean,
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
-    const system = [
-      '你是一个严谨的 AI 问答助手，具备两个知识来源：私有知识库资料和联网搜索到的网络资料。',
-      '回答时请结合两者：优先以【参考资料】中的知识库内容为准；知识库没有的、但【网络资料】中有的事实，可以引用网络资料。',
-      '如果两类资料都没有相关信息，请明确说明"未找到相关内容"，不要编造。',
-      '回答中引用资料时请标注 [来源1]、[来源2] 等编号（编号与资料一致），网络资料请附上对应链接。',
-      '回答使用简洁、结构化的中文。',
-    ].join('\n');
+    // 按模式切换系统提示词：
+    // - 使用知识库：强调以知识库资料为准，标注 [来源N]
+    // - 纯对话 + 联网：只允许引用网络资料
+    // - 纯对话：普通助手
+    const systemParts: string[] = [];
+    if (useKnowledgeBase) {
+      systemParts.push(
+        '你是一个严谨的 AI 问答助手，具备两个知识来源：私有知识库资料和联网搜索到的网络资料。',
+        '回答时请结合两者：优先以【参考资料】中的知识库内容为准；知识库没有的、但【网络资料】中有的事实，可以引用网络资料。',
+        '如果两类资料都没有相关信息，请明确说明"未找到相关内容"，不要编造。',
+        '回答中引用资料时请标注 [来源1]、[来源2] 等编号（编号与资料一致），网络资料请附上对应链接。',
+      );
+    } else if (webSources.length) {
+      systemParts.push(
+        '你是一个严谨的中文 AI 助手。',
+        '回答可以引用【网络资料】中的内容，引用时标注 [来源N] 并附上链接。',
+        '网络资料没有的信息请如实说明，不要编造。',
+      );
+    } else {
+      systemParts.push('你是一个友善、严谨的中文 AI 助手。');
+    }
+    systemParts.push('回答使用简洁、结构化的中文。');
+    const system = systemParts.join('\n');
 
     let number = 0;
-    // 知识库检索到的资料
-    const kbText = kbSources.length
-      ? kbSources
-          .map((s) => {
-            number += 1;
-            return `[${number}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`;
-          })
-          .join('\n\n')
-      : '（知识库中没有检索到相关资料）';
+    // 知识库检索到的资料（纯对话模式不注入知识库段落）
+    const kbText = useKnowledgeBase
+      ? kbSources.length
+        ? kbSources
+            .map((s) => {
+              number += 1;
+              return `[${number}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`;
+            })
+            .join('\n\n')
+        : '（知识库中没有检索到相关资料）'
+      : '';
 
     // 联网搜索到的网页资料
     const webText = webSources.length
@@ -287,11 +331,8 @@ export class ChatService {
       .join('\n');
 
     const userPrompt = [
-      '【参考资料】',
-      sourceText,
-      '',
+      sourceText ? `【参考资料】\n${sourceText}` : '',
       history.length ? `【历史对话】\n${historyText}` : '',
-      '',
       '【用户问题】',
       question,
     ]
@@ -362,9 +403,11 @@ export class ChatService {
       '',
       `> 导出时间：${new Date().toLocaleString('zh-CN')}`,
       `> 问答范围：${
-        session.knowledgeBases.length
-          ? session.knowledgeBases.map((k) => k.knowledgeBase.name).join('、')
-          : '全部知识库'
+        session.useKnowledgeBase === false
+          ? '不使用知识库（纯对话）'
+          : session.knowledgeBases.length
+            ? session.knowledgeBases.map((k) => k.knowledgeBase.name).join('、')
+            : '全部知识库'
       }`,
       '',
       '---',

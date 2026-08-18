@@ -89,15 +89,17 @@ model Chunk {
 
 // ==================== 对话会话 ====================
 // 会话可以绑定 0..N 个知识库（多对多，通过关联表 SessionKnowledgeBase）；
-// 0 个 = 检索该用户全部知识库
+// useKnowledgeBase=true 且 0 个绑定 = 检索该用户全部知识库；
+// useKnowledgeBase=false = 纯对话模式（不检索知识库）
 
 model ChatSession {
-  id        String   @id @default(uuid())
-  ownerId   String   @map("owner_id")
-  title     String   @default("新对话")
-  messages  ChatMessage[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid())
+  ownerId          String   @map("owner_id")
+  title            String   @default("新对话")
+  useKnowledgeBase Boolean  @default(true) @map("use_knowledge_base") // false = 纯对话，不检索知识库
+  messages         ChatMessage[]
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   owner          User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   knowledgeBases SessionKnowledgeBase[]

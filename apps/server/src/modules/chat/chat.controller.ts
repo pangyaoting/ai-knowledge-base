@@ -65,6 +65,7 @@ export class ChatController {
       userId,
       sessionId,
       dto.knowledgeBaseIds ?? [],
+      dto.useKnowledgeBase ?? true,
     );
   }
 
