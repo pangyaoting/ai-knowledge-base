@@ -14,6 +14,7 @@ import {
   FolderOpen,
   FolderTree,
   Sparkles,
+  Search,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -34,6 +35,14 @@ const knowledgeBaseId = route.params.id as string;
 
 const list = ref<Document[]>([]);
 const loading = ref(false);
+const docSearch = ref(''); // 文档搜索（本地过滤）
+
+/** 按文件名过滤文档（即时响应） */
+const filteredDocs = computed(() => {
+  const q = docSearch.value.trim().toLowerCase();
+  if (!q) return list.value;
+  return list.value.filter((d) => d.filename.toLowerCase().includes(q));
+});
 const uploading = ref(false);
 const uploadPercent = ref<number | null>(null); // 当前文件上传进度（0-100）
 const uploadIndex = ref(0); // 批量上传：第几个
@@ -359,6 +368,12 @@ onMounted(load);
           支持 PDF / Word(.docx) / Markdown / TXT，单个文件 ≤ 20MB；本地修改文件后可「更新」重新入库
         </p>
       </div>
+      <div class="relative ml-auto w-44 sm:w-56">
+        <Search
+          class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input v-model="docSearch" type="text" placeholder="搜索文档" class="h-8 pl-8 text-xs" />
+      </div>
     </div>
 
     <!-- 上传区：选择文件/目录 → 双击编辑 → 解析文件 -->
@@ -481,6 +496,14 @@ onMounted(load);
       <p class="mt-3 text-sm text-muted-foreground">还没有文档，上传一个试试</p>
     </div>
 
+    <div
+      v-else-if="filteredDocs.length === 0"
+      class="rounded-lg border border-dashed py-16 text-center"
+    >
+      <Search class="mx-auto h-10 w-10 text-muted-foreground/50" />
+      <p class="mt-3 text-sm text-muted-foreground">没有匹配的文档，换个关键词试试</p>
+    </div>
+
     <div v-else class="overflow-x-auto rounded-lg border">
       <table class="w-full min-w-[760px] text-sm">
         <thead class="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -494,7 +517,7 @@ onMounted(load);
           </tr>
         </thead>
         <tbody class="divide-y">
-          <tr v-for="doc in list" :key="doc.id">
+          <tr v-for="doc in filteredDocs" :key="doc.id">
             <td class="max-w-[280px] truncate px-4 py-3 font-medium" :title="doc.filename">
               {{ doc.filename }}
             </td>

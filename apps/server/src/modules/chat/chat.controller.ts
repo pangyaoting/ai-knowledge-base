@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -31,9 +32,9 @@ export class ChatController {
   // ==================== 会话管理 ====================
 
   @Get('sessions')
-  @ApiOperation({ summary: '我的会话列表' })
-  listSessions(@CurrentUser('id') userId: string) {
-    return this.chatService.listSessions(userId);
+  @ApiOperation({ summary: '我的会话列表（可按标题/消息内容搜索）' })
+  listSessions(@CurrentUser('id') userId: string, @Query('q') q?: string) {
+    return this.chatService.listSessions(userId, q);
   }
 
   @Post('sessions')

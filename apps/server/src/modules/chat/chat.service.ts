@@ -63,16 +63,27 @@ export class ChatService {
     });
   }
 
-  /** 我的会话列表（带消息数、最后一条消息预览、绑定的知识库） */
-  async listSessions(userId: string) {
+  /** 我的会话列表（带消息数、最后一条消息预览、绑定的知识库）；q 时按标题/消息内容全文检索 */
+  async listSessions(userId: string, q?: string) {
+    const keyword = q?.trim();
     const sessions = await this.prisma.chatSession.findMany({
-      where: { ownerId: userId },
+      where: keyword
+        ? {
+            ownerId: userId,
+            OR: [
+              { title: { contains: keyword, mode: 'insensitive' } },
+              // 消息内容命中：检索该用户所有会话的消息（chat_messages.content 有 pg_trgm GIN 索引）
+              { messages: { some: { content: { contains: keyword, mode: 'insensitive' } } } },
+            ],
+          }
+        : { ownerId: userId },
       include: {
         _count: { select: { messages: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true } },
         knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
       },
       orderBy: { updatedAt: 'desc' },
+      take: keyword ? 50 : undefined, // 搜索结果限定条数，避免超大列表
     });
     return sessions;
   }

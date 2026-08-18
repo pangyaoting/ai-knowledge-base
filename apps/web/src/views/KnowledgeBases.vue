@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   BookOpen,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Pencil,
   Sparkles,
+  Search,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -30,6 +31,14 @@ const loading = ref(false);
 const creating = ref(false);
 const seeding = ref(false);
 const error = ref('');
+const kbSearch = ref(''); // 知识库搜索（本地过滤）
+
+/** 按名称/描述过滤知识库（即时响应，无需请求后端） */
+const filteredList = computed(() => {
+  const q = kbSearch.value.trim().toLowerCase();
+  if (!q) return list.value;
+  return list.value.filter((kb) => `${kb.name} ${kb.description ?? ''}`.toLowerCase().includes(q));
+});
 
 const name = ref('');
 const description = ref('');
@@ -141,10 +150,18 @@ async function saveEdit() {
           上传你的文档，系统会自动解析、分块并向量化，之后就能进行语义问答
         </p>
       </div>
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
-        刷新
-      </Button>
+      <div class="flex items-center gap-2">
+        <div class="relative w-44 sm:w-52">
+          <Search
+            class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input v-model="kbSearch" type="text" placeholder="搜索知识库" class="h-8 pl-8 text-xs" />
+        </div>
+        <Button variant="outline" size="sm" :disabled="loading" @click="load">
+          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+          刷新
+        </Button>
+      </div>
     </div>
 
     <!-- 创建表单 -->
@@ -195,9 +212,17 @@ async function saveEdit() {
       </p>
     </div>
 
+    <div
+      v-else-if="filteredList.length === 0"
+      class="rounded-lg border border-dashed py-16 text-center"
+    >
+      <Search class="mx-auto h-10 w-10 text-muted-foreground/50" />
+      <p class="mt-3 text-sm text-muted-foreground">没有匹配的知识库，换个关键词试试</p>
+    </div>
+
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <div
-        v-for="kb in list"
+        v-for="kb in filteredList"
         :key="kb.id"
         class="flex flex-col rounded-lg border bg-card p-5 transition-shadow hover:shadow-md"
       >

@@ -11,8 +11,10 @@ import {
   Database,
   Download,
   Menu,
+  Search,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
+import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import {
   getChatSessions,
@@ -45,6 +47,8 @@ const error = ref('');
 const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
+const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 新建会话时选择问答来源：三种模式
 // none = 不使用知识库（纯对话）/ all = 全部知识库 / specific = 指定若干库
@@ -156,16 +160,24 @@ function openSource(src: RetrievalSource) {
 
 // ==================== 会话管理 ====================
 
-async function loadSessions() {
+async function loadSessions(q?: string) {
   loadingSessions.value = true;
   try {
-    sessions.value = await getChatSessions();
+    sessions.value = await getChatSessions(q);
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
     loadingSessions.value = false;
   }
 }
+
+// 会话搜索：防抖 300ms 后请求后端全文检索（标题 / 消息内容）
+watch(sessionSearch, () => {
+  if (searchTimer) clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    loadSessions(sessionSearch.value.trim() || undefined);
+  }, 300);
+});
 
 async function selectSession(id: string) {
   if (streaming.value) return;
@@ -183,6 +195,7 @@ async function handleNewSession() {
   if (streaming.value) return;
   try {
     const session = await createChatSession({});
+    sessionSearch.value = ''; // 清掉搜索，保证新会话可见
     await loadSessions();
     await selectSession(session.id);
   } catch (e) {
@@ -231,6 +244,7 @@ async function confirmCreateSession() {
       await loadSessions();
     } else {
       const session = await createChatSession({ knowledgeBaseIds: ids, useKnowledgeBase: useKb });
+      sessionSearch.value = ''; // 清掉搜索，保证新会话可见
       await loadSessions();
       await selectSession(session.id);
     }
@@ -413,10 +427,30 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           新建对话
         </Button>
       </div>
+      <!-- 会话搜索（标题/消息内容全文检索） -->
+      <div class="px-3 pb-2">
+        <div class="relative">
+          <Search
+            class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            v-model="sessionSearch"
+            type="text"
+            placeholder="搜索会话（标题/内容）"
+            class="h-8 pl-8 text-xs"
+          />
+        </div>
+      </div>
       <div class="flex-1 overflow-y-auto px-2 pb-2">
         <div v-if="loadingSessions" class="flex justify-center py-8">
           <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
+        <p
+          v-else-if="sessionSearch.trim() && sessions.length === 0"
+          class="py-8 text-center text-xs text-muted-foreground"
+        >
+          没有匹配的会话，换个关键词试试
+        </p>
         <div
           v-for="s in sessions"
           :key="s.id"

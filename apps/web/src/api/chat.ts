@@ -5,8 +5,9 @@ import type { ChatSession, ChatMessage, ChatSources } from '@/types/chat';
 
 // ==================== 会话管理 ====================
 
-export function getChatSessions() {
-  return request.get<unknown, ChatSession[]>('/chat/sessions');
+/** 会话列表；q 存在时按标题/消息内容全文检索 */
+export function getChatSessions(q?: string) {
+  return request.get<unknown, ChatSession[]>('/chat/sessions', { params: q ? { q } : undefined });
 }
 
 export function createChatSession(data: {
