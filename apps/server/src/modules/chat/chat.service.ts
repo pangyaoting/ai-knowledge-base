@@ -147,19 +147,7 @@ export class ChatService {
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
     const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
-    // ① 双路检索（并行）：知识库向量+关键词混合检索 + 可选联网搜索
-    const [kbSources, webSources] = await Promise.all([
-      this.ragService.retrieve(userId, question, kbIds.length ? kbIds : undefined),
-      useWebSearch ? this.webSearchService.search(question) : Promise.resolve([]),
-    ]);
-    writer('sources', { kb: kbSources, web: webSources });
-
-    // ② 保存用户消息
-    await this.prisma.chatMessage.create({
-      data: { sessionId, role: 'user', content: question },
-    });
-
-    // ③ 历史对话（最近 3 轮）：先按时间倒序取最近 N 条，再反转回时间正序
+    // ① 历史对话（最近 3 轮，不含当前提问）：先按时间倒序取最近 N 条，再反转回时间正序
     //（注意：不能 orderBy asc + take，那会取到【最早】的 N 条——上下文会越聊越旧）
     const history = await this.prisma.chatMessage.findMany({
       where: { sessionId },
@@ -168,7 +156,24 @@ export class ChatService {
     });
     history.reverse();
 
-    // ④ 组装 Prompt（知识库资料 + 网络资料一起注入）
+    // ② 多轮查询改写（指代消解）：有历史时，先把问题改写为"独立完整"的问法再检索。
+    //    例如第二问"它的原理是什么" → "【上一轮主题】的原理是什么"。
+    //    改写只影响【检索】，回答仍用用户的原问题（不改变对话语义）。
+    const searchQuery = history.length ? await this.rewriteQuery(question, history) : question;
+
+    // ③ 双路检索（并行）：知识库向量+关键词混合检索 + 可选联网搜索（用改写后的查询）
+    const [kbSources, webSources] = await Promise.all([
+      this.ragService.retrieve(userId, searchQuery, kbIds.length ? kbIds : undefined),
+      useWebSearch ? this.webSearchService.search(searchQuery) : Promise.resolve([]),
+    ]);
+    writer('sources', { kb: kbSources, web: webSources });
+
+    // ④ 保存用户消息
+    await this.prisma.chatMessage.create({
+      data: { sessionId, role: 'user', content: question },
+    });
+
+    // ⑤ 组装 Prompt（知识库资料 + 网络资料一起注入；LLM 看到的是用户原问题）
     const { system, messages } = this.buildPrompt(question, kbSources, webSources, history);
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
@@ -297,5 +302,98 @@ export class ChatService {
       { role: 'user', content: userPrompt },
     ];
     return { system, messages };
+  }
+
+  /**
+   * 多轮查询改写：把含指代/省略的最新提问，改写为独立完整的检索查询。
+   * 只用于检索（召回更准），不改变用户看到的问题。
+   * 改写失败时回退原问题，不阻塞主流程。
+   */
+  private async rewriteQuery(
+    question: string,
+    history: Array<{ role: string; content: string }>,
+  ): Promise<string> {
+    try {
+      const res = await this.client.chat.completions.create({
+        model: this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat'),
+        messages: [
+          {
+            role: 'system',
+            content:
+              '你是查询改写助手。根据对话历史，把用户最新提问改写为一个独立、完整、无指代的检索查询（例如"它的原理是什么"→"【主题】的原理是什么"）。只输出改写后的查询本身，不要任何解释或前缀。若无需改写则原样输出。',
+          },
+          {
+            role: 'user',
+            content: `历史对话：\n${history
+              .slice(-6)
+              .map((m) => `${m.role === 'user' ? '用户' : '助手'}：${m.content.slice(0, 200)}`)
+              .join('\n')}\n\n最新提问：${question}`,
+          },
+        ],
+        max_tokens: 100,
+        temperature: 0,
+      });
+      const rewritten = res.choices[0]?.message?.content?.trim();
+      return rewritten && rewritten.length > 0 && rewritten.length < 200 ? rewritten : question;
+    } catch (err) {
+      this.logger.warn(`查询改写失败，使用原问题: ${(err as Error).message}`);
+      return question;
+    }
+  }
+
+  /** 导出会话为 Markdown（含引用来源），供下载/复制 */
+  async exportSession(userId: string, sessionId: string) {
+    const session = await this.prisma.chatSession.findFirst({
+      where: { id: sessionId, ownerId: userId },
+      include: {
+        knowledgeBases: { select: { knowledgeBase: { select: { name: true } } } },
+      },
+    });
+    if (!session) {
+      throw new NotFoundException('会话不存在');
+    }
+    const messages = await this.prisma.chatMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const lines: string[] = [
+      `# ${session.title}`,
+      '',
+      `> 导出时间：${new Date().toLocaleString('zh-CN')}`,
+      `> 问答范围：${
+        session.knowledgeBases.length
+          ? session.knowledgeBases.map((k) => k.knowledgeBase.name).join('、')
+          : '全部知识库'
+      }`,
+      '',
+      '---',
+      '',
+    ];
+    for (const m of messages) {
+      if (m.role === 'user') {
+        lines.push(`## 🙋 ${m.content}`, '');
+      } else {
+        lines.push('### 🤖 回答', '', m.content, '');
+        const sources = (m.sources ?? null) as {
+          kb?: Array<{ filename: string; similarity: number }>;
+          web?: Array<{ title: string; url: string }>;
+        } | null;
+        if (sources && (sources.kb?.length || sources.web?.length)) {
+          lines.push('**引用来源：**', '');
+          sources.kb?.forEach((s, i) => {
+            lines.push(
+              `- 📚 来源${i + 1}：《${s.filename}》（相似度 ${(s.similarity * 100).toFixed(0)}%）`,
+            );
+          });
+          sources.web?.forEach((w) => {
+            lines.push(`- 🌐 [${w.title}](${w.url})`);
+          });
+          lines.push('');
+        }
+        lines.push('---', '');
+      }
+    }
+    return { filename: `${session.title}.md`, content: lines.join('\n') };
   }
 }

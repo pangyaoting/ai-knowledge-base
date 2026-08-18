@@ -1,4 +1,5 @@
 import request from './request';
+import axios from 'axios';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import type { ChatSession, ChatMessage, ChatSources } from '@/types/chat';
 
@@ -25,6 +26,16 @@ export function updateSessionKnowledgeBases(sessionId: string, knowledgeBaseIds:
   return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/knowledge-bases`, {
     knowledgeBaseIds,
   });
+}
+
+/** 导出会话为 Markdown 文件（原始 axios 下载，绕开 JSON 拦截器） */
+export async function exportSessionFile(sessionId: string): Promise<Blob> {
+  const res = await axios.get(`/api/chat/sessions/${sessionId}/export`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` },
+    responseType: 'blob',
+    timeout: 30_000,
+  });
+  return res.data;
 }
 
 // ==================== 提问（SSE 流式） ====================

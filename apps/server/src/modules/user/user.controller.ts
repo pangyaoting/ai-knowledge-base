@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -22,5 +23,11 @@ export class UserController {
   @ApiOperation({ summary: '修改个人信息' })
   updateProfile(@CurrentUser('id') userId: string, @Body() dto: UpdateUserDto) {
     return this.userService.update(userId, dto);
+  }
+
+  @Post('change-password')
+  @ApiOperation({ summary: '修改密码' })
+  changePassword(@CurrentUser('id') userId: string, @Body() dto: ChangePasswordDto) {
+    return this.userService.changePassword(userId, dto);
   }
 }

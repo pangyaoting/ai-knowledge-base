@@ -68,6 +68,22 @@ export class ChatController {
     );
   }
 
+  @Get('sessions/:id/export')
+  @ApiOperation({ summary: '导出会话为 Markdown 文件' })
+  async exportSession(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) sessionId: string,
+    @Res() res: Response,
+  ) {
+    const { filename, content } = await this.chatService.exportSession(userId, sessionId);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.send(content);
+  }
+
   // ==================== RAG 问答（SSE 流式） ====================
 
   @Post('sessions/:id/messages')

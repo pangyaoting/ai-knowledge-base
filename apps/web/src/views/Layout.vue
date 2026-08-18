@@ -51,6 +51,7 @@ async function handleLogout() {
           <div class="flex items-center gap-2 text-sm text-muted-foreground">
             <UserIcon class="h-4 w-4" />
             <span>{{ auth.user?.nickname || auth.user?.email }}</span>
+            <RouterLink to="/settings" class="ml-1 text-primary hover:underline">设置</RouterLink>
           </div>
           <Button variant="ghost" size="sm" @click="handleLogout">
             <LogOut class="h-4 w-4" />

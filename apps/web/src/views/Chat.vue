@@ -9,6 +9,7 @@ import {
   Loader2,
   BookOpen,
   Database,
+  Download,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import {
@@ -17,6 +18,7 @@ import {
   getChatMessages,
   deleteChatSession,
   updateSessionKnowledgeBases,
+  exportSessionFile,
   askQuestion,
 } from '@/api/chat';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
@@ -205,6 +207,21 @@ async function handleDeleteSession(id: string) {
   }
 }
 
+/** 导出会话为 Markdown 文件 */
+async function handleExportSession(id: string) {
+  try {
+    const blob = await exportSessionFile(id);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `会话-${id.slice(0, 8)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+
 // ==================== 提问与流式 ====================
 
 const canSend = computed(
@@ -343,16 +360,19 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <div v-if="loadingSessions" class="flex justify-center py-8">
           <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
-        <button
+        <div
           v-for="s in sessions"
           :key="s.id"
-          class="mb-1 flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors"
+          role="button"
+          tabindex="0"
+          class="mb-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors"
           :class="
             s.id === currentSessionId
               ? 'bg-primary/10 text-primary'
               : 'hover:bg-accent text-foreground'
           "
           @click="selectSession(s.id)"
+          @keydown.enter="selectSession(s.id)"
         >
           <MessageSquare class="h-4 w-4 shrink-0 text-muted-foreground" />
           <span class="min-w-0 flex-1 truncate">{{ s.title }}</span>
@@ -365,12 +385,20 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </span>
           <span class="shrink-0 text-xs text-muted-foreground">{{ s._count?.messages ?? 0 }}</span>
           <button
+            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+            title="导出 Markdown"
+            @click.stop="handleExportSession(s.id)"
+          >
+            <Download class="h-3.5 w-3.5" />
+          </button>
+          <button
             class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+            title="删除会话"
             @click.stop="handleDeleteSession(s.id)"
           >
             <Trash2 class="h-3.5 w-3.5" />
           </button>
-        </button>
+        </div>
       </div>
     </aside>
 
