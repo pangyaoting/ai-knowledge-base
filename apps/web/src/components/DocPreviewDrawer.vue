@@ -23,8 +23,7 @@ const error = ref('');
 const filename = ref('');
 const fileType = ref('');
 const chunks = ref<DocumentChunk[]>([]);
-const highlighted = ref<number | null>(null); // 当前高亮的 chunkIndex
-const flashTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const highlighted = ref<number | null>(null); // 当前定位高亮的 chunkIndex（常驻，直到切换/关闭）
 
 /** 打开抽屉：拉取文本块 */
 async function open(documentId: string) {
@@ -45,19 +44,18 @@ async function open(documentId: string) {
   }
 }
 
-/** 定位高亮：滚动到目标块 + 闪烁 2.5 秒 */
+/**
+ * 定位高亮：滚动到目标块。
+ * 高亮常驻显示（border + 背景），切换目标块时通过"先清后设"重新播放入场闪烁动画。
+ */
 async function flashTo(index: number) {
   await nextTick();
-  if (flashTimer.value) clearTimeout(flashTimer.value);
-  highlighted.value = null;
+  highlighted.value = null; // 先清除，保证切换目标时动画能重新触发
   await nextTick();
   highlighted.value = index;
   const el = document.querySelector(`[data-chunk="${index}"]`);
   if (el) {
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    flashTimer.value = setTimeout(() => {
-      highlighted.value = null;
-    }, 3000);
   }
 }
 
@@ -148,10 +146,10 @@ watch(
               v-for="c in chunks"
               :key="c.id"
               :data-chunk="c.chunkIndex"
-              class="rounded-lg border p-3 transition-colors duration-500"
+              class="rounded-lg border p-3 transition-colors duration-300"
               :class="
                 highlighted === c.chunkIndex
-                  ? 'border-primary bg-primary/10 shadow-sm'
+                  ? 'chunk-highlight border-primary bg-primary/10'
                   : 'bg-muted/30'
               "
             >
@@ -166,3 +164,18 @@ watch(
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* 定位高亮：常驻边框+底色之上，再播放入场闪烁动画 */
+.chunk-highlight {
+  animation: chunk-flash 1.4s ease-out;
+}
+@keyframes chunk-flash {
+  0% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+</style>

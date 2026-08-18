@@ -1,14 +1,24 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { Brain, LogOut, User as UserIcon, ChevronDown, Settings } from 'lucide-vue-next';
+import { ref, onMounted, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { Brain, LogOut, User as UserIcon, ChevronDown, Settings, Menu } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
 import Button from '@/components/ui/Button.vue';
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 
-const menuOpen = ref(false);
+const menuOpen = ref(false); // 用户菜单
+const mobileNavOpen = ref(false); // 移动端导航面板
+
+// 路由变化时收起移动端导航
+watch(
+  () => route.fullPath,
+  () => {
+    mobileNavOpen.value = false;
+  },
+);
 
 onMounted(() => {
   // 页面刷新后如果有 token，拉取用户信息
@@ -46,8 +56,17 @@ async function handleLogout() {
           <span class="text-lg font-semibold">AI 知识库</span>
         </RouterLink>
 
-        <div class="flex items-center gap-3">
-          <!-- 导航 -->
+        <div class="flex items-center gap-1">
+          <!-- 移动端：汉堡菜单打开导航面板 -->
+          <button
+            class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+            aria-label="导航菜单"
+            @click.stop="mobileNavOpen = !mobileNavOpen"
+          >
+            <Menu class="h-5 w-5" />
+          </button>
+
+          <!-- 导航（桌面端常驻） -->
           <nav class="mr-2 hidden items-center gap-1 sm:flex">
             <RouterLink to="/knowledge">
               <Button variant="ghost" size="sm">知识库</Button>
@@ -59,7 +78,27 @@ async function handleLogout() {
               <Button variant="ghost" size="sm">数据看板</Button>
             </RouterLink>
           </nav>
+        </div>
 
+        <!-- 移动端导航面板（下拉） -->
+        <template v-if="mobileNavOpen">
+          <div class="fixed inset-0 z-40 md:hidden" @click="mobileNavOpen = false" />
+          <nav
+            class="absolute inset-x-0 top-full z-50 flex flex-col gap-0.5 border-b bg-card px-3 py-2 shadow-lg md:hidden"
+          >
+            <RouterLink to="/knowledge" @click="mobileNavOpen = false">
+              <Button variant="ghost" size="sm" class="w-full justify-start">知识库</Button>
+            </RouterLink>
+            <RouterLink to="/chat" @click="mobileNavOpen = false">
+              <Button variant="ghost" size="sm" class="w-full justify-start">对话</Button>
+            </RouterLink>
+            <RouterLink to="/dashboard" @click="mobileNavOpen = false">
+              <Button variant="ghost" size="sm" class="w-full justify-start">数据看板</Button>
+            </RouterLink>
+          </nav>
+        </template>
+
+        <div class="flex items-center gap-3">
           <!-- 用户菜单：点头像/名称弹出 个人中心 + 退出 -->
           <div class="relative">
             <button

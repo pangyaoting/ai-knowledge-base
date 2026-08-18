@@ -10,6 +10,7 @@ import {
   BookOpen,
   Database,
   Download,
+  Menu,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
@@ -43,6 +44,7 @@ const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
+const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
 
 // 新建会话时选择问答来源：三种模式
 // none = 不使用知识库（纯对话）/ all = 全部知识库 / specific = 指定若干库
@@ -392,9 +394,19 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-4rem)] overflow-hidden">
-    <!-- 左侧：会话列表 -->
-    <aside class="flex w-64 flex-col border-r bg-card/50">
+  <div class="relative flex h-[calc(100vh-4rem)] overflow-hidden">
+    <!-- 移动端：打开会话列表时的遮罩 -->
+    <div
+      v-if="sidebarOpen"
+      class="absolute inset-0 z-30 bg-black/40 md:hidden"
+      @click="sidebarOpen = false"
+    />
+
+    <!-- 左侧：会话列表（移动端默认收起，从左侧滑出） -->
+    <aside
+      class="absolute inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r bg-card/50 shadow-xl transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:shadow-none"
+      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+    >
       <div class="p-3">
         <Button class="w-full" @click="openNewSessionPicker">
           <Plus class="h-4 w-4" />
@@ -450,7 +462,18 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
     <!-- 右侧：对话区 -->
     <main class="flex flex-1 flex-col">
       <!-- 会话头部：标题 + 问答范围 + 导出（显眼入口） -->
-      <div v-if="currentSessionId" class="flex items-center gap-2 border-b bg-card/50 px-4 py-2">
+      <div
+        v-if="currentSessionId"
+        class="flex flex-wrap items-center gap-2 border-b bg-card/50 px-3 py-2 md:px-4"
+      >
+        <!-- 移动端：会话列表开关 -->
+        <button
+          class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+          aria-label="会话列表"
+          @click="sidebarOpen = !sidebarOpen"
+        >
+          <Menu class="h-5 w-5" />
+        </button>
         <h2 class="min-w-0 flex-1 truncate text-sm font-semibold">{{ currentTitle }}</h2>
         <span
           class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -472,8 +495,15 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
       <div ref="messageContainer" class="flex-1 overflow-y-auto">
         <div
           v-if="!currentSessionId"
-          class="flex h-full flex-col items-center justify-center text-center"
+          class="relative flex h-full flex-col items-center justify-center text-center"
         >
+          <button
+            class="absolute left-3 top-3 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+            aria-label="会话列表"
+            @click="sidebarOpen = true"
+          >
+            <Menu class="h-5 w-5" />
+          </button>
           <BookOpen class="h-12 w-12 text-muted-foreground/40" />
           <p class="mt-3 text-sm text-muted-foreground">选择或新建一个会话开始提问</p>
         </div>

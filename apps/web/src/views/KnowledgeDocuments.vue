@@ -14,12 +14,10 @@ import {
   FolderOpen,
   FolderTree,
   Sparkles,
-  Eye,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
-import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import {
   getDocuments,
   uploadDocument,
@@ -44,7 +42,6 @@ const error = ref('');
 const uploadErrors = ref<string[]>([]); // 批量上传中失败的文件
 const fileInput = ref<HTMLInputElement | null>(null); // 多文件选择
 const dirInput = ref<HTMLInputElement | null>(null); // 目录选择
-const previewDoc = ref<Document | null>(null); // 正在预览的文档（抽屉）
 
 interface PendingFile {
   id: string;
@@ -484,8 +481,8 @@ onMounted(load);
       <p class="mt-3 text-sm text-muted-foreground">还没有文档，上传一个试试</p>
     </div>
 
-    <div v-else class="overflow-hidden rounded-lg border">
-      <table class="w-full text-sm">
+    <div v-else class="overflow-x-auto rounded-lg border">
+      <table class="w-full min-w-[760px] text-sm">
         <thead class="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
             <th class="px-4 py-3 font-medium">文件名</th>
@@ -519,14 +516,6 @@ onMounted(load);
             <td class="px-4 py-3 text-muted-foreground">{{ doc._count?.chunks ?? 0 }}</td>
             <td class="px-4 py-3 text-right">
               <div class="flex items-center justify-end gap-1">
-                <!-- 预览文本块（抽屉） -->
-                <button
-                  class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  :title="'预览 ' + doc.filename"
-                  @click="previewDoc = doc"
-                >
-                  <Eye class="h-4 w-4" />
-                </button>
                 <!-- 在线编辑（改名 / 改内容后重新向量化） -->
                 <button
                   class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -652,12 +641,5 @@ onMounted(load);
         </div>
       </div>
     </div>
-
-    <!-- 文档预览抽屉（文本块，可被聊天引用定位复用） -->
-    <DocPreviewDrawer
-      :document-id="previewDoc?.id ?? null"
-      :highlight-chunk-index="null"
-      @close="previewDoc = null"
-    />
   </div>
 </template>
