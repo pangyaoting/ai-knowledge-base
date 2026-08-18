@@ -234,10 +234,14 @@ async function handleReplace(docId: string, file: File) {
   updatingId.value = docId;
   error.value = '';
   try {
+    const oldDoc = list.value.find((d) => d.id === docId);
     // 先提交新版本（后台队列处理），等新文档处理完成后再删旧版——避免中间真空期、失败不丢旧数据
     const created = await uploadDocument(knowledgeBaseId, file);
     await waitForDoc(created.id);
-    await deleteDocument(knowledgeBaseId, docId);
+    // 若新旧文件名相同，后端队列已自动替换（旧文档已被删），无需再手动删（否则会 404 报"文档不存在"）
+    if (created.filename !== oldDoc?.filename) {
+      await deleteDocument(knowledgeBaseId, docId);
+    }
     await load();
   } catch (e) {
     error.value = (e as Error).message;

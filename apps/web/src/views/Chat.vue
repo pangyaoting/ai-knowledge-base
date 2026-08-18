@@ -94,6 +94,12 @@ const currentScope = computed<ChatSession['knowledgeBases']>(() => {
   return s?.knowledgeBases ?? [];
 });
 
+/** 当前会话标题（对话区头部显示） */
+const currentTitle = computed(() => {
+  const s = sessions.value.find((x) => x.id === currentSessionId.value);
+  return s?.title ?? '';
+});
+
 /** 会话绑定知识库的展示名（最多显示 2 个，多了折叠成"等N个"） */
 function kbNames(bound: ChatSession['knowledgeBases']): string {
   const names = bound.map((k) => k.knowledgeBase.name);
@@ -385,14 +391,14 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </span>
           <span class="shrink-0 text-xs text-muted-foreground">{{ s._count?.messages ?? 0 }}</span>
           <button
-            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-foreground"
             title="导出 Markdown"
             @click.stop="handleExportSession(s.id)"
           >
             <Download class="h-3.5 w-3.5" />
           </button>
           <button
-            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-destructive"
             title="删除会话"
             @click.stop="handleDeleteSession(s.id)"
           >
@@ -404,6 +410,21 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 
     <!-- 右侧：对话区 -->
     <main class="flex flex-1 flex-col">
+      <!-- 会话头部：标题 + 问答范围 + 导出（显眼入口） -->
+      <div v-if="currentSessionId" class="flex items-center gap-2 border-b bg-card/50 px-4 py-2">
+        <h2 class="min-w-0 flex-1 truncate text-sm font-semibold">{{ currentTitle }}</h2>
+        <span
+          v-if="currentScope.length"
+          class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          :title="currentScope.map((k) => k.knowledgeBase.name).join('、')"
+        >
+          {{ kbNames(currentScope) }}
+        </span>
+        <Button variant="ghost" size="sm" @click="handleExportSession(currentSessionId)">
+          <Download class="h-4 w-4" />
+          导出
+        </Button>
+      </div>
       <!-- 消息区 -->
       <div ref="messageContainer" class="flex-1 overflow-y-auto">
         <div
