@@ -1,12 +1,19 @@
 @echo off
+setlocal
+set "ROOT=%~dp0"
 echo ============================================
 echo   AI Knowledge Base - One-Click Start
 echo ============================================
 echo.
 
 echo [1/4] Starting WSL2 Docker and database containers...
-start "WSLDocker" /min wsl -d alpine -- sh /mnt/d/??/???/keep-docker-running.sh
-
+for /f "delims=" %%i in ('wsl -d alpine -- wslpath "%ROOT%"') do set "WSLROOT=%%i"
+if not defined WSLROOT (
+  echo [ERROR] Cannot resolve WSL path. Is WSL2 available?
+  pause
+  exit /b 1
+)
+start "WSLDocker" /min wsl -d alpine -- sh "%WSLROOT%/keep-docker-running.sh"
 echo   Waiting for database (max 90s)...
 powershell -NoProfile -Command "$t=0; while($t -lt 90){ if(Test-NetConnection -ComputerName localhost -Port 5432 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 }; Start-Sleep -Seconds 2; $t+=2 }; exit 1"
 if errorlevel 1 (
@@ -17,18 +24,28 @@ if errorlevel 1 (
 echo   Database ready.
 
 echo [2/4] Starting backend (NestJS) ...
-start "KB-Backend" /min cmd /c "D:\??\???\start-backend.bat"
-echo   Waiting for backend (max 60s)...
-powershell -NoProfile -Command "$t=0; while($t -lt 60){ if(Test-NetConnection -ComputerName localhost -Port 3000 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 }; Start-Sleep -Seconds 2; $t+=2 }; exit 1"
+powershell -NoProfile -Command "if(Test-NetConnection -ComputerName localhost -Port 3000 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 } else { exit 1 }"
 if errorlevel 1 (
-  echo [ERROR] Backend not ready in 60s. Check the KB-Backend window.
-  pause
-  exit /b 1
+  start "KB-Backend" /min cmd /c ""%ROOT%start-backend.bat""
+  echo   Waiting for backend (max 90s)...
+  powershell -NoProfile -Command "$t=0; while($t -lt 90){ if(Test-NetConnection -ComputerName localhost -Port 3000 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 }; Start-Sleep -Seconds 2; $t+=2 }; exit 1"
+  if errorlevel 1 (
+    echo [ERROR] Backend not ready in 90s. Check the KB-Backend window.
+    pause
+    exit /b 1
+  )
+) else (
+  echo   Backend already running, skipped.
 )
 echo   Backend ready.
 
 echo [3/4] Starting frontend (Vite) ...
-start "KB-Frontend" cmd /c "D:\??\???\start-frontend.bat"
+powershell -NoProfile -Command "if(Test-NetConnection -ComputerName localhost -Port 5173 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 } else { exit 1 }"
+if errorlevel 1 (
+  start "KB-Frontend" cmd /c ""%ROOT%start-frontend.bat""
+) else (
+  echo   Frontend already running, skipped.
+)
 
 echo.
 echo [4/4] All done!

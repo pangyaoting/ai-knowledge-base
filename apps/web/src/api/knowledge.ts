@@ -30,14 +30,20 @@ export function getDocuments(knowledgeBaseId: string) {
  * 上传文档（后端同步完成 解析→分块→向量化，可能耗时较长）
  * 单独放宽超时到 120 秒，避免大文档被默认 15s 超时打断
  * @param onProgress 上传进度回调（0-100，只反映 HTTP 传输阶段）
+ * @param filename 可选：自定义文档名（目录上传时传相对路径如 docs/子/a.txt）
+ * 注意：浏览器会把 multipart 文件名里的路径分隔符剥掉，所以相对路径走独立字段 name
  */
 export function uploadDocument(
   knowledgeBaseId: string,
   file: File,
   onProgress?: (percent: number) => void,
+  filename?: string,
 ) {
   const form = new FormData();
   form.append('file', file);
+  if (filename && filename !== file.name) {
+    form.append('name', filename);
+  }
   return request.post<unknown, Document>(`/knowledge/${knowledgeBaseId}/documents`, form, {
     timeout: 120_000,
     onUploadProgress: onProgress

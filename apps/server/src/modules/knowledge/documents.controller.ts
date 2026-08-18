@@ -58,8 +58,10 @@ export class DocumentsController {
     @CurrentUser('id') userId: string,
     @Param('id', ParseUUIDPipe) knowledgeBaseId: string,
     @UploadedFile() file: Express.Multer.File | undefined,
+    // 可选：自定义文档名（目录上传时前端把相对路径放这里，绕过浏览器对文件名的路径剥离）
+    @Body('name') name?: string,
   ) {
-    return this.documentsService.upload(userId, knowledgeBaseId, file);
+    return this.documentsService.upload(userId, knowledgeBaseId, file, name);
   }
 
   @Get(':id/documents')

@@ -1,9 +1,8 @@
 @echo off
-chcp 65001 >nul
-cd /d "D:\项目\主项目\apps\server"
+cd /d "%~dp0apps\server"
 set PATH=C:\Program Files\nodejs;%PATH%
-echo [1/2] 编译 TypeScript...
-"C:\Program Files\nodejs\node.exe" "D:\项目\主项目\node_modules\.pnpm\typescript@5.6.2\node_modules\typescript\bin\tsc" -p tsconfig.build.json
-echo [2/2] 启动后端服务...
+echo [1/2] Compiling TypeScript...
+"C:\Program Files\nodejs\node.exe" "%~dp0node_modules\.pnpm\typescript@5.6.2\node_modules\typescript\bin\tsc" -p tsconfig.build.json
+echo [2/2] Starting backend...
 "C:\Program Files\nodejs\node.exe" dist/main.js
 pause

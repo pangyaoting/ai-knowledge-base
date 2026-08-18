@@ -40,7 +40,12 @@ export class DocumentsService {
    * 上传并处理文档（multipart/form-data，字段名 file）
    * 流程：校验归属 → 校验文件 → 存盘 → 建 Document(processing) → 解析分块 → 状态 done/failed
    */
-  async upload(userId: string, knowledgeBaseId: string, file: Express.Multer.File | undefined) {
+  async upload(
+    userId: string,
+    knowledgeBaseId: string,
+    file: Express.Multer.File | undefined,
+    name?: string,
+  ) {
     // 1. 校验知识库归属（不属于当前用户 → 404，与知识库 CRUD 一致）
     await this.knowledgeService.findOne(userId, knowledgeBaseId);
 
@@ -59,7 +64,9 @@ export class DocumentsService {
     if (!fileType || !ALLOWED_TYPES.includes(fileType)) {
       throw new BadRequestException('仅支持 PDF / Word(.docx) / Markdown / TXT 文件');
     }
-    const originalName = fixMojibakeFilename(file.originalname); // 修复中文文件名乱码
+    // 目录上传时 name 是独立文本字段（UTF-8 正确解码，直接采用）；
+    // 普通上传走 file.originalname（busboy 按 latin1 解码，需要修复中文乱码）
+    const originalName = name ? name : fixMojibakeFilename(file.originalname);
 
     // 2.5 同名文件替换：先记住旧文档，等新文档全部处理成功后再删旧版
     //（避免新上传失败时旧版也丢了；成功前不打扰旧文档）

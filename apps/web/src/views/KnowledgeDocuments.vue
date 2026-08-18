@@ -12,6 +12,7 @@ import {
   Pencil,
   X,
   FolderOpen,
+  FolderTree,
   Sparkles,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
@@ -34,28 +35,59 @@ const knowledgeBaseId = route.params.id as string;
 const list = ref<Document[]>([]);
 const loading = ref(false);
 const uploading = ref(false);
-const uploadPercent = ref<number | null>(null); // 上传进度（0-100）
+const uploadPercent = ref<number | null>(null); // 当前文件上传进度（0-100）
+const uploadIndex = ref(0); // 批量上传：第几个
+const uploadTotal = ref(0);
 const error = ref('');
-const fileInput = ref<HTMLInputElement | null>(null);
-const selectedFile = ref<File | null>(null);
+const uploadErrors = ref<string[]>([]); // 批量上传中失败的文件
+const fileInput = ref<HTMLInputElement | null>(null); // 多文件选择
+const dirInput = ref<HTMLInputElement | null>(null); // 目录选择
+
+interface PendingFile {
+  id: string;
+  file: File;
+  name: string; // 显示名（目录上传时带相对路径）
+}
+const pendingFiles = ref<PendingFile[]>([]);
+
+const ALLOWED_RE = /\.(pdf|docx|md|markdown|txt)$/i;
 
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement;
-  selectedFile.value = input.files?.[0] ?? null;
+  addPendingFiles(Array.from(input.files ?? []));
+  input.value = '';
 }
 
-/**
- * 点击文件框时先清空 value：
- * 浏览器对"未变化的 input"不触发 change 事件，清空后重复选同一个文件也能触发
- */
-function onPickClick() {
-  if (fileInput.value) fileInput.value.value = '';
+/** 目录上传：File.webkitRelativePath 保留目录结构（如 docs/子目录/a.md） */
+function onDirChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  addPendingFiles(Array.from(input.files ?? []));
+  input.value = '';
 }
 
-/** 移除已选文件 */
+function addPendingFiles(files: File[]) {
+  const allowed = files.filter((f) => ALLOWED_RE.test(f.name));
+  if (allowed.length < files.length) {
+    error.value = `已过滤 ${files.length - allowed.length} 个不支持的文件（仅支持 PDF/Word/Markdown/TXT）`;
+  }
+  const next = allowed.map((file) => ({
+    id: crypto.randomUUID(),
+    file,
+    name: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
+  }));
+  // 同名去重（重新选择的同路径文件视为覆盖旧选择）
+  const existing = new Map(pendingFiles.value.map((p) => [p.name, p]));
+  next.forEach((p) => existing.set(p.name, p));
+  pendingFiles.value = [...existing.values()];
+}
+
+function removePending(id: string) {
+  pendingFiles.value = pendingFiles.value.filter((p) => p.id !== id);
+}
+
+/** 清空已选 */
 function clearSelection() {
-  selectedFile.value = null;
-  if (fileInput.value) fileInput.value.value = '';
+  pendingFiles.value = [];
 }
 
 async function load() {
@@ -70,22 +102,32 @@ async function load() {
   }
 }
 
-async function handleUpload() {
-  const file = selectedFile.value;
-  if (!file) return;
+/** 是否恰有一个可编辑的文本文件（txt/md），用于双击编辑 */
+const singleTextPending = computed(() => {
+  if (pendingFiles.value.length !== 1) return null;
+  const p = pendingFiles.value[0];
+  return /\.(txt|md|markdown)$/i.test(p.name) ? p : null;
+});
 
-  // 空文件直接拦截（后端也会拦，这里提前给出友好提示）
-  if (file.size === 0) {
-    error.value = '文件内容为空，无法解析';
+const totalPendingSize = computed(() => pendingFiles.value.reduce((s, p) => s + p.file.size, 0));
+
+async function handleUpload() {
+  const files = pendingFiles.value;
+  if (!files.length) return;
+
+  // 空文件拦截（整个批次先检查）
+  const empty = files.find((f) => f.file.size === 0);
+  if (empty) {
+    error.value = `「${empty.name}」内容为空，无法解析`;
     return;
   }
-  // 同名文件 → 后端会替换旧版，先确认避免误操作
-  const dup = list.value.find((d) => d.filename === file.name);
+  // 同名文件 → 后端会替换旧版，整批确认一次
+  const dup = files.find((f) => list.value.some((d) => d.filename === f.name));
   if (
     dup &&
     // eslint-disable-next-line no-alert
     !window.confirm(
-      `已存在同名文件「${file.name}」，上传后将替换旧版（旧文档及其向量数据将被删除）。继续？`,
+      `存在同名文件「${dup.name}」，上传后将替换旧版（旧文档及其向量数据将被删除）。继续？`,
     )
   ) {
     return;
@@ -93,17 +135,31 @@ async function handleUpload() {
 
   uploading.value = true;
   error.value = '';
-  uploadPercent.value = 0;
+  uploadErrors.value = [];
+  uploadTotal.value = files.length;
   try {
-    await uploadDocument(knowledgeBaseId, file, (p) => (uploadPercent.value = p));
-    selectedFile.value = null;
-    if (fileInput.value) fileInput.value.value = '';
+    // 逐个上传：单文件失败不影响后续（失败汇总展示原因）
+    for (let i = 0; i < files.length; i++) {
+      uploadIndex.value = i + 1;
+      const p = files[i];
+      try {
+        await uploadDocument(
+          knowledgeBaseId,
+          p.file,
+          (percent) => (uploadPercent.value = percent),
+          p.name,
+        );
+      } catch (e) {
+        uploadErrors.value.push(`${p.name}: ${(e as Error).message}`);
+      }
+    }
+    pendingFiles.value = [];
     await load();
-  } catch (e) {
-    error.value = (e as Error).message;
   } finally {
     uploading.value = false;
     uploadPercent.value = null;
+    uploadIndex.value = 0;
+    uploadTotal.value = 0;
   }
 }
 
@@ -210,30 +266,31 @@ const showDraftEditor = ref(false);
 const draftContent = ref('');
 const loadingDraft = ref(false);
 
-/** 纯文本类文件支持上传前在线编辑 */
-const selectedIsText = computed(() => {
-  const name = selectedFile.value?.name ?? '';
-  return /\.(txt|md|markdown)$/i.test(name);
-});
+/** 纯文本类文件支持上传前在线编辑（仅单个 txt/md 选中时） */
+const selectedIsText = computed(() => !!singleTextPending.value);
 
 async function openDraftEditor() {
-  const file = selectedFile.value;
-  if (!file) return;
+  const p = singleTextPending.value;
+  if (!p) return;
   loadingDraft.value = true;
   draftContent.value = '';
   showDraftEditor.value = true;
   try {
-    draftContent.value = await file.text();
+    draftContent.value = await p.file.text();
   } finally {
     loadingDraft.value = false;
   }
 }
 
-/** 用编辑后的文本替换待上传文件（内容变了，文件名保持不变） */
+/** 用编辑后的文本替换待上传文件（内容变了，文件名/相对路径保持不变） */
 async function saveDraft() {
-  const file = selectedFile.value;
-  if (!file) return;
-  selectedFile.value = new File([draftContent.value], file.name, { type: 'text/plain' });
+  const p = singleTextPending.value;
+  if (!p) return;
+  const edited = new File([draftContent.value], p.name, { type: 'text/plain' });
+  pendingFiles.value = [
+    { id: p.id, file: edited, name: p.name },
+    ...pendingFiles.value.filter((x) => x.id !== p.id),
+  ];
   showDraftEditor.value = false;
 }
 
@@ -272,78 +329,110 @@ onMounted(load);
       </div>
     </div>
 
-    <!-- 上传区：选择文件 → 双击编辑 → 解析文件 -->
+    <!-- 上传区：选择文件/目录 → 双击编辑 → 解析文件 -->
     <div class="mb-8 rounded-lg border border-dashed bg-card p-6">
-      <div class="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+      <div class="flex flex-col items-center gap-3">
         <input
           ref="fileInput"
           type="file"
+          multiple
           accept=".pdf,.docx,.md,.markdown,.txt"
           class="hidden"
           @change="onFileChange"
-          @click="onPickClick"
         />
-        <Button variant="outline" :disabled="uploading" @click="fileInput?.click()">
-          <FolderOpen class="h-4 w-4" />
-          选择文件
-        </Button>
-
-        <!-- 已选文件：双击可编辑（txt/md） -->
-        <div
-          v-if="selectedFile"
-          class="flex max-w-[280px] cursor-pointer items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm transition-colors hover:bg-muted"
-          :title="
-            selectedIsText
-              ? '双击编辑文本后，再点「解析文件」入库'
-              : '该类型上传后可在列表中点击编辑'
-          "
-          @dblclick="selectedIsText ? openDraftEditor() : undefined"
-        >
-          <FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span class="min-w-0 flex-1 truncate">{{ selectedFile.name }}</span>
-          <span class="shrink-0 text-xs text-muted-foreground">
-            {{ formatFileSize(selectedFile.size) }}
-          </span>
-          <button
-            class="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
-            title="移除"
-            @click="clearSelection"
-          >
-            <X class="h-3.5 w-3.5" />
-          </button>
+        <input ref="dirInput" type="file" webkitdirectory class="hidden" @change="onDirChange" />
+        <div class="flex flex-wrap items-center justify-center gap-3">
+          <Button variant="outline" :disabled="uploading" @click="fileInput?.click()">
+            <FolderOpen class="h-4 w-4" />
+            选择文件（可多选）
+          </Button>
+          <Button variant="outline" :disabled="uploading" @click="dirInput?.click()">
+            <FolderTree class="h-4 w-4" />
+            选择目录
+          </Button>
         </div>
 
-        <!-- 解析文件（上传 + 解析 + 向量化） -->
-        <Button :disabled="!selectedFile || uploading" @click="handleUpload">
-          <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
-          <Sparkles v-else class="h-4 w-4" />
-          {{ uploading ? '解析向量化中...' : '解析文件' }}
-        </Button>
-      </div>
-      <p class="mt-2 text-center text-xs text-muted-foreground">
-        {{
-          selectedIsText
-            ? '双击选中的文件可先编辑文本，再点「解析文件」入库'
-            : '选择文件后点「解析文件」；PDF/Word 上传后可在列表中点 ✏️ 在线编辑内容'
-        }}
-      </p>
-      <div v-if="uploading" class="mt-3 w-full max-w-md">
-        <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <!-- 已选文件列表：双击 txt/md 可先编辑 -->
+        <div v-if="pendingFiles.length" class="w-full max-w-xl space-y-1">
           <div
-            class="h-full bg-primary transition-all duration-200"
-            :style="{ width: (uploadPercent ?? 0) + '%' }"
-          />
+            v-for="p in pendingFiles"
+            :key="p.id"
+            class="group flex cursor-pointer items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+            :title="
+              singleTextPending?.id === p.id ? '双击编辑文本后，再点「解析文件」入库' : undefined
+            "
+            @dblclick="singleTextPending?.id === p.id && openDraftEditor()"
+          >
+            <FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span class="min-w-0 flex-1 truncate">{{ p.name }}</span>
+            <span class="shrink-0 text-xs text-muted-foreground">
+              {{ formatFileSize(p.file.size) }}
+            </span>
+            <button
+              class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+              title="移除"
+              @click="removePending(p.id)"
+            >
+              <X class="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div class="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              {{ pendingFiles.length }} 个文件 · 共 {{ formatFileSize(totalPendingSize) }}
+            </span>
+            <button class="text-destructive hover:underline" @click="clearSelection">清空</button>
+          </div>
         </div>
-        <p class="mt-2 text-center text-xs text-muted-foreground">
-          上传 {{ uploadPercent ?? 0 }}% · 解析分块向量化中（大文档可能需要十几秒）
+
+        <!-- 解析文件 -->
+        <div class="flex flex-col items-center gap-2">
+          <Button :disabled="!pendingFiles.length || uploading" @click="handleUpload">
+            <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
+            <Sparkles v-else class="h-4 w-4" />
+            {{
+              uploading
+                ? `正在解析 ${uploadIndex}/${uploadTotal}...`
+                : `解析文件${pendingFiles.length ? `（${pendingFiles.length} 个）` : ''}`
+            }}
+          </Button>
+          <p v-if="!uploading" class="text-xs text-muted-foreground">
+            {{
+              singleTextPending
+                ? '双击文件可先编辑文本，再解析入库'
+                : '支持多选文件或整目录上传；PDF/Word 上传后可在列表中点 ✏️ 在线编辑'
+            }}
+          </p>
+        </div>
+
+        <!-- 批量上传进度 -->
+        <div v-if="uploading" class="w-full max-w-md">
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              class="h-full bg-primary transition-all duration-200"
+              :style="{ width: (uploadPercent ?? 0) + '%' }"
+            />
+          </div>
+          <p class="mt-2 text-center text-xs text-muted-foreground">
+            第 {{ uploadIndex }}/{{ uploadTotal }} 个 · 上传
+            {{ uploadPercent ?? 0 }}%（大文档解析向量化可能需要十几秒）
+          </p>
+        </div>
+
+        <!-- 批量失败汇总 -->
+        <div
+          v-if="uploadErrors.length"
+          class="w-full max-w-md rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm"
+        >
+          <p class="font-medium text-destructive">以下文件处理失败：</p>
+          <ul class="mt-1 list-inside list-disc text-xs text-muted-foreground">
+            <li v-for="(msg, i) in uploadErrors" :key="i">{{ msg }}</li>
+          </ul>
+        </div>
+
+        <p v-if="error && !uploading" class="text-center text-sm text-destructive">
+          <AlertCircle class="mr-1 inline h-4 w-4" /> {{ error }}
         </p>
       </div>
-      <p
-        v-if="error"
-        class="mt-3 flex items-center justify-center gap-1.5 text-center text-sm text-destructive"
-      >
-        <AlertCircle class="h-4 w-4" /> {{ error }}
-      </p>
     </div>
 
     <!-- 文档列表 -->
