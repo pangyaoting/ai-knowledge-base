@@ -111,6 +111,20 @@ const singleTextPending = computed(() => {
 
 const totalPendingSize = computed(() => pendingFiles.value.reduce((s, p) => s + p.file.size, 0));
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 轮询文档列表，直到没有 pending/processing 的文档（后台队列处理完） */
+async function waitUntilProcessed() {
+  for (let i = 0; i < 60; i++) {
+    await load();
+    const busy = list.value.some((d) => d.status === 'pending' || d.status === 'processing');
+    if (!busy) return;
+    await sleep(2000);
+  }
+}
+
 async function handleUpload() {
   const files = pendingFiles.value;
   if (!files.length) return;
@@ -138,7 +152,7 @@ async function handleUpload() {
   uploadErrors.value = [];
   uploadTotal.value = files.length;
   try {
-    // 逐个上传：单文件失败不影响后续（失败汇总展示原因）
+    // 逐个提交（后台队列异步处理，接口秒回）；单文件提交失败不影响后续
     for (let i = 0; i < files.length; i++) {
       uploadIndex.value = i + 1;
       const p = files[i];
@@ -154,6 +168,9 @@ async function handleUpload() {
       }
     }
     pendingFiles.value = [];
+    uploadPercent.value = null; // 提交完成，进入后台处理阶段
+    // 轮询等待队列处理完毕（前端可见 排队中→解析中→已完成 的状态流转）
+    await waitUntilProcessed();
     await load();
   } finally {
     uploading.value = false;
@@ -203,12 +220,23 @@ function onReplaceFileChange(e: Event, docId: string) {
   handleReplace(docId, file);
 }
 
+/** 轮询等待指定文档处理完成（队列异步） */
+async function waitForDoc(id: string) {
+  for (let i = 0; i < 60; i++) {
+    await load();
+    const d = list.value.find((x) => x.id === id);
+    if (!d || d.status === 'done' || d.status === 'failed') return;
+    await sleep(2000);
+  }
+}
+
 async function handleReplace(docId: string, file: File) {
   updatingId.value = docId;
   error.value = '';
   try {
-    // 先上传新版本（成功后新文档已入库），再删旧文档——失败不会丢失旧数据
-    await uploadDocument(knowledgeBaseId, file);
+    // 先提交新版本（后台队列处理），等新文档处理完成后再删旧版——避免中间真空期、失败不丢旧数据
+    const created = await uploadDocument(knowledgeBaseId, file);
+    await waitForDoc(created.id);
     await deleteDocument(knowledgeBaseId, docId);
     await load();
   } catch (e) {
@@ -413,8 +441,12 @@ onMounted(load);
             />
           </div>
           <p class="mt-2 text-center text-xs text-muted-foreground">
-            第 {{ uploadIndex }}/{{ uploadTotal }} 个 · 上传
-            {{ uploadPercent ?? 0 }}%（大文档解析向量化可能需要十几秒）
+            第 {{ uploadIndex }}/{{ uploadTotal }} 个 ·
+            {{
+              uploadPercent === null
+                ? '已提交，后台解析向量化中（列表会显示状态流转）...'
+                : '上传 ' + uploadPercent + '%'
+            }}
           </p>
         </div>
 

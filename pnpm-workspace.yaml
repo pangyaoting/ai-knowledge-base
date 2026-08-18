@@ -5,9 +5,10 @@ packages:
 # pnpm 11+ 安全策略：依赖的 postinstall 脚本默认被拦截（防止供应链攻击），
 # 必须在此白名单显式放行。键名是 allowBuilds（pnpm 11 起取代 onlyBuiltDependencies），值为 true。
 allowBuilds:
-  '@nestjs/core': true   # NestJS 的 opencollective 赞助提示脚本
+  '@nestjs/core': true # NestJS 的 opencollective 赞助提示脚本
   '@prisma/client': true # 安装时自动生成 Prisma Client
   '@prisma/engines': true # 下载 Prisma 查询引擎二进制
-  esbuild: true          # 下载/链接 esbuild 平台二进制（Vite 打包依赖）
-  prisma: true           # Prisma CLI 预安装脚本
-  vue-demi: true         # 自动切换 Vue 2/3 版本（@vueuse 依赖它）
+  esbuild: true # 下载/链接 esbuild 平台二进制（Vite 打包依赖）
+  msgpackr-extract: true # BullMQ 序列化依赖的原生二进制
+  prisma: true # Prisma CLI 预安装脚本
+  vue-demi: true # 自动切换 Vue 2/3 版本（@vueuse 依赖它）

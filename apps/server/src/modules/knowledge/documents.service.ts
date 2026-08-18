@@ -5,19 +5,17 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { KnowledgeService } from './knowledge.service';
-import { EmbeddingService } from './embedding.service';
+import { DocumentQueueService } from './document-queue.service';
+import { DocumentProcessor } from './document-processor.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { cleanText, detectFileType, extractText, type DocType } from './utils/document-parser';
-import { splitText } from './utils/text-splitter';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const ALLOWED_TYPES = ['pdf', 'docx', 'md', 'txt'];
-const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
-const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
 
 /**
- * 文档服务：上传 → 解析 → 清洗 → 分块 → 存 Chunk（同步流水线）
- * 阶段 4 会升级为 BullMQ 异步队列 + 进度推送，这里先同步跑通
+ * 文档服务：上传 → 入队（异步处理）→ 状态轮询；列表/下载/编辑/删除
+ * 解析、分块、向量化已移到 DocumentProcessor（BullMQ worker 后台执行）
  */
 @Injectable()
 export class DocumentsService {
@@ -26,8 +24,9 @@ export class DocumentsService {
   constructor(
     private prisma: PrismaService,
     private knowledgeService: KnowledgeService,
-    private embeddingService: EmbeddingService,
     private configService: ConfigService,
+    private queueService: DocumentQueueService,
+    private processor: DocumentProcessor,
   ) {}
 
   /** 单文件大小上限（.env 可配 MAX_FILE_SIZE_MB，默认 20MB） */
@@ -37,8 +36,9 @@ export class DocumentsService {
   }
 
   /**
-   * 上传并处理文档（multipart/form-data，字段名 file）
-   * 流程：校验归属 → 校验文件 → 存盘 → 建 Document(processing) → 解析分块 → 状态 done/failed
+   * 上传文档（multipart/form-data，字段名 file）
+   * 流程：校验归属 → 校验文件 → 存盘 → 建 Document(pending) → 入队 → 立即返回
+   * 真正的解析/分块/向量化由队列 worker 异步执行，前端轮询文档状态
    */
   async upload(
     userId: string,
@@ -68,113 +68,42 @@ export class DocumentsService {
     // 普通上传走 file.originalname（busboy 按 latin1 解码，需要修复中文乱码）
     const originalName = name ? name : fixMojibakeFilename(file.originalname);
 
-    // 2.5 同名文件替换：先记住旧文档，等新文档全部处理成功后再删旧版
-    //（避免新上传失败时旧版也丢了；成功前不打扰旧文档）
-    const existing = await this.prisma.document.findFirst({
-      where: { knowledgeBaseId, filename: originalName },
-    });
-
     // 3. 存盘：UUID 改名防重名/防路径注入，扩展名保留
     const storedName = `${randomUUID()}.${fileType}`;
     if (!existsSync(UPLOAD_DIR)) {
       mkdirSync(UPLOAD_DIR, { recursive: true });
     }
-    const filepath = join('uploads', storedName);
     writeFileSync(join(UPLOAD_DIR, storedName), file.buffer);
 
-    // 4. 创建 Document 记录（processing）
+    // 4. 创建 Document 记录（pending：已接收，待后台处理）
     const document = await this.prisma.document.create({
       data: {
         knowledgeBaseId,
         filename: originalName,
-        filepath,
+        filepath: join('uploads', storedName),
         fileSize: file.size,
         fileType,
-        status: 'processing',
+        status: 'pending',
       },
     });
 
-    try {
-      // 5. 解析 → 清洗
-      const rawText = await extractText(file.buffer, fileType);
-      const cleaned = cleanText(rawText);
-      if (!cleaned) {
-        throw new Error('未能从文档中提取到文本（可能是扫描件或不含文字的 PDF）');
-      }
+    // 5. 入队并立即返回（解析/分块/向量化在后台执行，接口响应 <1s）
+    await this.queueService.addDocumentJob({
+      documentId: document.id,
+      knowledgeBaseId,
+      storedName,
+      fileType,
+      originalName,
+    });
+    this.logger.log(`文档已入队: ${originalName} (${document.id})`);
 
-      // 6-8. 分块 + 向量化（与在线编辑共用同一管线）
-      const chunkCount = await this.indexText(document.id, cleaned);
-      this.logger.log(`向量化完成: ${file.originalname} → ${chunkCount} 个向量(1024维)`);
-
-      // 9. 状态 → done，返回带 chunk 数量
-      const updated = await this.prisma.document.update({
-        where: { id: document.id },
-        data: { status: 'done' },
-        include: { _count: { select: { chunks: true } } },
-      });
-
-      // 9.5 新文档成功 → 删除旧版（chunk 由外键级联删除，磁盘文件手动删）
-      if (existing) {
-        await this.prisma.document.delete({ where: { id: existing.id } });
-        try {
-          unlinkSync(join(process.cwd(), existing.filepath));
-        } catch {
-          /* 文件可能已不存在，忽略 */
-        }
-        this.logger.log(`同名文件替换: ${originalName}（旧文档 ${existing.id} 已删除）`);
-      }
-
-      this.logger.log(
-        `文档处理完成: ${file.originalname} (${file.size} bytes) → ${chunkCount} 个 chunk`,
-      );
-      return updated;
-    } catch (err) {
-      // 失败：全量清理（磁盘文件 + chunk + Document 行），不留"解析失败"的残渣记录
-      try {
-        unlinkSync(join(UPLOAD_DIR, storedName));
-      } catch {
-        /* 文件可能不存在，忽略 */
-      }
-      await this.prisma.chunk.deleteMany({ where: { documentId: document.id } });
-      await this.prisma.document.delete({ where: { id: document.id } }).catch(() => undefined);
-      const message = (err as Error).message || '解析失败';
-      this.logger.warn(`文档处理失败（已全量清理）: ${file.originalname} → ${message}`);
-      throw new BadRequestException(`文档解析失败：${message}`);
-    }
+    return this.prisma.document.findUnique({
+      where: { id: document.id },
+      include: { _count: { select: { chunks: true } } },
+    });
   }
 
-  /**
-   * 把清洗后的文本重新分块并向量化（上传与在线编辑共用）：
-   * 删旧 chunk → 建新 chunk → 批量调 bge-m3 写回 embedding → 返回 chunk 数
-   */
-  private async indexText(documentId: string, cleaned: string): Promise<number> {
-    const chunks = splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
-    // 编辑场景会残留旧块，先清掉再建（上传场景此刻还没有 chunk，等同空操作）
-    await this.prisma.chunk.deleteMany({ where: { documentId } });
-    await this.prisma.chunk.createMany({
-      data: chunks.map((content, index) => ({
-        documentId,
-        content,
-        chunkIndex: index,
-      })),
-    });
-    const created = await this.prisma.chunk.findMany({
-      where: { documentId },
-      select: { id: true, content: true },
-      orderBy: { chunkIndex: 'asc' },
-    });
-    const vectors = await this.embeddingService.embedTexts(created.map((c) => c.content));
-    await this.prisma.$transaction(async (tx) => {
-      for (let i = 0; i < created.length; i++) {
-        await tx.$executeRaw`
-          UPDATE "chunks" SET "embedding" = ${toPgVector(vectors[i])}::vector WHERE "id" = ${created[i].id}
-        `;
-      }
-    });
-    return chunks.length;
-  }
-
-  /** 文档列表（带 chunk 数量） */
+  /** 文档列表（带 chunk 数量；前端据此轮询处理状态） */
   async findAll(userId: string, knowledgeBaseId: string) {
     await this.knowledgeService.findOne(userId, knowledgeBaseId);
     return this.prisma.document.findMany({
@@ -280,8 +209,8 @@ export class DocumentsService {
         data.fileType = 'txt';
       }
       data.fileSize = Buffer.byteLength(cleaned, 'utf8');
-      // 重新分块 + 向量化（复用上传管线）
-      const chunkCount = await this.indexText(documentId, cleaned);
+      // 重新分块 + 向量化（与队列处理共用同一管线）
+      const chunkCount = await this.processor.indexText(documentId, cleaned);
       data.status = 'done';
       this.logger.log(`文档内容已编辑并重新向量化: ${doc.filename} → ${chunkCount} 个 chunk`);
     }
@@ -292,11 +221,6 @@ export class DocumentsService {
       include: { _count: { select: { chunks: true } } },
     });
   }
-}
-
-/** 数字数组 → pgvector 字面量字符串，如 [0.1,0.2,...] → "[0.1,0.2,...]" */
-function toPgVector(vector: number[]): string {
-  return `[${vector.join(',')}]`;
 }
 
 /**
