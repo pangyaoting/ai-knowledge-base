@@ -122,12 +122,14 @@ model SessionKnowledgeBase {
 // 流式回答结束后才落库（中间态不写库），sources 存引用来源 JSON
 
 model ChatMessage {
-  id        String    @id @default(uuid())
-  sessionId String    @map("session_id")
-  role      String // user / assistant
-  content   String // 完整消息内容
-  sources   Json? // 引用来源：[{ documentId, filename, chunkIndex, content, similarity }]
-  createdAt DateTime  @default(now()) @map("created_at")
+  id               String   @id @default(uuid())
+  sessionId        String   @map("session_id")
+  role             String // user / assistant
+  content          String // 完整消息内容
+  sources          Json? // 引用来源：[{ documentId, filename, chunkIndex, content, similarity }]
+  promptTokens     Int?     @map("prompt_tokens") // 流式请求输入 token（数据看板用）
+  completionTokens Int?     @map("completion_tokens") // 流式请求输出 token
+  createdAt        DateTime @default(now()) @map("created_at")
 
   session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 

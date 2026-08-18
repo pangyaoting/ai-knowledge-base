@@ -177,12 +177,15 @@ export class ChatService {
     signal.addEventListener('abort', onAbort, { once: true });
 
     let answer = '';
+    // 流式 usage（stream_options.include_usage）：最后一个 chunk 携带本次请求的 token 用量
+    let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
     try {
       const stream = await this.client.chat.completions.create(
         {
           model: this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat'),
           messages: [{ role: 'system', content: system }, ...messages],
           stream: true,
+          stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
         },
         { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
       );
@@ -192,6 +195,9 @@ export class ChatService {
         if (delta) {
           answer += delta;
           writer('delta', { content: delta });
+        }
+        if (part.usage) {
+          usage = part.usage; // 流式结束时的 usage chunk
         }
       }
     } catch (err) {
@@ -205,7 +211,7 @@ export class ChatService {
       signal.removeEventListener('abort', onAbort);
     }
 
-    // ⑥ 流式结束：落库助手消息 + 引用来源（知识库 + 网络）
+    // ⑥ 流式结束：落库助手消息 + 引用来源（知识库 + 网络）+ Token 用量
     await this.prisma.chatMessage.create({
       data: {
         sessionId,
@@ -213,6 +219,8 @@ export class ChatService {
         content: answer,
         // JSON.parse(JSON.stringify()) 转成纯 JSON，兼容各版本 Prisma 客户端类型
         sources: JSON.parse(JSON.stringify({ kb: kbSources, web: webSources })),
+        promptTokens: usage?.prompt_tokens ?? null,
+        completionTokens: usage?.completion_tokens ?? null,
       },
     });
 
