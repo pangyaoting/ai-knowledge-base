@@ -45,26 +45,52 @@ const useWebSearch = ref(false); // 联网检索开关
 const kbs = ref<KnowledgeBase[]>([]);
 const showKbPicker = ref(false);
 const pickerMode = ref<'create' | 'edit'>('create'); // create=新建会话 / edit=修改当前会话范围
-const pickingAll = ref(true); // 全部知识库
+const pickingAll = ref(true); // 全部知识库（后端语义：空列表 = 全部）
 const pickingKbIds = ref<string[]>([]);
+
+/**
+ * "全部知识库"与每个库勾选状态双向联动：
+ * - 勾"全部" → 每个库都显示为已勾选
+ * - 手动勾满所有库 → "全部"自动勾上
+ * - 在"全部"下取消某个库 → 退出全部模式，其余保持勾选
+ */
+const allSelected = computed(
+  () =>
+    pickingAll.value || (kbs.value.length > 0 && pickingKbIds.value.length === kbs.value.length),
+);
+
+function kbChecked(id: string): boolean {
+  return pickingAll.value || pickingKbIds.value.includes(id);
+}
+
+function toggleAll() {
+  if (allSelected.value) {
+    // 取消"全部"：进入指定模式并清空勾选（空 = 检索全部，界面有提示）
+    pickingAll.value = false;
+    pickingKbIds.value = [];
+  } else {
+    pickingAll.value = true;
+    pickingKbIds.value = [];
+  }
+}
+
+function toggleKb(id: string) {
+  if (pickingAll.value) {
+    // 在"全部"模式下取消某个库 → 退出全部模式，改为"除它之外全部"
+    pickingAll.value = false;
+    pickingKbIds.value = kbs.value.map((k) => k.id).filter((x) => x !== id);
+    return;
+  }
+  const i = pickingKbIds.value.indexOf(id);
+  if (i >= 0) pickingKbIds.value.splice(i, 1);
+  else pickingKbIds.value.push(id);
+}
 
 /** 当前会话绑定的知识库（用于顶部的"问答范围"标签） */
 const currentScope = computed<ChatSession['knowledgeBases']>(() => {
   const s = sessions.value.find((x) => x.id === currentSessionId.value);
   return s?.knowledgeBases ?? [];
 });
-
-function toggleAll() {
-  pickingAll.value = !pickingAll.value;
-  if (pickingAll.value) pickingKbIds.value = [];
-}
-
-function toggleKb(id: string) {
-  const i = pickingKbIds.value.indexOf(id);
-  if (i >= 0) pickingKbIds.value.splice(i, 1);
-  else pickingKbIds.value.push(id);
-  pickingAll.value = pickingKbIds.value.length === 0;
-}
 
 /** 会话绑定知识库的展示名（最多显示 2 个，多了折叠成"等N个"） */
 function kbNames(bound: ChatSession['knowledgeBases']): string {
@@ -145,11 +171,11 @@ async function openEditScope() {
   showKbPicker.value = true;
 }
 
-/** 确认：新建会话 或 修改当前会话范围 */
+/** 确认：新建会话 或 修改当前会话范围（空勾选 = 检索全部） */
 async function confirmCreateSession() {
   showKbPicker.value = false;
   if (streaming.value) return;
-  const ids = pickingAll.value ? [] : [...pickingKbIds.value];
+  const ids = pickingAll.value || pickingKbIds.value.length === 0 ? [] : [...pickingKbIds.value];
   try {
     if (pickerMode.value === 'edit' && currentSessionId.value) {
       await updateSessionKnowledgeBases(currentSessionId.value, ids);
@@ -573,9 +599,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <div class="mt-4 max-h-72 space-y-1.5 overflow-y-auto">
           <label
             class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
-            :class="pickingAll ? 'border-primary' : ''"
+            :class="allSelected ? 'border-primary' : ''"
           >
-            <input type="checkbox" class="h-3.5 w-3.5" :checked="pickingAll" @change="toggleAll" />
+            <input type="checkbox" class="h-3.5 w-3.5" :checked="allSelected" @change="toggleAll" />
             <span class="font-medium">全部知识库</span>
             <span class="ml-auto text-xs text-muted-foreground">搜索你所有知识库</span>
           </label>
@@ -583,12 +609,12 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             v-for="kb in kbs"
             :key="kb.id"
             class="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm transition-colors hover:bg-accent"
-            :class="pickingKbIds.includes(kb.id) ? 'border-primary' : ''"
+            :class="kbChecked(kb.id) ? 'border-primary' : ''"
           >
             <input
               type="checkbox"
               class="h-3.5 w-3.5"
-              :checked="pickingKbIds.includes(kb.id)"
+              :checked="kbChecked(kb.id)"
               @change="toggleKb(kb.id)"
             />
             <span class="min-w-0 flex-1 truncate font-medium">{{ kb.name }}</span>
@@ -598,6 +624,12 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </label>
           <p v-if="kbs.length === 0" class="py-4 text-center text-xs text-muted-foreground">
             还没有知识库，先去「知识库」页上传文档
+          </p>
+          <p
+            v-else-if="!allSelected && pickingKbIds.length === 0"
+            class="py-2 text-center text-xs text-muted-foreground"
+          >
+            未勾选任何库时将检索全部知识库
           </p>
         </div>
         <div class="mt-5 flex justify-end gap-2">
