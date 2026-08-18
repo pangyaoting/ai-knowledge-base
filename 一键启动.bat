@@ -1,13 +1,15 @@
 @echo off
 setlocal
 set "ROOT=%~dp0"
+set "ROOTN=%ROOT:~0,-1%"
 echo ============================================
 echo   AI Knowledge Base - One-Click Start
 echo ============================================
 echo.
 
 echo [1/4] Starting WSL2 Docker and database containers...
-for /f "delims=" %%i in ('wsl -d alpine -- wslpath "%ROOT%"') do set "WSLROOT=%%i"
+rem ROOTN 去掉结尾反斜杠，避免 wslpath "D:\...\" 的 \" 转义引号导致 sh 语法错误
+for /f "delims=" %%i in ('wsl -d alpine -- wslpath "%ROOTN%"') do set "WSLROOT=%%i"
 if not defined WSLROOT (
   echo [ERROR] Cannot resolve WSL path. Is WSL2 available?
   pause
