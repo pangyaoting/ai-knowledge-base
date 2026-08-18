@@ -6,11 +6,13 @@ import {
   FileText,
   Loader2,
   Trash2,
-  Upload,
   AlertCircle,
   Download,
   RefreshCw,
   Pencil,
+  X,
+  FolderOpen,
+  Sparkles,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -47,6 +49,12 @@ function onFileChange(e: Event) {
  * 浏览器对"未变化的 input"不触发 change 事件，清空后重复选同一个文件也能触发
  */
 function onPickClick() {
+  if (fileInput.value) fileInput.value.value = '';
+}
+
+/** 移除已选文件 */
+function clearSelection() {
+  selectedFile.value = null;
   if (fileInput.value) fileInput.value.value = '';
 }
 
@@ -264,33 +272,61 @@ onMounted(load);
       </div>
     </div>
 
-    <!-- 上传区 -->
+    <!-- 上传区：选择文件 → 双击编辑 → 解析文件 -->
     <div class="mb-8 rounded-lg border border-dashed bg-card p-6">
       <div class="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
         <input
           ref="fileInput"
           type="file"
           accept=".pdf,.docx,.md,.markdown,.txt"
-          class="block w-full max-w-md text-sm file:mr-4 file:rounded-md file:border-0 file:bg-primary file:px-4 file:py-2 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
+          class="hidden"
           @change="onFileChange"
           @click="onPickClick"
         />
+        <Button variant="outline" :disabled="uploading" @click="fileInput?.click()">
+          <FolderOpen class="h-4 w-4" />
+          选择文件
+        </Button>
+
+        <!-- 已选文件：双击可编辑（txt/md） -->
+        <div
+          v-if="selectedFile"
+          class="flex max-w-[280px] cursor-pointer items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm transition-colors hover:bg-muted"
+          :title="
+            selectedIsText
+              ? '双击编辑文本后，再点「解析文件」入库'
+              : '该类型上传后可在列表中点击编辑'
+          "
+          @dblclick="selectedIsText ? openDraftEditor() : undefined"
+        >
+          <FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span class="min-w-0 flex-1 truncate">{{ selectedFile.name }}</span>
+          <span class="shrink-0 text-xs text-muted-foreground">
+            {{ formatFileSize(selectedFile.size) }}
+          </span>
+          <button
+            class="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
+            title="移除"
+            @click="clearSelection"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <!-- 解析文件（上传 + 解析 + 向量化） -->
         <Button :disabled="!selectedFile || uploading" @click="handleUpload">
           <Loader2 v-if="uploading" class="h-4 w-4 animate-spin" />
-          <Upload v-else class="h-4 w-4" />
-          {{ uploading ? '解析向量化中...' : '上传并解析' }}
-        </Button>
-        <!-- txt/md 支持上传前在线编辑 -->
-        <Button
-          v-if="selectedIsText && !uploading"
-          variant="outline"
-          :disabled="!selectedFile"
-          @click="openDraftEditor"
-        >
-          <Pencil class="h-4 w-4" />
-          编辑文本
+          <Sparkles v-else class="h-4 w-4" />
+          {{ uploading ? '解析向量化中...' : '解析文件' }}
         </Button>
       </div>
+      <p class="mt-2 text-center text-xs text-muted-foreground">
+        {{
+          selectedIsText
+            ? '双击选中的文件可先编辑文本，再点「解析文件」入库'
+            : '选择文件后点「解析文件」；PDF/Word 上传后可在列表中点 ✏️ 在线编辑内容'
+        }}
+      </p>
       <div v-if="uploading" class="mt-3 w-full max-w-md">
         <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
@@ -412,7 +448,8 @@ onMounted(load);
       >
         <h3 class="text-base font-semibold">编辑文档</h3>
         <p class="mt-1 text-xs text-muted-foreground">
-          修改后自动重新分块并向量化，之后的问题按新内容检索
+          修改后自动重新分块并向量化，之后的问题按新内容检索。
+          修改只更新知识库中的版本；需要本地副本请用列表中的「下载」。
         </p>
         <div class="mt-4 space-y-3">
           <div class="space-y-1.5">
