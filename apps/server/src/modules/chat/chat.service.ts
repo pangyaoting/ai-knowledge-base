@@ -147,7 +147,7 @@ export class ChatService {
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
     const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
-    // ① 历史对话（最近 3 轮，不含当前提问）：先按时间倒序取最近 N 条，再反转回时间正序
+    // ① 历史对话（最近 3 轮）：先按时间倒序取最近 N 条，再反转回时间正序
     //（注意：不能 orderBy asc + take，那会取到【最早】的 N 条——上下文会越聊越旧）
     const history = await this.prisma.chatMessage.findMany({
       where: { sessionId },

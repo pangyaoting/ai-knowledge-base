@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from '../knowledge/embedding.service';
+import { RerankService } from '../knowledge/rerank.service';
 
 /** 检索命中的来源片段 */
 export interface RetrievalSource {
@@ -27,10 +28,13 @@ const RRF_K = 60; // RRF 平滑常数（论文默认值）
  */
 @Injectable()
 export class RagService {
+  private readonly logger = new Logger(RagService.name);
+
   constructor(
     private prisma: PrismaService,
     private embeddingService: EmbeddingService,
     private configService: ConfigService,
+    private rerankService: RerankService,
   ) {}
 
   /** 向量相似度下限（.env 可配 MIN_SIMILARITY，默认 0.35）低于它的片段视为噪声丢弃 */
@@ -132,15 +136,34 @@ export class RagService {
           LIMIT ${limit}
         `;
 
-    // 3. RRF 融合：score = Σ 1/(k + rank)，按融合分排序取 Top-K
-    return rrfMerge(vectorRows, keywordRows, topK).map((r) => ({
+    // 3. RRF 融合：召回粗排 Top-N（多取一些，给精排留余地）
+    const merged = rrfMerge(vectorRows, keywordRows, Math.max(topK * 3, 15));
+
+    // 4. 两阶段精排：交叉编码器重排 → 截断 Top-K（重排不可用/失败时回退 RRF 顺序）
+    const toSource = (r: RawRow) => ({
       chunkId: r.chunk_id,
       content: r.content,
       chunkIndex: r.chunk_index,
       documentId: r.document_id,
       filename: r.filename,
       similarity: Number(r.similarity),
-    }));
+    });
+    if (merged.length <= topK) {
+      return merged.map(toSource);
+    }
+    const order = await this.rerankService.rerank(
+      question,
+      merged.map((r) => r.content),
+      topK,
+    );
+    if (!order) {
+      return merged.slice(0, topK).map(toSource);
+    }
+    this.logger.log(`两阶段检索: 召回 ${merged.length} 条 → 重排截断 ${order.length} 条`);
+    return order
+      .map((i) => merged[i])
+      .filter((r): r is RawRow => !!r)
+      .map(toSource);
   }
 }
 

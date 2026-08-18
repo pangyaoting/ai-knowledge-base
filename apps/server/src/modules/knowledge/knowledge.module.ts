@@ -6,6 +6,7 @@ import { DocumentsService } from './documents.service';
 import { EmbeddingService } from './embedding.service';
 import { DocumentProcessor } from './document-processor.service';
 import { DocumentQueueService } from './document-queue.service';
+import { RerankService } from './rerank.service';
 import { DemoController } from './demo.controller';
 import { DemoService } from './demo.service';
 
@@ -17,8 +18,9 @@ import { DemoService } from './demo.service';
     EmbeddingService,
     DocumentProcessor,
     DocumentQueueService,
+    RerankService,
     DemoService,
   ],
-  exports: [KnowledgeService, EmbeddingService], // 供 ChatModule 的 RagService 注入
+  exports: [KnowledgeService, EmbeddingService, RerankService], // 供 ChatModule 的 RagService 注入
 })
 export class KnowledgeModule {}

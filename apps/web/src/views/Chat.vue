@@ -391,13 +391,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </span>
           <span class="shrink-0 text-xs text-muted-foreground">{{ s._count?.messages ?? 0 }}</span>
           <button
-            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-foreground"
-            title="导出 Markdown"
-            @click.stop="handleExportSession(s.id)"
-          >
-            <Download class="h-3.5 w-3.5" />
-          </button>
-          <button
             class="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-destructive"
             title="删除会话"
             @click.stop="handleDeleteSession(s.id)"
@@ -420,7 +413,12 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         >
           {{ kbNames(currentScope) }}
         </span>
-        <Button variant="ghost" size="sm" @click="handleExportSession(currentSessionId)">
+        <Button
+          variant="ghost"
+          size="sm"
+          title="把本次对话导出为 Markdown 文件"
+          @click="handleExportSession(currentSessionId)"
+        >
           <Download class="h-4 w-4" />
           导出
         </Button>
@@ -676,14 +674,18 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </p>
           <p
             v-else-if="!allSelected && pickingKbIds.length === 0"
-            class="py-2 text-center text-xs text-muted-foreground"
+            class="py-2 text-center text-xs text-destructive"
           >
-            未勾选任何库时将检索全部知识库
+            还没有选任何知识库，请勾选「全部知识库」或至少一个库再提交
           </p>
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <Button variant="ghost" size="sm" @click="showKbPicker = false">取消</Button>
-          <Button size="sm" @click="confirmCreateSession">
+          <Button
+            size="sm"
+            :disabled="!allSelected && pickingKbIds.length === 0"
+            @click="confirmCreateSession"
+          >
             {{ pickerMode === 'create' ? '开始对话' : '保存修改' }}
           </Button>
         </div>
