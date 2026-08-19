@@ -1,6 +1,6 @@
 @echo off
 rem Frontend start (idempotent: skip if port 5173 already in use)
-powershell -NoProfile -Command "if(Test-NetConnection -ComputerName localhost -Port 5173 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 } else { exit 1 }"
+call "%~dp0check-port.bat" 5173
 if not errorlevel 1 (
   echo [SKIP] Frontend already running on port 5173.
   exit /b 0

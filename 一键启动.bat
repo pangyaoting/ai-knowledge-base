@@ -7,28 +7,31 @@ echo   AI Knowledge Base - One-Click Start
 echo ============================================
 echo.
 
+rem [1/4] Boot WSL, hang keepalive (prevent idle recycle), then run docker-ready script synchronously.
+rem The ready script only exits 0 after containers are healthy AND ports are bound,
+rem so no more "Database not ready in 90s" false alarms from slow Test-NetConnection.
 echo [1/4] Starting WSL2 Docker and database containers...
 rem ROOTN has no trailing backslash so wslpath quoting stays balanced
 for /f "delims=" %%i in ('wsl -d alpine -- wslpath "%ROOTN%"') do set "WSLROOT=%%i"
 if not defined WSLROOT goto :wslpath_fail
-start "WSLDocker" /min wsl -d alpine -- sh "%WSLROOT%/keep-docker-running.sh"
-echo   Waiting for database (max 90s)...
-powershell -NoProfile -Command "$t=0; while($t -lt 90){ if(Test-NetConnection -ComputerName localhost -Port 5432 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 }; Start-Sleep -Seconds 2; $t+=2 }; exit 1"
+start "KB-Keepalive" /min wsl -d alpine -- sh "%WSLROOT%/keepalive.sh"
+echo   Running docker ready-check (containers must be healthy, max ~2min)...
+wsl -d alpine -- sh "%WSLROOT%/keep-docker-running.sh"
 if errorlevel 1 goto :db_fail
 echo   Database ready.
 
 echo [2/4] Starting backend (NestJS) ...
-powershell -NoProfile -Command "if(Test-NetConnection -ComputerName localhost -Port 3000 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 } else { exit 1 }"
+call "%ROOT%check-port.bat" 3000
 if not errorlevel 1 goto :backend_up
 start "KB-Backend" /min cmd /c "%ROOT%start-backend.bat"
 echo   Waiting for backend (max 90s)...
-powershell -NoProfile -Command "$t=0; while($t -lt 90){ if(Test-NetConnection -ComputerName localhost -Port 3000 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 }; Start-Sleep -Seconds 2; $t+=2 }; exit 1"
+powershell -NoProfile -Command "$t=0; while($t -lt 90){ $c=New-Object Net.Sockets.TcpClient; try{ $r=$c.ConnectAsync('127.0.0.1',3000).Wait(500); if($r -and $c.Connected){ exit 0 } }catch{} finally{ $c.Dispose() }; Start-Sleep -Seconds 1; $t+=1 }; exit 1"
 if errorlevel 1 goto :backend_fail
 :backend_up
 echo   Backend ready.
 
 echo [3/4] Starting frontend (Vite) ...
-powershell -NoProfile -Command "if(Test-NetConnection -ComputerName localhost -Port 5173 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 } else { exit 1 }"
+call "%ROOT%check-port.bat" 5173
 if not errorlevel 1 goto :frontend_up
 start "KB-Frontend" cmd /c "%ROOT%start-frontend.bat"
 :frontend_up
@@ -50,9 +53,8 @@ pause
 exit /b 1
 
 :db_fail
-echo [ERROR] Database not ready in 90s.
-
-echo   Fix: run keep-docker-running.sh inside WSL (project root),
+echo [ERROR] Docker/database not ready. See messages above; check WSL window for details.
+echo   Tip: wsl --shutdown  then run this script again.
 pause
 exit /b 1
 

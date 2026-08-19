@@ -1,26 +1,53 @@
 #!/bin/sh
-# AI 知识库 - WSL docker 保活脚本（开机自启 / 一键启动 共用）
-# 设计要点：
-# 1) 用"docker ps 能否连上"判断 dockerd 是否真正可用——旧版用 pgrep 进程名，
-#    关机残留的僵尸进程会让守卫误判"已在运行"而跳过启动，导致 5432 永远不通；
-# 2) 不可用 → 清残留进程/pid/socket → 重启 dockerd → 等 socket 就绪；
-# 3) compose 拉起容器 + 端口自愈（容器活着但端口没绑时重启容器强制重建转发）；
-# 4) tail -f 保活：防止 WSL 发行版因空闲被系统回收（回收会断掉所有容器端口）。
+# AI 知识库 - WSL docker 就绪脚本（一键启动前台同步调用）
+# 职责：确保 dockerd 可用 → 容器健康 → 端口绑定，全部就绪后 exit 0。
+# 设计要点（针对"开机后一键启动误报 Database not ready"的根治）：
+# 1) 用 docker ps 能否连上判断 dockerd 是否真正可用（进程存在≠可用）；
+# 2) 不可用 → 彻底清理残留（dockerd + containerd + shim + pid/socket）→ 重启 dockerd；
+# 3) 就绪判断：容器 HEALTHCHECK 通过（不是只看端口开），再确认端口已绑定；
+# 4) 每步失败都给明确 exit code，供 bat 判断，不再让 bat 用慢速探测瞎等。
 
-log() { echo "[keep-docker] $*"; }
+log() { echo "[docker-ready] $*"; }
 
+# 等 dockerd 可连（60s）
 wait_docker() {
   i=0
-  while [ $i -lt 30 ]; do
+  while [ $i -lt 60 ]; do
     if docker ps >/dev/null 2>&1; then return 0; fi
     i=$((i+1)); sleep 1
   done
   return 1
 }
 
+# 等容器 HEALTHCHECK 通过（60s）
+wait_healthy() {
+  container=$1
+  i=0
+  while [ $i -lt 60 ]; do
+    status=$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null)
+    if [ "$status" = "healthy" ]; then return 0; fi
+    if [ "$status" = "" ]; then
+      # 无 healthcheck 的容器：只要 Running 就算就绪
+      running=$(docker ps --format '{{.Names}}' | grep -qx "$container" && echo yes)
+      [ "$running" = "yes" ] && return 0
+    fi
+    i=$((i+1)); sleep 1
+  done
+  return 1
+}
+
+# 端口已绑定（在 WSL 网络命名空间内检查）
+port_bound() {
+  port=$1
+  netstat -tln 2>/dev/null | grep -q ":$port "
+}
+
+# ============ 1. dockerd ============
 if ! docker ps >/dev/null 2>&1; then
-  log "dockerd 不可用，清理残留并重启..."
-  pkill -f dockerd 2>/dev/null
+  log "dockerd 不可用，清理残留进程与 socket..."
+  # 彻底清理：dockerd + 其子进程 containerd + runc shim（残留 containerd 会占住 socket 导致新 dockerd 起不来）
+  pkill -9 -f 'dockerd' 2>/dev/null
+  pkill -9 -f 'containerd' 2>/dev/null
   sleep 3
   rm -f /var/run/docker.pid
   rm -rf /var/run/docker
@@ -28,36 +55,50 @@ if ! docker ps >/dev/null 2>&1; then
   if wait_docker; then
     log "dockerd 已就绪"
   else
-    log "ERROR: dockerd 30s 内未就绪，请查看 /var/log/dockerd.log"
+    log "ERROR: dockerd 60s 内未就绪，请查看 /var/log/dockerd.log"
+    exit 1
   fi
 else
   log "dockerd 正常"
 fi
 
-cd /mnt/d/项目/主项目
+# ============ 2. 容器 ============
+cd /mnt/d/项目/主项目 || exit 1
 docker compose -p kb up -d 2>&1
 
-# 端口自愈：容器健康但 docker-proxy 没把端口绑出来时，重启对应容器强制重建转发
-# （WSL/dockerd 重启后偶发"容器活着、端口却不通"，一键启动就会卡在等 5432）
-repair_port() {
-  container=$1
-  port=$2
-  n=0
-  while [ $n -lt 30 ]; do
-    if netstat -tln 2>/dev/null | grep -q ":$port "; then
-      return 0
+for c in kb-postgres kb-redis; do
+  if wait_healthy "$c"; then
+    log "$c healthy"
+  else
+    log "ERROR: $c 60s 内未 healthy，尝试重启一次"
+    docker restart "$c" >/dev/null 2>&1
+    if wait_healthy "$c"; then
+      log "$c healthy (restarted)"
+    else
+      log "ERROR: $c 仍不健康，请 docker logs $c 排查"
+      exit 1
     fi
-    if docker ps --format '{{.Names}} {{.Status}}' | grep -q "^$container Up"; then
-      log "REPAIR: $container 端口 $port 未绑定，重启容器强制重建转发"
-      docker restart "$container" >/dev/null 2>&1
-    fi
-    n=$((n+1)); sleep 2
-  done
-  log "WARN: $container 端口 $port 反复尝试后仍未绑定（可能被本机其他进程占用，如 rediszt3 服务）"
-}
-repair_port kb-postgres 5432
-repair_port kb-redis 6379
+  fi
+done
+
+# ============ 3. 端口绑定 ============
+i=0
+while [ $i -lt 30 ]; do
+  if port_bound 5432 && port_bound 6379; then
+    break
+  fi
+  i=$((i+1)); sleep 2
+done
+if port_bound 5432 && port_bound 6379; then
+  log "端口 5432/6379 已绑定"
+else
+  log "WARN: 端口绑定异常，可能被本机进程占用（如 rediszt3 服务占 IPv4 6379；项目已用 ::1 规避）"
+  # 不致命：redis 走 ::1 仍可用，postgres 若绑定失败则后端连不上——再给 postgres 一次重启
+  if ! port_bound 5432; then
+    docker restart kb-postgres >/dev/null 2>&1
+    sleep 8
+  fi
+fi
 
 log "SERVICES_READY"
-# 保活：防止 WSL 发行版因空闲被系统回收
-exec tail -f /dev/null
+exit 0

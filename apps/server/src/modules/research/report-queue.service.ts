@@ -27,6 +27,8 @@ export class ReportQueueService implements OnApplicationBootstrap, OnApplication
       port: this.configService.get<number>('REDIS_PORT', 6379),
       password: this.configService.get<string>('REDIS_PASSWORD') || undefined,
       maxRetriesPerRequest: null, // BullMQ 必需：等待期间不限制重试
+      // 显式重连策略：Redis 重启（如 WSL 冷启动后 docker 恢复）时 worker 才能可靠恢复消费
+      retryStrategy: (times: number) => Math.min(times * 500, 5000),
     };
   }
 
