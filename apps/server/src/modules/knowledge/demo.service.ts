@@ -79,6 +79,7 @@ export class DemoService {
         },
       });
       await this.queueService.addDocumentJob({
+        userId,
         documentId: document.id,
         knowledgeBaseId: kb.id,
         storedName,

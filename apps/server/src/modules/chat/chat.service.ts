@@ -1,5 +1,4 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
@@ -21,7 +20,6 @@ const HISTORY_ROUNDS = 6; // 历史对话最多保留最近 3 轮（6 条）
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
-  private client: OpenAI;
 
   constructor(
     private prisma: PrismaService,
@@ -29,22 +27,7 @@ export class ChatService {
     private webSearchService: WebSearchService,
     private graphService: GraphService,
     private modelConfigService: ModelConfigService,
-    private configService: ConfigService,
-  ) {
-    this.client = new OpenAI({
-      apiKey: this.configService.get<string>('DEEPSEEK_API_KEY'),
-      baseURL: this.configService.get<string>('DEEPSEEK_BASE_URL'),
-    });
-  }
-
-  /** 系统默认模型（对话之外的辅助调用：查询改写/标题等） */
-  private get systemTarget(): ChatTarget {
-    return {
-      apiKey: this.configService.get<string>('DEEPSEEK_API_KEY', ''),
-      baseURL: this.configService.get<string>('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
-      model: this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat'),
-    };
-  }
+  ) {}
 
   // ==================== 会话管理 ====================
 
@@ -214,6 +197,19 @@ export class ChatService {
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
     const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
+    // 模型目标（BYO 强依赖）：会话绑定的配置 → 用户的默认配置 → 都没有则提示先绑定 Key。
+    // 所有 token 消耗由用户自己的 Key 承担，系统不提供兜底模型。
+    const target =
+      (await this.modelConfigService.resolveForChat(userId, session.modelConfigId)) ??
+      (await this.modelConfigService.resolveDefaultForUser(userId));
+    if (!target) {
+      writer('error', {
+        message:
+          '使用前请先在「模型配置」里绑定你自己的大模型 API Key（设置 → 模型配置，或对话页右上角「模型」入口）。绑定后本会话所有 AI 消耗都由你的 Key 承担。',
+      });
+      return;
+    }
+
     // ① 历史对话（最近 3 轮）：先按时间倒序取最近 N 条，再反转回时间正序
     //（注意：不能 orderBy asc + take，那会取到【最早】的 N 条——上下文会越聊越旧）
     const history = await this.prisma.chatMessage.findMany({
@@ -229,7 +225,9 @@ export class ChatService {
     //    纯对话模式（不用知识库也不联网）不需要检索 → 跳过改写，省一次 LLM 调用。
     const needRetrieval = useKnowledgeBase || useWebSearch;
     const searchQuery =
-      history.length && needRetrieval ? await this.rewriteQuery(question, history) : question;
+      history.length && needRetrieval
+        ? await this.rewriteQuery(question, history, target)
+        : question;
 
     // ③ 检索（并行）：知识库向量+关键词混合检索（纯对话模式跳过）+ 可选联网搜索（用改写后的查询）
     const kbScope = kbIds.length ? kbIds : undefined;
@@ -277,11 +275,7 @@ export class ChatService {
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
-    // 模型目标：会话绑定了用户模型配置（BYO key）→ 用用户的 key/baseURL/model 出回答，
-    // token 由用户买单；未绑定 → 系统默认模型。
-    const target =
-      (await this.modelConfigService.resolveForChat(userId, session.modelConfigId)) ??
-      this.systemTarget;
+    // 模型目标已在开头解析（会话绑定 → 用户默认配置），token 全部由用户自己的 Key 承担。
     const answerClient = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
@@ -441,10 +435,12 @@ export class ChatService {
   private async rewriteQuery(
     question: string,
     history: Array<{ role: string; content: string }>,
+    target: ChatTarget,
   ): Promise<string> {
     try {
-      const res = await this.client.chat.completions.create({
-        model: this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat'),
+      const client = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
+      const res = await client.chat.completions.create({
+        model: target.model,
         messages: [
           {
             role: 'system',

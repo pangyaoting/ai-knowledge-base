@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from '../chat/rag.service';
+import { ModelConfigService, ChatTarget } from '../models/model-config.service';
 
 export interface ReportJobData {
   userId: string;
@@ -28,31 +28,29 @@ interface ReportSource {
  * ① 主题拆解成 3~5 个子问题 → ② 每个子问题检索知识库 + 撰写小节（并行）
  * → ③ 汇总成完整 Markdown 报告（引言/正文/结论，保留 [来源N] 标注）。
  * 报告耗时 1~2 分钟，所以走异步队列；status/step 供前端轮询进度。
+ * BYO 强依赖：所有 LLM 调用都使用用户自己的默认模型配置，token 由用户承担；
+ * 未绑定配置 → 报告直接标记 failed 并提示先去「模型配置」绑定。
  */
 @Injectable()
 export class ReportProcessor {
   private readonly logger = new Logger(ReportProcessor.name);
-  private client: OpenAI;
 
   constructor(
     private prisma: PrismaService,
     private ragService: RagService,
-    private configService: ConfigService,
-  ) {
-    this.client = new OpenAI({
-      apiKey: this.configService.get<string>('DEEPSEEK_API_KEY'),
-      baseURL: this.configService.get<string>('DEEPSEEK_BASE_URL'),
-    });
-  }
+    private modelConfigService: ModelConfigService,
+  ) {}
 
-  private get model(): string {
-    return this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat');
-  }
-
-  /** 一次 LLM 补全（非流式） */
-  private async complete(system: string, user: string, maxTokens = 1200): Promise<string> {
-    const res = await this.client.chat.completions.create({
-      model: this.model,
+  /** 一次 LLM 补全（非流式，使用用户自己的模型配置） */
+  private async complete(
+    target: ChatTarget,
+    system: string,
+    user: string,
+    maxTokens = 1200,
+  ): Promise<string> {
+    const client = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
+    const res = await client.chat.completions.create({
+      model: target.model,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -70,13 +68,28 @@ export class ReportProcessor {
       where: { id: reportId, ownerId: userId },
     });
     if (!report) return;
+
+    // BYO：必须先绑定用户自己的默认模型配置，否则不消耗系统任何 token
+    const target = await this.modelConfigService.resolveDefaultForUser(userId);
+    if (!target) {
+      await this.prisma.report.update({
+        where: { id: reportId },
+        data: {
+          status: 'failed',
+          error:
+            '请先在「模型配置」绑定你自己的大模型 API Key（个人中心入口已移动到导航栏「模型配置」），再重新生成报告。',
+        },
+      });
+      return;
+    }
+
     try {
       // ① 拆解子问题
       await this.prisma.report.update({
         where: { id: reportId },
         data: { status: 'processing', step: 1 },
       });
-      const subQuestions = await this.splitTopic(report.topic);
+      const subQuestions = await this.splitTopic(target, report.topic);
 
       // ② 每个子问题：检索 + 撰写小节（并行，来源编号全局统一）
       await this.prisma.report.update({ where: { id: reportId }, data: { step: 2 } });
@@ -99,7 +112,7 @@ export class ReportProcessor {
             }
             return { ...s, num };
           });
-          const content = await this.writeSection(question, numbered);
+          const content = await this.writeSection(target, question, numbered);
           sections.push({ index, question, content });
         }),
       );
@@ -107,7 +120,7 @@ export class ReportProcessor {
 
       // ③ 汇总成完整报告
       await this.prisma.report.update({ where: { id: reportId }, data: { step: 3 } });
-      const content = await this.mergeReport(report.topic, sections);
+      const content = await this.mergeReport(target, report.topic, sections);
       await this.prisma.report.update({
         where: { id: reportId },
         data: {
@@ -131,8 +144,9 @@ export class ReportProcessor {
   }
 
   /** 主题 → 子问题列表（JSON 解析失败时按行拆分回退） */
-  private async splitTopic(topic: string): Promise<string[]> {
+  private async splitTopic(target: ChatTarget, topic: string): Promise<string[]> {
     const raw = await this.complete(
+      target,
       '你是研究规划助手。把用户的研究主题拆解为 3~5 个具体的子问题，覆盖该主题的主要方面，用于后续检索资料和分节撰写。只输出 JSON 字符串数组，如 ["子问题一","子问题二"]，不要任何其他内容。',
       `研究主题：${topic}`,
       300,
@@ -157,6 +171,7 @@ export class ReportProcessor {
 
   /** 单个小节：检索片段 + 撰写（[来源N] 编号与全局一致） */
   private async writeSection(
+    target: ChatTarget,
     question: string,
     sources: Array<RetrievalSource & { num: number }>,
   ): Promise<string> {
@@ -166,6 +181,7 @@ export class ReportProcessor {
           .join('\n\n')
       : '（未检索到相关资料）';
     return this.complete(
+      target,
       '你是严谨的研究撰写助手。根据【资料】撰写本小节内容，引用时标注 [来源N]（编号与资料一致）；资料没有的信息不要编造，可基于自身知识补充并注明"（补充）"。输出 Markdown。',
       `【资料】\n${sourceText}\n\n【小节主题】\n${question}`,
       1000,
@@ -173,9 +189,14 @@ export class ReportProcessor {
   }
 
   /** 汇总：引言 + 各小节 + 结论 */
-  private async mergeReport(topic: string, sections: ReportSection[]): Promise<string> {
+  private async mergeReport(
+    target: ChatTarget,
+    topic: string,
+    sections: ReportSection[],
+  ): Promise<string> {
     const body = sections.map((s) => `### ${s.question}\n\n${s.content}`).join('\n\n');
     return this.complete(
+      target,
       '你是研究报告主编。根据各小节内容输出一份完整的研究报告 Markdown：标题、引言（说明研究主题与资料范围）、正文（按小节组织，保留各小节的 [来源N] 标注）、结论（总结要点与资料局限）。不要遗漏小节内容，不要编造来源编号。',
       `【研究主题】\n${topic}\n\n【各小节内容】\n\n${body}`,
       2500,

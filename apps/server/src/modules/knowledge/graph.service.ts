@@ -1,8 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { KnowledgeService } from './knowledge.service';
+import { ModelConfigService, ChatTarget } from '../models/model-config.service';
 
 const EXTRACT_MAX_CHARS = 4000; // 抽取时喂给 LLM 的文本上限（控制成本）
 const EXPAND_LIMIT = 5; // 多跳扩展最多追加的关联片段数
@@ -31,35 +31,34 @@ export interface GraphEdge {
  * - 抽取：文档处理时用 LLM 抽"实体 + 关系"，实体关联到出现的 chunk（多跳检索取回原文）；
  * - 多跳扩展：问题命中实体 → 沿关系找到相邻实体 → 取回它们的原文片段，作为额外证据；
  * - 图查询：聚合节点/边，供前端"知识网络"可视化。
+ * BYO 强依赖：抽取用的 LLM 必须是用户自己的默认模型配置（token 用户承担）；
+ * 未绑定配置时跳过抽取（图谱是增强环节，不影响文档入库）。
  */
 @Injectable()
 export class GraphService {
   private readonly logger = new Logger(GraphService.name);
-  private client: OpenAI;
 
   constructor(
     private prisma: PrismaService,
     private knowledgeService: KnowledgeService,
-    private configService: ConfigService,
-  ) {
-    this.client = new OpenAI({
-      apiKey: this.configService.get<string>('DEEPSEEK_API_KEY'),
-      baseURL: this.configService.get<string>('DEEPSEEK_BASE_URL'),
-    });
-  }
-
-  private get model(): string {
-    return this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat');
-  }
+    private modelConfigService: ModelConfigService,
+  ) {}
 
   // ==================== 抽取 ====================
 
   /**
    * 从文档抽取实体/关系并落库（幂等：先删该文档旧图谱再写入）。
    * 实体按名称去重，并把"名称出现在哪些 chunk"记录到 chunkIds（多跳取回原文用）。
-   * 抽取失败只记录日志，不抛错（图谱是增强，不应影响文档处理主流程）。
+   * 用户未绑定模型配置时跳过抽取（日志记录）；抽取失败只记录日志，不抛错
+   * （图谱是增强，不应影响文档处理主流程）。
    */
-  async extractFromDocument(documentId: string): Promise<void> {
+  async extractFromDocument(userId: string, documentId: string): Promise<void> {
+    const target = await this.modelConfigService.resolveDefaultForUser(userId);
+    if (!target) {
+      this.logger.log(`图谱抽取跳过（用户 ${userId} 未绑定模型配置）`);
+      return;
+    }
+
     const doc = await this.prisma.document.findUnique({
       where: { id: documentId },
       select: { id: true, knowledgeBaseId: true, filename: true },
@@ -73,7 +72,7 @@ export class GraphService {
     });
     if (chunks.length === 0) return;
 
-    const result = await this.extractWithLLM(chunks.map((c) => c.content).join('\n'));
+    const result = await this.extractWithLLM(target, chunks.map((c) => c.content).join('\n'));
     // 先清旧图谱（重新抽取幂等）
     await this.prisma.$transaction([
       this.prisma.graphEntity.deleteMany({ where: { documentId } }),
@@ -120,12 +119,13 @@ export class GraphService {
     );
   }
 
-  /** LLM 抽取（JSON 解析失败时回退为空结果，不抛错） */
-  private async extractWithLLM(text: string): Promise<ExtractResult> {
+  /** LLM 抽取（使用用户自己的模型配置；JSON 解析失败时回退为空结果，不抛错） */
+  private async extractWithLLM(target: ChatTarget, text: string): Promise<ExtractResult> {
     const truncated = text.slice(0, EXTRACT_MAX_CHARS);
     try {
-      const res = await this.client.chat.completions.create({
-        model: this.model,
+      const client = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
+      const res = await client.chat.completions.create({
+        model: target.model,
         messages: [
           {
             role: 'system',
@@ -156,17 +156,17 @@ export class GraphService {
   /** 重建某个知识库全部已完成文档的图谱（fire-and-forget，前端轮询图数据） */
   async rebuild(knowledgeBaseId: string, userId: string) {
     await this.knowledgeService.findOne(userId, knowledgeBaseId);
-    void this.rebuildInternal(knowledgeBaseId);
+    void this.rebuildInternal(knowledgeBaseId, userId);
     return { success: true };
   }
 
-  private async rebuildInternal(knowledgeBaseId: string) {
+  private async rebuildInternal(knowledgeBaseId: string, userId: string) {
     const docs = await this.prisma.document.findMany({
       where: { knowledgeBaseId, status: 'done' },
       select: { id: true },
     });
     for (const doc of docs) {
-      await this.extractFromDocument(doc.id).catch((err) =>
+      await this.extractFromDocument(userId, doc.id).catch((err) =>
         this.logger.warn(`图谱重建失败 ${doc.id}: ${(err as Error).message}`),
       );
     }

@@ -61,8 +61,13 @@ const defaultModelConfigId = computed(
   () => modelConfigs.value.find((c) => c.isDefault)?.id ?? null,
 );
 
-/** 当前会话使用的模型名（null = 系统默认） */
-const currentModelName = computed(() => currentSession.value?.modelConfig?.name ?? '系统默认');
+/** 当前会话使用的模型名（未绑定 = 跟随默认配置；没有默认配置时提示未绑定） */
+const currentModelName = computed(() => {
+  const bound = currentSession.value?.modelConfig;
+  if (bound) return bound.name;
+  if (modelConfigs.value.length === 0) return '未绑定模型';
+  return '默认配置';
+});
 
 async function loadModelConfigs() {
   try {
@@ -753,11 +758,16 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             <span class="shrink-0 text-muted-foreground">修改</span>
           </button>
 
-          <!-- 模型选择（BYO 大模型 API：系统默认 / 用户自带 Key） -->
+          <!-- 模型选择（BYO 大模型 API：默认配置 / 会话绑定） -->
           <span class="shrink-0 text-muted-foreground">模型</span>
           <div class="relative">
             <button
-              class="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
+              class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
+              :class="
+                modelConfigs.length === 0
+                  ? 'border-destructive/40 bg-destructive/5 text-destructive'
+                  : 'border bg-muted/40'
+              "
               :title="'当前模型：' + currentModelName + '（点击切换，Token 按所选模型计费）'"
               @click="modelDropdownOpen = !modelDropdownOpen"
             >
@@ -774,14 +784,22 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 :class="!currentSession?.modelConfigId ? 'text-primary' : ''"
                 @click="selectModel(null)"
               >
-                <span>系统默认</span>
+                <span>默认配置</span>
                 <span v-if="!currentSession?.modelConfigId" class="text-xs">✓</span>
               </button>
-              <p v-if="modelConfigs.length === 0" class="px-3 py-1.5 text-xs text-muted-foreground">
-                去「个人中心-模型配置」绑定你自己的 API Key
+              <div class="border-t" />
+              <p v-if="modelConfigs.length === 0" class="px-3 py-2 text-xs text-muted-foreground">
+                还没有绑定任何模型 Key，AI 功能无法使用。
               </p>
+              <RouterLink
+                v-if="modelConfigs.length === 0"
+                to="/model-configs"
+                class="flex items-center gap-1 px-3 py-2 text-xs font-medium text-primary hover:underline"
+                @click="modelDropdownOpen = false"
+              >
+                去「模型配置」绑定自己的 API Key →
+              </RouterLink>
               <template v-else>
-                <div class="border-t" />
                 <button
                   v-for="c in modelConfigs"
                   :key="c.id"

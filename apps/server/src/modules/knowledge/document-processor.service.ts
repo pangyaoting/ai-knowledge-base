@@ -13,6 +13,7 @@ const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
 
 /** 文档处理任务的数据载荷 */
 export interface DocumentJobData {
+  userId: string; // 归属用户（图谱抽取用用户的模型配置，BYO）
   documentId: string;
   knowledgeBaseId: string;
   storedName: string; // 磁盘文件名（uploads/uuid.txt）
@@ -35,7 +36,7 @@ export class DocumentProcessor {
   ) {}
 
   async processDocument(data: DocumentJobData): Promise<void> {
-    const { documentId, storedName, fileType, originalName, knowledgeBaseId } = data;
+    const { documentId, storedName, fileType, originalName, knowledgeBaseId, userId } = data;
     const absPath = join(UPLOAD_DIR, storedName);
     try {
       if (!existsSync(absPath)) {
@@ -58,9 +59,9 @@ export class DocumentProcessor {
       // 分块 + 向量化
       const chunkCount = await this.indexText(documentId, cleaned);
 
-      // 知识图谱抽取（增强环节：失败不影响文档主流程）
+      // 知识图谱抽取（增强环节：使用用户自己的模型配置，未绑定则自动跳过；失败不影响文档主流程）
       await this.graphService
-        .extractFromDocument(documentId)
+        .extractFromDocument(userId, documentId)
         .catch((err) =>
           this.logger.warn(`图谱抽取失败 ${originalName}: ${(err as Error).message}`),
         );

@@ -80,6 +80,11 @@ async function handleLogout() {
             <RouterLink to="/dashboard">
               <Button variant="ghost" size="sm">数据看板</Button>
             </RouterLink>
+            <RouterLink to="/model-configs">
+              <Button variant="outline" size="sm" class="ml-1 border-primary/40 text-primary">
+                模型配置
+              </Button>
+            </RouterLink>
           </nav>
         </div>
 
@@ -100,6 +105,9 @@ async function handleLogout() {
             </RouterLink>
             <RouterLink to="/dashboard" @click="mobileNavOpen = false">
               <Button variant="ghost" size="sm" class="w-full justify-start">数据看板</Button>
+            </RouterLink>
+            <RouterLink to="/model-configs" @click="mobileNavOpen = false">
+              <Button variant="ghost" size="sm" class="w-full justify-start">模型配置</Button>
             </RouterLink>
           </nav>
         </template>

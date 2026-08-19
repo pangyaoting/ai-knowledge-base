@@ -3,9 +3,9 @@ import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { Login2faDto } from './dto/login-2fa.dto';
-import { Enable2faDto } from './dto/enable-2fa.dto';
-import { Disable2faDto } from './dto/disable-2fa.dto';
+import { SendCodeDto } from './dto/send-code.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { BindEmailDto } from './dto/bind-email.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -17,9 +17,17 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Post('send-code')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '发送邮箱验证码（注册/忘记密码/换绑邮箱；开发模式验证码随响应返回）' })
+  sendCode(@Body() dto: SendCodeDto) {
+    return this.authService.sendCode(dto.email, dto.type);
+  }
+
+  @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: '注册' })
+  @ApiOperation({ summary: '注册（邮箱 + 验证码 + 密码）' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
@@ -27,17 +35,17 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '登录（开启 2FA 的用户返回 need2fa + loginToken，走第二步）' })
+  @ApiOperation({ summary: '登录（邮箱 + 密码）' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
   @Public()
-  @Post('login/2fa')
+  @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '登录第二步：动态码 / 恢复码换取正式 Token' })
-  login2fa(@Body() dto: Login2faDto) {
-    return this.authService.login2fa(dto.loginToken, dto.code);
+  @ApiOperation({ summary: '忘记密码（邮箱 + 验证码 → 设置新密码）' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
   }
 
   @Public()
@@ -60,46 +68,17 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Get('profile')
-  @ApiOperation({ summary: '获取当前登录用户信息（含 2FA 状态）' })
+  @ApiOperation({ summary: '获取当前登录用户信息' })
   getProfile(@CurrentUser('id') userId: string) {
     return this.authService.getProfile(userId);
   }
 
-  // ==================== 双因素认证（TOTP）====================
-
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @Post('2fa/generate')
+  @Post('bind-email')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '生成 2FA 绑定材料（base32 密钥 + otpauth URI）' })
-  generate2fa(@CurrentUser('id') userId: string) {
-    return this.authService.generate2fa(userId);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Post('2fa/enable')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '绑定：校验动态码后启用 2FA，返回一次性恢复码' })
-  enable2fa(@CurrentUser('id') userId: string, @Body() dto: Enable2faDto) {
-    return this.authService.enable2fa(userId, dto.code);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Post('2fa/verify')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '校验当前动态码（设置页实时验证）' })
-  verify2fa(@CurrentUser('id') userId: string, @Body() dto: Enable2faDto) {
-    return this.authService.verify2fa(userId, dto.code);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @Post('2fa/disable')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: '关闭 2FA（需验证当前密码）' })
-  disable2fa(@CurrentUser('id') userId: string, @Body() dto: Disable2faDto) {
-    return this.authService.disable2fa(userId, dto.password);
+  @ApiOperation({ summary: '更换邮箱绑定（验证新邮箱 + 验证码）' })
+  bindEmail(@CurrentUser('id') userId: string, @Body() dto: BindEmailDto) {
+    return this.authService.bindEmail(userId, dto);
   }
 }

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { Brain, Loader2, MailCheck } from 'lucide-vue-next';
-import { useAuthStore } from '@/stores/auth';
-import { sendCode } from '@/api/auth';
+import { KeyRound, Loader2, CheckCircle2 } from 'lucide-vue-next';
+import { sendCode, forgotPassword } from '@/api/auth';
 import Card from '@/components/ui/Card.vue';
 import CardHeader from '@/components/ui/CardHeader.vue';
 import CardTitle from '@/components/ui/CardTitle.vue';
@@ -15,7 +14,6 @@ import Label from '@/components/ui/Label.vue';
 import Button from '@/components/ui/Button.vue';
 
 const router = useRouter();
-const auth = useAuthStore();
 
 // 第一步：邮箱 + 验证码
 const step = ref<1 | 2>(1);
@@ -26,16 +24,16 @@ const form = reactive({
 const sending = ref(false);
 const countdown = ref(0);
 const stepError = ref('');
-const codeHint = ref(''); // 开发模式：验证码随响应返回，自动填入并提示
+const codeHint = ref('');
 
-// 第二步：设置密码
+// 第二步：设置新密码
 const pwdForm = reactive({
   password: '',
   confirm: '',
-  nickname: '',
 });
 const loading = ref(false);
 const errorMsg = ref('');
+const success = ref(false);
 
 let timer: ReturnType<typeof setInterval> | null = null;
 onUnmounted(() => {
@@ -45,7 +43,6 @@ onUnmounted(() => {
 const canSend = computed(() => countdown.value <= 0 && !!form.email.trim());
 const emailValid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()));
 
-/** 发送验证码（60 秒重发限制由后端控制，前端倒计时兜底防误触） */
 async function handleSendCode() {
   stepError.value = '';
   if (!emailValid.value) {
@@ -54,7 +51,7 @@ async function handleSendCode() {
   }
   sending.value = true;
   try {
-    const res = await sendCode(form.email.trim(), 'register');
+    const res = await sendCode(form.email.trim(), 'forgot');
     countdown.value = 60;
     if (timer) clearInterval(timer);
     timer = setInterval(() => {
@@ -64,7 +61,6 @@ async function handleSendCode() {
         timer = null;
       }
     }, 1000);
-    // 开发模式：后端未配置 SMTP，验证码直接随响应返回 → 自动填入方便本地联调
     if (res.devMode && res.code) {
       form.code = res.code;
       codeHint.value = '（开发模式）验证码已自动填入：' + res.code;
@@ -78,7 +74,6 @@ async function handleSendCode() {
   }
 }
 
-/** 第一步校验通过 → 设置密码 */
 function goNext() {
   stepError.value = '';
   if (!emailValid.value) {
@@ -97,11 +92,10 @@ function goBack() {
   errorMsg.value = '';
 }
 
-/** 完成注册（后端会再次校验验证码） */
 async function handleSubmit() {
   errorMsg.value = '';
   if (pwdForm.password.length < 6) {
-    errorMsg.value = '密码至少 6 位';
+    errorMsg.value = '新密码至少 6 位';
     return;
   }
   if (pwdForm.password !== pwdForm.confirm) {
@@ -111,13 +105,12 @@ async function handleSubmit() {
 
   loading.value = true;
   try {
-    await auth.register({
+    await forgotPassword({
       email: form.email.trim(),
       code: form.code.trim(),
-      password: pwdForm.password,
-      nickname: pwdForm.nickname.trim() || undefined,
+      newPassword: pwdForm.password,
     });
-    router.push('/');
+    success.value = true;
   } catch (e) {
     errorMsg.value = (e as Error).message;
   } finally {
@@ -135,17 +128,24 @@ async function handleSubmit() {
         <div
           class="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
         >
-          <Brain class="h-6 w-6" />
+          <KeyRound class="h-6 w-6" />
         </div>
-        <CardTitle class="text-2xl">创建账号</CardTitle>
+        <CardTitle class="text-2xl">找回密码</CardTitle>
         <CardDescription>
-          {{ step === 1 ? '验证邮箱后设置密码' : '最后一步：设置登录密码' }}
+          {{ step === 1 ? '验证邮箱后设置新密码' : '最后一步：设置新密码' }}
         </CardDescription>
       </CardHeader>
 
       <CardContent>
-        <!-- 第一步：邮箱验证 -->
-        <form v-if="step === 1" class="space-y-4" @submit.prevent="goNext">
+        <!-- 成功：跳转登录 -->
+        <div v-if="success" class="space-y-4 text-center">
+          <CheckCircle2 class="mx-auto h-12 w-12 text-green-600" />
+          <p class="text-sm text-muted-foreground">密码已重置成功，请使用新密码登录。</p>
+          <Button class="w-full" @click="router.push('/login')">去登录</Button>
+        </div>
+
+        <!-- 第一步：邮箱 + 验证码 -->
+        <form v-else-if="step === 1" class="space-y-4" @submit.prevent="goNext">
           <div
             v-if="stepError"
             class="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
@@ -154,7 +154,7 @@ async function handleSubmit() {
           </div>
 
           <div class="space-y-2">
-            <Label for="email">真实邮箱</Label>
+            <Label for="email">注册邮箱</Label>
             <Input
               id="email"
               v-model="form.email"
@@ -199,15 +199,8 @@ async function handleSubmit() {
           </Button>
         </form>
 
-        <!-- 第二步：设置密码 -->
+        <!-- 第二步：设置新密码 -->
         <form v-else class="space-y-4" @submit.prevent="handleSubmit">
-          <div
-            class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground"
-          >
-            <MailCheck class="h-4 w-4 text-green-600" />
-            <span class="truncate">已验证邮箱：{{ form.email }}</span>
-          </div>
-
           <div
             v-if="errorMsg"
             class="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
@@ -216,7 +209,7 @@ async function handleSubmit() {
           </div>
 
           <div class="space-y-2">
-            <Label for="password">设置密码</Label>
+            <Label for="password">新密码</Label>
             <Input
               id="password"
               v-model="pwdForm.password"
@@ -227,24 +220,13 @@ async function handleSubmit() {
           </div>
 
           <div class="space-y-2">
-            <Label for="confirm">确认密码</Label>
+            <Label for="confirm">确认新密码</Label>
             <Input
               id="confirm"
               v-model="pwdForm.confirm"
               type="password"
-              placeholder="再次输入密码"
+              placeholder="再次输入新密码"
               autocomplete="new-password"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Label for="nickname">昵称（选填）</Label>
-            <Input
-              id="nickname"
-              v-model="pwdForm.nickname"
-              type="text"
-              placeholder="你的昵称"
-              autocomplete="nickname"
             />
           </div>
 
@@ -254,7 +236,7 @@ async function handleSubmit() {
             </Button>
             <Button type="submit" class="flex-1" :disabled="loading">
               <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
-              {{ loading ? '注册中...' : '完成注册' }}
+              {{ loading ? '提交中...' : '重置密码' }}
             </Button>
           </div>
         </form>
@@ -262,7 +244,7 @@ async function handleSubmit() {
 
       <CardFooter class="justify-center">
         <p class="text-sm text-muted-foreground">
-          已有账号？
+          想起密码了？
           <RouterLink to="/login" class="text-primary hover:underline">去登录</RouterLink>
         </p>
       </CardFooter>

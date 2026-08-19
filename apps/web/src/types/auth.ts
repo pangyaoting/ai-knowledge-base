@@ -4,7 +4,6 @@ export interface UserInfo {
   email: string;
   nickname: string | null;
   avatar: string | null;
-  totpEnabled?: boolean;
 }
 
 // 登录/注册返回
@@ -14,33 +13,16 @@ export interface AuthResult {
   user: UserInfo;
 }
 
-/** 登录第一步：开启 2FA 的用户返回 need2fa + loginToken，走第二步 */
-export interface LoginStep1Result {
-  need2fa: true;
-  loginToken: string;
-  user: { email: string };
-}
-
-/** 2FA 绑定材料 */
-export interface TwoFactorSetup {
-  secret: string;
-  otpauthUrl: string;
-}
-
-/** 启用 2FA 后的一次性恢复码 */
-export interface TwoFactorEnabled {
-  recoveryCodes: string[];
-}
-
 // 登录参数
 export interface LoginPayload {
   email: string;
   password: string;
 }
 
-// 注册参数
+// 注册参数（邮箱 + 验证码 + 密码）
 export interface RegisterPayload {
   email: string;
+  code: string;
   password: string;
   nickname?: string;
 }

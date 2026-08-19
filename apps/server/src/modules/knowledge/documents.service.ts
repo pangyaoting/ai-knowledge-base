@@ -92,6 +92,7 @@ export class DocumentsService {
 
     // 5. 入队并立即返回（解析/分块/向量化在后台执行，接口响应 <1s）
     await this.queueService.addDocumentJob({
+      userId,
       documentId: document.id,
       knowledgeBaseId,
       storedName,

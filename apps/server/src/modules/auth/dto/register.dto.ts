@@ -1,10 +1,15 @@
-import { IsEmail, IsString, MinLength, MaxLength, IsOptional } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsOptional, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
   @ApiProperty({ example: 'user@example.com', description: '邮箱' })
   @IsEmail({}, { message: '邮箱格式不正确' })
   email!: string;
+
+  @ApiProperty({ example: '123456', description: '邮箱验证码（发送到该邮箱）' })
+  @IsString({ message: '验证码格式不正确' })
+  @Length(6, 6, { message: '验证码为 6 位数字' })
+  code!: string;
 
   @ApiProperty({ example: '123456', description: '密码（至少6位）' })
   @IsString()

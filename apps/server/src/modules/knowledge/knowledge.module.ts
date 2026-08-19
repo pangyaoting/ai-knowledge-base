@@ -11,8 +11,10 @@ import { DemoController } from './demo.controller';
 import { DemoService } from './demo.service';
 import { GraphService } from './graph.service';
 import { GraphController } from './graph.controller';
+import { ModelsModule } from '../models/models.module'; // 图谱抽取用用户默认模型配置（BYO key）
 
 @Module({
+  imports: [ModelsModule],
   controllers: [KnowledgeController, DocumentsController, DemoController, GraphController],
   providers: [
     KnowledgeService,

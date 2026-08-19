@@ -17,6 +17,12 @@ const router = createRouter({
       meta: { public: true },
     },
     {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('@/views/ForgotPassword.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('@/views/Layout.vue'),
       children: [
@@ -59,6 +65,11 @@ const router = createRouter({
           path: 'settings',
           name: 'settings',
           component: () => import('@/views/Settings.vue'),
+        },
+        {
+          path: 'model-configs',
+          name: 'model-configs',
+          component: () => import('@/views/ModelConfigs.vue'),
         },
       ],
     },

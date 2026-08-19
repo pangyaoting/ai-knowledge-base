@@ -16,9 +16,11 @@ import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import { getReports, getReport, createReport, deleteReport } from '@/api/research';
 import { getKnowledgeBases } from '@/api/knowledge';
+import { getModelConfigs } from '@/api/model-configs';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import type { Report, ReportSource } from '@/types/research';
 import type { KnowledgeBase } from '@/types/knowledge';
+import type { ModelConfig } from '@/types/model-config';
 
 // ==================== 状态 ====================
 const reports = ref<Report[]>([]);
@@ -32,6 +34,16 @@ const creating = ref(false);
 const kbs = ref<KnowledgeBase[]>([]);
 const scope = ref<'all' | 'specific'>('all'); // 检索范围：全部 / 指定
 const pickingKbIds = ref<string[]>([]);
+
+// BYO：报告生成使用用户默认模型配置（未绑定则无法生成，用于前端引导提示）
+const modelConfigs = ref<ModelConfig[]>([]);
+async function loadModelConfigs() {
+  try {
+    modelConfigs.value = await getModelConfigs();
+  } catch {
+    modelConfigs.value = [];
+  }
+}
 
 // 文档预览抽屉（点击来源定位原文）
 const previewDocId = ref<string | null>(null);
@@ -234,6 +246,7 @@ onMounted(async () => {
   if (reports.value.length > 0) {
     await selectReport(reports.value[0].id);
   }
+  await loadModelConfigs();
 });
 
 onBeforeUnmount(stopPolling);
@@ -295,6 +308,21 @@ onBeforeUnmount(stopPolling);
         class="flex flex-1 flex-col items-center justify-center overflow-y-auto p-6"
       >
         <div class="w-full max-w-2xl">
+          <!-- 未绑定模型：前置引导（报告生成依赖用户自己的 Key） -->
+          <div
+            v-if="modelConfigs.length === 0"
+            class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm"
+          >
+            <span class="text-muted-foreground">
+              研究报告由你自己的大模型 Key 生成，请先绑定模型配置
+            </span>
+            <RouterLink
+              to="/model-configs"
+              class="shrink-0 font-medium text-primary hover:underline"
+            >
+              去绑定 →
+            </RouterLink>
+          </div>
           <div class="mb-6 text-center">
             <BookOpen class="mx-auto h-12 w-12 text-primary/60" />
             <h1 class="mt-3 text-2xl font-bold tracking-tight">研究报告</h1>
@@ -359,13 +387,22 @@ onBeforeUnmount(stopPolling);
             <Button
               class="mt-4 w-full"
               :disabled="
-                creating || !topic.trim() || (scope === 'specific' && pickingKbIds.length === 0)
+                creating ||
+                modelConfigs.length === 0 ||
+                !topic.trim() ||
+                (scope === 'specific' && pickingKbIds.length === 0)
               "
               @click="handleCreate"
             >
               <Loader2 v-if="creating" class="h-4 w-4 animate-spin" />
               <Sparkles v-else class="h-4 w-4" />
-              {{ creating ? '提交中...' : '开始生成报告' }}
+              {{
+                creating
+                  ? '提交中...'
+                  : modelConfigs.length === 0
+                    ? '请先绑定模型配置'
+                    : '开始生成报告'
+              }}
             </Button>
             <p class="mt-2 text-center text-[11px] text-muted-foreground">
               生成约需 1~2 分钟（异步任务），完成后可导出 Markdown

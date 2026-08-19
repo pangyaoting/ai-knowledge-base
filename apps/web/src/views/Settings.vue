@@ -1,35 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onUnmounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { updateProfile, changePassword } from '@/api/user';
-import { generate2fa, enable2fa, disable2fa } from '@/api/auth';
-import QRCode from 'qrcode';
-import {
-  Loader2,
-  UserRound,
-  KeyRound,
-  Cpu,
-  Plus,
-  Trash2,
-  Star,
-  Pencil,
-  FlaskConical,
-  X,
-  ShieldCheck,
-  ShieldAlert,
-} from 'lucide-vue-next';
+import { sendCode, bindEmail } from '@/api/auth';
+import { Loader2, UserRound, KeyRound, Mail, ArrowUpRight } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
-import {
-  getModelConfigs,
-  createModelConfig,
-  updateModelConfig,
-  deleteModelConfig,
-  testModelConfig,
-} from '@/api/model-configs';
-import type { ModelConfig } from '@/types/model-config';
-import type { TwoFactorSetup } from '@/types/auth';
 
 const auth = useAuthStore();
 
@@ -51,6 +28,83 @@ async function saveProfile() {
     profileError.value = (e as Error).message;
   } finally {
     savingProfile.value = false;
+  }
+}
+
+// ===== 更换邮箱 =====
+const bindForm = reactive({ email: '', code: '' });
+const sendingCode = ref(false);
+const countdown = ref(0);
+const binding = ref(false);
+const bindMsg = ref('');
+const bindError = ref('');
+const bindHint = ref('');
+
+let timer: ReturnType<typeof setInterval> | null = null;
+onUnmounted(() => {
+  if (timer) clearInterval(timer);
+});
+
+const canSendBind = computed(() => countdown.value <= 0 && !!bindForm.email.trim());
+
+async function handleSendBindCode() {
+  bindError.value = '';
+  bindMsg.value = '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bindForm.email.trim())) {
+    bindError.value = '请输入正确的邮箱地址';
+    return;
+  }
+  if (bindForm.email.trim().toLowerCase() === (auth.user?.email ?? '').toLowerCase()) {
+    bindError.value = '新邮箱与当前邮箱相同';
+    return;
+  }
+  sendingCode.value = true;
+  try {
+    const res = await sendCode(bindForm.email.trim(), 'bind');
+    countdown.value = 60;
+    if (timer) clearInterval(timer);
+    timer = setInterval(() => {
+      countdown.value -= 1;
+      if (countdown.value <= 0 && timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }, 1000);
+    if (res.devMode && res.code) {
+      bindForm.code = res.code;
+      bindHint.value = '（开发模式）验证码已自动填入：' + res.code;
+    } else {
+      bindHint.value = '';
+    }
+  } catch (e) {
+    bindError.value = (e as Error).message;
+  } finally {
+    sendingCode.value = false;
+  }
+}
+
+async function handleBindEmail() {
+  bindError.value = '';
+  bindMsg.value = '';
+  if (!bindForm.code.trim() || bindForm.code.trim().length !== 6) {
+    bindError.value = '请输入 6 位验证码';
+    return;
+  }
+  binding.value = true;
+  try {
+    const updated = await bindEmail({
+      email: bindForm.email.trim(),
+      code: bindForm.code.trim(),
+    });
+    auth.user = updated; // 更新本地用户信息（邮箱已变）
+    bindMsg.value = '邮箱已更换成功';
+    bindForm.email = '';
+    bindForm.code = '';
+    bindHint.value = '';
+  } catch (e) {
+    bindError.value = (e as Error).message;
+  } finally {
+    binding.value = false;
   }
 }
 
@@ -87,203 +141,6 @@ async function savePassword() {
     savingPassword.value = false;
   }
 }
-
-// ===== 双因素认证（TOTP）=====
-const totpEnabled = computed(() => auth.user?.totpEnabled ?? false);
-const setup = ref<TwoFactorSetup | null>(null); // 绑定中（待验证码确认）
-const setupQr = ref(''); // 二维码 dataURL
-const setupCode = ref('');
-const enabling = ref(false);
-const recoveryCodes = ref<string[] | null>(null); // 启用成功后的一次性恢复码
-const disablePwd = ref('');
-const disabling = ref(false);
-const totpMsg = ref('');
-const totpError = ref('');
-
-/** 第一步：生成绑定材料（密钥 + 二维码） */
-async function startSetup() {
-  totpError.value = '';
-  totpMsg.value = '';
-  try {
-    const s = await generate2fa();
-    setup.value = s;
-    setupQr.value = await QRCode.toDataURL(s.otpauthUrl, { width: 180, margin: 1 });
-  } catch (e) {
-    totpError.value = (e as Error).message;
-  }
-}
-
-/** 第二步：输入验证器动态码 → 启用，返回一次性恢复码 */
-async function confirmEnable() {
-  if (!setupCode.value.trim()) {
-    totpError.value = '请输入验证器 App 上的 6 位动态码';
-    return;
-  }
-  enabling.value = true;
-  totpError.value = '';
-  try {
-    const res = await enable2fa(setupCode.value.trim());
-    recoveryCodes.value = res.recoveryCodes;
-    setup.value = null;
-    setupQr.value = '';
-    setupCode.value = '';
-    auth.fetchProfile().catch(() => undefined); // 刷新 2FA 状态
-  } catch (e) {
-    totpError.value = (e as Error).message;
-  } finally {
-    enabling.value = false;
-  }
-}
-
-/** 关闭 2FA：验证当前密码 */
-async function handleDisable() {
-  if (!disablePwd.value) {
-    totpError.value = '请输入密码确认关闭';
-    return;
-  }
-  disabling.value = true;
-  totpError.value = '';
-  try {
-    await disable2fa(disablePwd.value);
-    disablePwd.value = '';
-    totpMsg.value = '双因素认证已关闭';
-    auth.fetchProfile().catch(() => undefined);
-  } catch (e) {
-    totpError.value = (e as Error).message;
-  } finally {
-    disabling.value = false;
-  }
-}
-
-// ===== 模型配置（BYO 大模型 API）=====
-const configs = ref<ModelConfig[]>([]);
-const loadingConfigs = ref(false);
-const formOpen = ref(false);
-const editingId = ref<string | null>(null);
-const savingConfig = ref(false);
-const testingId = ref<string | null>(null);
-const configMsg = ref('');
-const configError = ref('');
-const testResults = ref<Record<string, string>>({});
-
-const configForm = reactive({
-  name: '',
-  baseURL: 'https://api.deepseek.com',
-  apiKey: '',
-  model: '',
-  isDefault: false,
-});
-
-async function loadConfigs() {
-  loadingConfigs.value = true;
-  try {
-    configs.value = await getModelConfigs();
-  } catch (e) {
-    configError.value = (e as Error).message;
-  } finally {
-    loadingConfigs.value = false;
-  }
-}
-
-function openCreate() {
-  editingId.value = null;
-  configForm.name = '';
-  configForm.baseURL = 'https://api.deepseek.com';
-  configForm.apiKey = '';
-  configForm.model = '';
-  configForm.isDefault = false;
-  configMsg.value = '';
-  configError.value = '';
-  formOpen.value = true;
-}
-
-function openEdit(c: ModelConfig) {
-  editingId.value = c.id;
-  configForm.name = c.name;
-  configForm.baseURL = c.baseURL;
-  configForm.apiKey = ''; // 编辑时 key 可留空（保留原 key）
-  configForm.model = c.model;
-  configForm.isDefault = c.isDefault;
-  configMsg.value = '';
-  configError.value = '';
-  formOpen.value = true;
-}
-
-async function saveConfig() {
-  if (!configForm.name.trim() || !configForm.model.trim()) {
-    configError.value = '请填写名称和模型名';
-    return;
-  }
-  if (!editingId.value && !configForm.apiKey.trim()) {
-    configError.value = '请填写 API Key';
-    return;
-  }
-  savingConfig.value = true;
-  configMsg.value = '';
-  configError.value = '';
-  try {
-    if (editingId.value) {
-      await updateModelConfig(editingId.value, {
-        name: configForm.name.trim(),
-        baseURL: configForm.baseURL.trim(),
-        model: configForm.model.trim(),
-        isDefault: configForm.isDefault,
-        ...(configForm.apiKey.trim() ? { apiKey: configForm.apiKey.trim() } : {}),
-      });
-      configMsg.value = '配置已更新';
-    } else {
-      await createModelConfig({
-        name: configForm.name.trim(),
-        baseURL: configForm.baseURL.trim(),
-        apiKey: configForm.apiKey.trim(),
-        model: configForm.model.trim(),
-        isDefault: configForm.isDefault,
-      });
-      configMsg.value = '配置已保存';
-    }
-    formOpen.value = false;
-    await loadConfigs();
-  } catch (e) {
-    configError.value = (e as Error).message;
-  } finally {
-    savingConfig.value = false;
-  }
-}
-
-async function handleDelete(id: string, name: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`删除模型配置「${name}」？`)) return;
-  try {
-    await deleteModelConfig(id);
-    await loadConfigs();
-  } catch (e) {
-    configError.value = (e as Error).message;
-  }
-}
-
-async function handleSetDefault(id: string) {
-  try {
-    await updateModelConfig(id, { isDefault: true });
-    await loadConfigs();
-  } catch (e) {
-    configError.value = (e as Error).message;
-  }
-}
-
-async function handleTest(id: string) {
-  testingId.value = id;
-  testResults.value[id] = '测试中...';
-  try {
-    const res = await testModelConfig(id);
-    testResults.value[id] = res.ok ? '✅ 连接成功' : `❌ ${res.message}`;
-  } catch (e) {
-    testResults.value[id] = `❌ ${(e as Error).message}`;
-  } finally {
-    testingId.value = null;
-  }
-}
-
-onMounted(loadConfigs);
 </script>
 
 <template>
@@ -292,6 +149,19 @@ onMounted(loadConfigs);
       <h1 class="text-2xl font-bold tracking-tight">个人中心</h1>
       <p class="mt-1 text-sm text-muted-foreground">管理你的资料与账号安全</p>
     </div>
+
+    <!-- 提示：模型配置已移到导航栏 -->
+    <RouterLink
+      to="/model-configs"
+      class="mb-6 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
+    >
+      <span class="text-muted-foreground">
+        使用 AI 功能前请先绑定你自己的模型 Key（对话 / 研究报告 / 图谱都由你的 Key 计费）
+      </span>
+      <span class="flex items-center gap-1 font-medium text-primary">
+        去模型配置 <ArrowUpRight class="h-4 w-4" />
+      </span>
+    </RouterLink>
 
     <div class="grid gap-6 lg:grid-cols-2">
       <!-- 资料 -->
@@ -302,8 +172,9 @@ onMounted(loadConfigs);
         </div>
         <div class="mt-5 space-y-4">
           <div class="space-y-1.5">
-            <Label>邮箱（不可修改）</Label>
+            <Label>邮箱</Label>
             <Input :model-value="auth.user?.email ?? ''" disabled />
+            <p class="text-xs text-muted-foreground">邮箱为登录账号，更换请用下方「更换邮箱」</p>
           </div>
           <div class="space-y-1.5">
             <Label>昵称</Label>
@@ -347,226 +218,48 @@ onMounted(loadConfigs);
       </div>
     </div>
 
-    <!-- 双因素认证（TOTP） -->
+    <!-- 更换邮箱 -->
     <div class="mt-6 rounded-lg border bg-card p-6">
-      <div class="flex flex-wrap items-center gap-2">
-        <ShieldCheck v-if="totpEnabled" class="h-4 w-4 text-green-600" />
-        <ShieldAlert v-else class="h-4 w-4 text-primary" />
-        <h2 class="font-semibold">双因素认证（2FA）</h2>
-        <span
-          class="rounded px-1.5 py-0.5 text-[10px]"
-          :class="totpEnabled ? 'bg-green-50 text-green-700' : 'bg-muted text-muted-foreground'"
-        >
-          {{ totpEnabled ? '已开启' : '未开启' }}
-        </span>
-        <p class="w-full text-xs text-muted-foreground">
-          TOTP 验证器（Google Authenticator / Microsoft Authenticator
-          等）扫码绑定，登录时除密码外还需 6 位动态码
-        </p>
+      <div class="flex items-center gap-2">
+        <Mail class="h-4 w-4 text-primary" />
+        <h2 class="font-semibold">更换邮箱</h2>
+        <p class="text-xs text-muted-foreground">验证新邮箱后，登录账号将切换为新邮箱</p>
       </div>
-
-      <!-- 绑定中：二维码 + 密钥 + 验证码确认 -->
-      <div
-        v-if="setup"
-        class="mt-4 flex flex-col items-center rounded-lg border border-primary/30 bg-muted/30 p-4 text-center"
-      >
-        <p class="text-sm font-medium">用验证器 App 扫描二维码（或手动输入密钥）</p>
-        <img :src="setupQr" alt="2FA 二维码" class="mt-3 rounded bg-white p-1" width="180" />
-        <p class="mt-2 break-all font-mono text-xs text-muted-foreground">{{ setup.secret }}</p>
-        <div class="mt-3 flex items-center gap-2">
-          <Input
-            v-model="setupCode"
-            type="text"
-            placeholder="输入 6 位动态码"
-            class="w-40"
-            :disabled="enabling"
-          />
-          <Button size="sm" :disabled="enabling" @click="confirmEnable">
-            <Loader2 v-if="enabling" class="h-4 w-4 animate-spin" />
-            确认启用
-          </Button>
+      <div class="mt-5 max-w-xl space-y-4">
+        <div class="space-y-1.5">
+          <Label>新邮箱</Label>
+          <Input v-model="bindForm.email" type="email" placeholder="new@example.com" />
         </div>
-      </div>
-
-      <!-- 启用成功：一次性恢复码（醒目提示） -->
-      <div
-        v-else-if="recoveryCodes"
-        class="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 p-4"
-      >
-        <p class="text-sm font-semibold text-destructive">⚠️ 保存好这些恢复码！</p>
-        <p class="mt-1 text-xs text-muted-foreground">
-          每个恢复码只能用一次（丢失验证器时用它登录）。此页面关闭后不再显示，请立即复制保存。
-        </p>
-        <div class="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-          <code
-            v-for="c in recoveryCodes"
-            :key="c"
-            class="rounded bg-muted px-2 py-1 text-center text-xs font-mono"
-            >{{ c }}</code
-          >
+        <div class="space-y-1.5">
+          <Label>新邮箱验证码</Label>
+          <div class="flex gap-2">
+            <Input
+              v-model="bindForm.code"
+              type="text"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6 位数字"
+              class="flex-1"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              class="shrink-0"
+              :disabled="!canSendBind || sendingCode"
+              @click="handleSendBindCode"
+            >
+              <Loader2 v-if="sendingCode" class="h-4 w-4 animate-spin" />
+              {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
+            </Button>
+          </div>
+          <p v-if="bindHint" class="text-xs text-green-600">{{ bindHint }}</p>
         </div>
-        <Button
-          size="sm"
-          class="mt-3"
-          @click="
-            recoveryCodes = null;
-            totpMsg = '双因素认证已启用';
-          "
-        >
-          我已保存
+        <p v-if="bindMsg" class="text-sm text-green-600">{{ bindMsg }}</p>
+        <p v-if="bindError" class="text-sm text-destructive">{{ bindError }}</p>
+        <Button :disabled="binding" @click="handleBindEmail">
+          <Loader2 v-if="binding" class="h-4 w-4 animate-spin" />
+          确认更换
         </Button>
-      </div>
-
-      <!-- 已开启：禁用 -->
-      <div v-else-if="totpEnabled" class="mt-4 flex flex-wrap items-center gap-2">
-        <Input
-          v-model="disablePwd"
-          type="password"
-          placeholder="输入密码确认关闭"
-          class="w-52"
-          :disabled="disabling"
-        />
-        <Button variant="outline" size="sm" :disabled="disabling" @click="handleDisable">
-          <Loader2 v-if="disabling" class="h-4 w-4 animate-spin" />
-          关闭双因素认证
-        </Button>
-      </div>
-
-      <!-- 未开启：启用 -->
-      <Button v-else class="mt-4" size="sm" @click="startSetup">启用双因素认证</Button>
-
-      <p v-if="totpMsg" class="mt-3 text-sm text-green-600">{{ totpMsg }}</p>
-      <p v-if="totpError" class="mt-3 text-sm text-destructive">{{ totpError }}</p>
-    </div>
-
-    <!-- 模型配置（BYO 大模型 API） -->
-    <div class="mt-6 rounded-lg border bg-card p-6">
-      <div class="flex flex-wrap items-center gap-2">
-        <Cpu class="h-4 w-4 text-primary" />
-        <h2 class="font-semibold">模型配置</h2>
-        <span class="text-xs text-muted-foreground">
-          绑定你自己的大模型 API Key（OpenAI 兼容协议），回答的 Token 由你的 Key 计费
-        </span>
-        <Button variant="outline" size="sm" class="ml-auto" @click="openCreate">
-          <Plus class="h-4 w-4" />
-          新增配置
-        </Button>
-      </div>
-
-      <!-- 新建/编辑表单 -->
-      <div v-if="formOpen" class="mt-4 rounded-lg border border-primary/30 bg-muted/30 p-4">
-        <div class="flex items-center justify-between">
-          <p class="text-sm font-medium">{{ editingId ? '编辑配置' : '新增配置' }}</p>
-          <button
-            class="rounded p-1 text-muted-foreground hover:bg-accent"
-            @click="formOpen = false"
-          >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-        <div class="mt-3 grid gap-3 sm:grid-cols-2">
-          <div class="space-y-1.5">
-            <Label>名称</Label>
-            <Input v-model="configForm.name" placeholder="如：我的 DeepSeek" />
-          </div>
-          <div class="space-y-1.5">
-            <Label>模型名</Label>
-            <Input v-model="configForm.model" placeholder="如：deepseek-chat" />
-          </div>
-          <div class="space-y-1.5">
-            <Label>接口地址（OpenAI 兼容）</Label>
-            <Input v-model="configForm.baseURL" placeholder="https://api.deepseek.com" />
-          </div>
-          <div class="space-y-1.5">
-            <Label>API Key（{{ editingId ? '留空则保留原 Key' : '加密存储，不返回明文' }}）</Label>
-            <Input v-model="configForm.apiKey" type="password" placeholder="sk-..." />
-          </div>
-        </div>
-        <label class="mt-3 flex cursor-pointer items-center gap-2 text-sm select-none">
-          <input v-model="configForm.isDefault" type="checkbox" class="h-3.5 w-3.5" />
-          设为默认（新建会话默认使用）
-        </label>
-        <p v-if="configError" class="mt-3 text-sm text-destructive">{{ configError }}</p>
-        <div class="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" @click="formOpen = false">取消</Button>
-          <Button size="sm" :disabled="savingConfig" @click="saveConfig">
-            <Loader2 v-if="savingConfig" class="h-4 w-4 animate-spin" />
-            {{ editingId ? '保存修改' : '保存配置' }}
-          </Button>
-        </div>
-      </div>
-
-      <!-- 列表 -->
-      <div v-if="loadingConfigs" class="flex justify-center py-8">
-        <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-      <div
-        v-else-if="configs.length === 0 && !formOpen"
-        class="mt-4 rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground"
-      >
-        还没有模型配置——点「新增配置」绑定你自己的 API Key（如 DeepSeek / 硅基流动 / OpenAI
-        兼容服务）
-      </div>
-      <div v-else-if="configs.length" class="mt-4 space-y-2">
-        <div
-          v-for="c in configs"
-          :key="c.id"
-          class="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
-        >
-          <div class="min-w-0 flex-1">
-            <p class="flex items-center gap-2 text-sm font-medium">
-              {{ c.name }}
-              <span
-                v-if="c.isDefault"
-                class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
-              >
-                默认
-              </span>
-            </p>
-            <p class="mt-0.5 truncate text-xs text-muted-foreground">
-              {{ c.baseURL }} · {{ c.model }} · Key: {{ c.apiKeyMasked }}
-            </p>
-            <p
-              v-if="testResults[c.id]"
-              class="mt-0.5 text-xs"
-              :class="testResults[c.id]!.startsWith('✅') ? 'text-green-600' : 'text-destructive'"
-            >
-              {{ testResults[c.id] }}
-            </p>
-          </div>
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="测试连接"
-              @click="handleTest(c.id)"
-            >
-              <Loader2 v-if="testingId === c.id" class="h-4 w-4 animate-spin" />
-              <FlaskConical v-else class="h-4 w-4" />
-            </button>
-            <button
-              v-if="!c.isDefault"
-              class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="设为默认"
-              @click="handleSetDefault(c.id)"
-            >
-              <Star class="h-4 w-4" />
-            </button>
-            <button
-              class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="编辑"
-              @click="openEdit(c)"
-            >
-              <Pencil class="h-4 w-4" />
-            </button>
-            <button
-              class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-              title="删除"
-              @click="handleDelete(c.id, c.name)"
-            >
-              <Trash2 class="h-4 w-4" />
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   </div>

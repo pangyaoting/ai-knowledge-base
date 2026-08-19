@@ -24,12 +24,6 @@ const form = reactive({
 const loading = ref(false);
 const errorMsg = ref('');
 
-// 2FA 第二步：开启双因素认证的用户，密码验证后还需动态码/恢复码
-const need2fa = ref(false);
-const loginToken = ref('');
-const twofaCode = ref('');
-const submitting2fa = ref(false);
-
 async function handleSubmit() {
   errorMsg.value = '';
 
@@ -40,38 +34,13 @@ async function handleSubmit() {
 
   loading.value = true;
   try {
-    const result = await auth.login(form);
-    // 需要第二步：进入验证码输入
-    if ('need2fa' in result) {
-      need2fa.value = true;
-      loginToken.value = result.loginToken;
-      return;
-    }
+    await auth.login(form);
     const redirect = (route.query.redirect as string) || '/';
     router.push(redirect);
   } catch (e) {
     errorMsg.value = (e as Error).message;
   } finally {
     loading.value = false;
-  }
-}
-
-/** 第二步：动态码 / 恢复码 */
-async function handleTwoFactor() {
-  errorMsg.value = '';
-  if (!twofaCode.value.trim()) {
-    errorMsg.value = '请输入 6 位动态码或恢复码';
-    return;
-  }
-  submitting2fa.value = true;
-  try {
-    await auth.login2fa({ loginToken: loginToken.value, code: twofaCode.value.trim() });
-    const redirect = (route.query.redirect as string) || '/';
-    router.push(redirect);
-  } catch (e) {
-    errorMsg.value = (e as Error).message;
-  } finally {
-    submitting2fa.value = false;
   }
 }
 </script>
@@ -92,43 +61,7 @@ async function handleTwoFactor() {
       </CardHeader>
 
       <CardContent>
-        <!-- 第二步：双因素认证动态码 -->
-        <form v-if="need2fa" class="space-y-4" @submit.prevent="handleTwoFactor">
-          <div class="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-            密码已验证。请在验证器 App（如 Google Authenticator / Microsoft Authenticator）查看 6
-            位动态码，或输入一次性恢复码完成登录。
-          </div>
-          <div
-            v-if="errorMsg"
-            class="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
-          >
-            {{ errorMsg }}
-          </div>
-          <div class="space-y-2">
-            <Label for="twofa">动态码 / 恢复码</Label>
-            <Input
-              id="twofa"
-              v-model="twofaCode"
-              type="text"
-              placeholder="6 位数字，或 xxxx-xxxx 恢复码"
-              autocomplete="one-time-code"
-            />
-          </div>
-          <Button type="submit" class="w-full" :disabled="submitting2fa">
-            <Loader2 v-if="submitting2fa" class="h-4 w-4 animate-spin" />
-            {{ submitting2fa ? '验证中...' : '完成登录' }}
-          </Button>
-          <button
-            type="button"
-            class="w-full text-center text-xs text-muted-foreground hover:underline"
-            @click="need2fa = false"
-          >
-            返回重新输入密码
-          </button>
-        </form>
-
-        <!-- 第一步：邮箱 + 密码 -->
-        <form v-else class="space-y-4" @submit.prevent="handleSubmit">
+        <form class="space-y-4" @submit.prevent="handleSubmit">
           <div
             v-if="errorMsg"
             class="rounded-md bg-destructive/10 px-4 py-3 text-sm text-destructive"
@@ -148,7 +81,15 @@ async function handleTwoFactor() {
           </div>
 
           <div class="space-y-2">
-            <Label for="password">密码</Label>
+            <div class="flex items-center justify-between">
+              <Label for="password">密码</Label>
+              <RouterLink
+                to="/forgot-password"
+                class="text-xs text-muted-foreground hover:underline"
+              >
+                忘记密码？
+              </RouterLink>
+            </div>
             <Input
               id="password"
               v-model="form.password"

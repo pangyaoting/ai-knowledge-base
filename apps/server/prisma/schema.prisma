@@ -21,12 +21,8 @@ model User {
   nickname    String?
   avatar      String?
   lastLoginAt DateTime? @map("last_login_at")
-  // ===== 双因素认证（TOTP，Google Authenticator 风格）=====
-  totpSecret    String? @map("totp_secret") // base32 密钥（otplib），启用后存库
-  totpEnabled   Boolean @default(false) @map("totp_enabled")
-  recoveryCodes Json?   @map("recovery_codes") // 恢复码（sha256 哈希数组，一次性）
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   knowledgeBases KnowledgeBase[]
   chatSessions   ChatSession[]

@@ -2,18 +2,11 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import {
   login as loginApi,
-  login2fa as login2faApi,
   register as registerApi,
   logout as logoutApi,
   getProfile,
 } from '@/api/auth';
-import type {
-  LoginPayload,
-  RegisterPayload,
-  UserInfo,
-  AuthResult,
-  LoginStep1Result,
-} from '@/types/auth';
+import type { LoginPayload, RegisterPayload, UserInfo, AuthResult } from '@/types/auth';
 
 export const useAuthStore = defineStore('auth', () => {
   // 状态
@@ -41,20 +34,9 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refreshToken');
   }
 
-  // 登录（两步验证支持：开启 2FA 的用户第一步只返回 need2fa + loginToken）
-  async function login(payload: LoginPayload): Promise<AuthResult | LoginStep1Result> {
+  // 登录（邮箱 + 密码，一步完成）
+  async function login(payload: LoginPayload): Promise<AuthResult> {
     const result = await loginApi(payload);
-    if ('need2fa' in result) {
-      return result; // 需要第二步（动态码/恢复码）
-    }
-    setTokens(result.accessToken, result.refreshToken);
-    user.value = result.user;
-    return result;
-  }
-
-  // 登录第二步：动态码 / 恢复码 → 正式登录
-  async function login2fa(payload: { loginToken: string; code: string }): Promise<AuthResult> {
-    const result = await login2faApi(payload);
     setTokens(result.accessToken, result.refreshToken);
     user.value = result.user;
     return result;
@@ -92,7 +74,6 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken,
     isLoggedIn,
     login,
-    login2fa,
     register,
     fetchProfile,
     logout,

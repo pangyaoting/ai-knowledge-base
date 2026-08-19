@@ -203,4 +203,20 @@ export class ModelConfigService {
       model: config.model,
     };
   }
+
+  /**
+   * 解析用户的默认配置（BYO 强依赖：AI 功能优先用会话绑定，否则用默认配置，
+   * 两者都没有 → 返回 null，调用方提示用户先绑定 Key）。
+   */
+  async resolveDefaultForUser(userId: string): Promise<ChatTarget | null> {
+    const config = await this.prisma.modelConfig.findFirst({
+      where: { ownerId: userId, isDefault: true },
+    });
+    if (!config) return null;
+    return {
+      baseURL: config.baseURL,
+      apiKey: this.decrypt(config.apiKey),
+      model: config.model,
+    };
+  }
 }
