@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onUnmounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { updateProfile, changePassword } from '@/api/user';
-import { sendCode, bindEmail } from '@/api/auth';
+import { sendCode, bindEmail, forgotPassword } from '@/api/auth';
 import { Loader2, UserRound, KeyRound, Mail, ArrowUpRight } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -135,6 +135,94 @@ async function savePassword() {
     savingPassword.value = false;
   }
 }
+
+// ===== 忘记原密码：邮箱验证码重设（与原密码修改同一入口） =====
+const showForgotPwd = ref(false);
+const forgotForm = reactive({ code: '', newPassword: '', confirm: '' });
+const forgotSending = ref(false);
+const forgotCountdown = ref(0);
+const forgotResetting = ref(false);
+const forgotHint = ref('');
+const forgotError = ref('');
+const forgotMsg = ref('');
+
+let forgotTimer: ReturnType<typeof setInterval> | null = null;
+onUnmounted(() => {
+  if (forgotTimer) clearInterval(forgotTimer);
+});
+
+const canSendForgot = computed(() => forgotCountdown.value <= 0 && !!auth.user?.email);
+
+async function handleSendForgotCode() {
+  forgotError.value = '';
+  forgotMsg.value = '';
+  const email = auth.user?.email;
+  if (!email) {
+    forgotError.value = '未获取到当前登录邮箱，请重新登录';
+    return;
+  }
+  forgotSending.value = true;
+  try {
+    const res = await sendCode(email, 'forgot');
+    forgotCountdown.value = 60;
+    if (forgotTimer) clearInterval(forgotTimer);
+    forgotTimer = setInterval(() => {
+      forgotCountdown.value -= 1;
+      if (forgotCountdown.value <= 0 && forgotTimer) {
+        clearInterval(forgotTimer);
+        forgotTimer = null;
+      }
+    }, 1000);
+    if (res.devMode && res.code) {
+      forgotForm.code = res.code;
+      forgotHint.value = '（开发模式）验证码已自动填入：' + res.code;
+    } else {
+      forgotHint.value = '';
+    }
+  } catch (e) {
+    forgotError.value = (e as Error).message;
+  } finally {
+    forgotSending.value = false;
+  }
+}
+
+async function handleForgotReset() {
+  forgotError.value = '';
+  forgotMsg.value = '';
+  const email = auth.user?.email;
+  if (!email) return;
+  if (!forgotForm.code.trim() || forgotForm.code.trim().length !== 6) {
+    forgotError.value = '请输入 6 位邮箱验证码';
+    return;
+  }
+  if (forgotForm.newPassword.length < 6) {
+    forgotError.value = '新密码至少 6 位';
+    return;
+  }
+  if (forgotForm.newPassword !== forgotForm.confirm) {
+    forgotError.value = '两次输入的新密码不一致';
+    return;
+  }
+  forgotResetting.value = true;
+  try {
+    await forgotPassword({
+      email,
+      code: forgotForm.code.trim(),
+      newPassword: forgotForm.newPassword,
+    });
+    forgotMsg.value = '密码已通过邮箱验证重置，下次登录请使用新密码';
+    forgotForm.code = '';
+    forgotForm.newPassword = '';
+    forgotForm.confirm = '';
+    forgotHint.value = '';
+    showForgotPwd.value = false;
+    toast.success('密码已重置，下次登录请使用新密码');
+  } catch (e) {
+    forgotError.value = (e as Error).message;
+  } finally {
+    forgotResetting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -204,6 +292,60 @@ async function savePassword() {
             <Loader2 v-if="savingPassword" class="h-4 w-4 animate-spin" />
             修改密码
           </Button>
+
+          <!-- 忘记原密码：邮箱验证码重设 -->
+          <div class="border-t pt-4">
+            <button
+              class="text-xs text-muted-foreground transition-colors hover:text-primary hover:underline"
+              @click="showForgotPwd = !showForgotPwd"
+            >
+              {{ showForgotPwd ? '收起「忘记原密码」' : '忘记原密码？用邮箱验证码重设' }}
+            </button>
+            <div v-if="showForgotPwd" class="mt-3 space-y-3">
+              <div class="space-y-1.5">
+                <Label>注册邮箱</Label>
+                <Input :model-value="auth.user?.email ?? ''" disabled />
+              </div>
+              <div class="space-y-1.5">
+                <Label>邮箱验证码</Label>
+                <div class="flex gap-2">
+                  <Input
+                    v-model="forgotForm.code"
+                    type="text"
+                    inputmode="numeric"
+                    maxlength="6"
+                    placeholder="6 位数字"
+                    class="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    class="shrink-0"
+                    :disabled="!canSendForgot || forgotSending"
+                    @click="handleSendForgotCode"
+                  >
+                    <Loader2 v-if="forgotSending" class="h-4 w-4 animate-spin" />
+                    {{ forgotCountdown > 0 ? `${forgotCountdown}s 后重发` : '发送验证码' }}
+                  </Button>
+                </div>
+                <p v-if="forgotHint" class="text-xs text-green-600">{{ forgotHint }}</p>
+              </div>
+              <div class="space-y-1.5">
+                <Label>新密码</Label>
+                <Input v-model="forgotForm.newPassword" type="password" placeholder="至少 6 位" />
+              </div>
+              <div class="space-y-1.5">
+                <Label>确认新密码</Label>
+                <Input v-model="forgotForm.confirm" type="password" placeholder="再次输入新密码" />
+              </div>
+              <p v-if="forgotMsg" class="text-sm text-green-600">{{ forgotMsg }}</p>
+              <p v-if="forgotError" class="text-sm text-destructive">{{ forgotError }}</p>
+              <Button :disabled="forgotResetting" @click="handleForgotReset">
+                <Loader2 v-if="forgotResetting" class="h-4 w-4 animate-spin" />
+                通过邮箱验证重置密码
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -22,6 +22,7 @@ const knowledgeBaseId = route.params.id as string;
 const loading = ref(false);
 const rebuilding = ref(false);
 const error = ref('');
+const notice = ref(''); // 重建进度 / 结果说明（避免"转圈 30 秒后什么都没发生"的困惑）
 const nodes = ref<GraphNode[]>([]);
 const edges = ref<GraphEdge[]>([]);
 
@@ -141,18 +142,30 @@ async function handleRebuild() {
   if (rebuilding.value) return;
   rebuilding.value = true;
   error.value = '';
+  notice.value = '';
   try {
-    await rebuildKnowledgeGraph(knowledgeBaseId);
-    // 异步抽取：轮询直到节点数变化或超时（10 次 × 3s）
-    for (let i = 0; i < 10; i++) {
+    const res = await rebuildKnowledgeGraph(knowledgeBaseId);
+    if (!res.success) {
+      // 未绑定模型配置：直接告诉用户原因，不再静默空转
+      error.value = res.message;
+      return;
+    }
+    notice.value = res.message;
+    // 异步抽取：最多轮询 6 次 × 3s = 18s，节点数有变化（>0 且 ≠ 之前）即完成
+    for (let i = 0; i < 6; i++) {
       await new Promise((r) => setTimeout(r, 3000));
       const data = await getKnowledgeGraph(knowledgeBaseId);
-      if (data.nodes.length !== nodes.value.length) {
+      if (data.nodes.length > 0 && data.nodes.length !== nodes.value.length) {
         await load();
-        break;
+        notice.value = `知识网络已更新：${data.nodes.length} 个概念 · ${data.edges.length} 条关系`;
+        return;
       }
     }
     await load();
+    if (nodes.value.length === 0) {
+      notice.value =
+        '抽取完成但未生成概念。可能原因：模型配置不可用（先到「模型配置」页点「测试连接」验证 Key/模型名），或文档内容过短、缺少明确的概念与关系。修复后可再次重建。';
+    }
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -202,6 +215,11 @@ onBeforeUnmount(() => {
       </Button>
     </div>
 
+    <!-- 重建进度/结果提示条 -->
+    <div v-if="notice" class="border-b bg-primary/5 px-4 py-2 text-xs text-primary" role="status">
+      {{ notice }}
+    </div>
+
     <!-- 主体 -->
     <div class="flex min-h-0 flex-1">
       <!-- 图 -->
@@ -235,6 +253,20 @@ onBeforeUnmount(() => {
           <p class="mt-3 text-sm text-muted-foreground">
             还没有知识网络——点右上角「重建知识网络」从文档中抽取概念和关系
           </p>
+          <!-- 空图原因引导（模型配置 / 文档内容） -->
+          <div
+            v-if="notice"
+            class="mt-4 max-w-md rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-left text-xs text-muted-foreground"
+          >
+            <p class="font-medium text-foreground">为什么是空的？</p>
+            <ul class="mt-1.5 list-disc space-y-1 pl-4">
+              <li>
+                抽取使用你自己的大模型 Key——到「模型配置」页点「测试连接」确认 Key 和模型名可用；
+              </li>
+              <li>文档需先处理完成（状态「已完成」），且内容里有明确的概念/关系才抽得出来；</li>
+              <li>修复后再次「重建知识网络」即可。</li>
+            </ul>
+          </div>
         </div>
         <div v-else ref="chartEl" class="h-full w-full" />
       </div>

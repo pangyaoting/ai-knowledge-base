@@ -148,7 +148,7 @@ export class GraphService {
         relations: Array.isArray(parsed.relations) ? parsed.relations : [],
       };
     } catch (err) {
-      this.logger.warn(`图谱抽取 JSON 解析失败: ${(err as Error).message}`);
+      this.logger.warn(`图谱抽取失败（已跳过该文档）: ${(err as Error).message}`);
       return { entities: [], relations: [] };
     }
   }
@@ -156,8 +156,17 @@ export class GraphService {
   /** 重建某个知识库全部已完成文档的图谱（fire-and-forget，前端轮询图数据） */
   async rebuild(knowledgeBaseId: string, userId: string) {
     await this.knowledgeService.findOne(userId, knowledgeBaseId);
+    // BYO：抽取依赖用户自己的模型配置；未绑定直接告诉用户原因（避免"重建后图是空的"困惑）
+    const target = await this.modelConfigService.resolveDefaultForUser(userId);
+    if (!target) {
+      return {
+        success: false,
+        message:
+          '未绑定模型配置，无法抽取知识网络。请先到「模型配置」绑定你自己的大模型 API Key，再重建。',
+      };
+    }
     void this.rebuildInternal(knowledgeBaseId, userId);
-    return { success: true };
+    return { success: true, message: '已开始重建，正在后台抽取实体与关系（文档多时约需数分钟）' };
   }
 
   private async rebuildInternal(knowledgeBaseId: string, userId: string) {

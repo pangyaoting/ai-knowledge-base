@@ -133,5 +133,7 @@ export function getEntityChunks(knowledgeBaseId: string, name: string) {
 
 /** 重建知识库图谱（对全部已完成文档重新抽取，异步） */
 export function rebuildKnowledgeGraph(knowledgeBaseId: string) {
-  return request.post<unknown, { success: boolean }>(`/knowledge/${knowledgeBaseId}/graph/rebuild`);
+  return request.post<unknown, { success: boolean; message: string }>(
+    `/knowledge/${knowledgeBaseId}/graph/rebuild`,
+  );
 }
