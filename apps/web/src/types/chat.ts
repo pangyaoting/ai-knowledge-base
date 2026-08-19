@@ -5,7 +5,7 @@ export interface ChatSession {
   title: string;
   /** 是否使用知识库检索（false = 纯对话模式；true 且未绑定 = 检索全部知识库） */
   useKnowledgeBase: boolean;
-  /** 会话绑定的用户模型配置（null = 系统默认模型；BYO key） */
+  /** 会话绑定的用户模型配置（null = 跟随用户默认配置；BYO key） */
   modelConfigId: string | null;
   modelConfig: { id: string; name: string; model: string } | null;
   /** 会话绑定的知识库（空数组 = 检索全部知识库） */

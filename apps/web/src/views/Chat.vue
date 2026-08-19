@@ -77,7 +77,7 @@ async function loadModelConfigs() {
   }
 }
 
-/** 切换当前会话的模型配置（null = 系统默认） */
+/** 切换当前会话的模型配置（null = 跟随用户默认配置） */
 async function selectModel(id: string | null) {
   modelDropdownOpen.value = false;
   if (!currentSessionId.value) return;

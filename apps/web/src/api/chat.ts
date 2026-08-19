@@ -39,7 +39,7 @@ export function updateSessionKnowledgeBases(
   });
 }
 
-/** 修改会话绑定的模型配置（null = 系统默认模型；BYO key） */
+/** 修改会话绑定的模型配置（null = 跟随用户默认配置；BYO key） */
 export function updateSessionModel(sessionId: string, modelConfigId: string | null) {
   return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/model`, {
     modelConfigId,
