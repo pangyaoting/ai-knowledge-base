@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ModelConfigService } from './model-config.service';
 import { CreateModelConfigDto } from './dto/create-model-config.dto';
 import { UpdateModelConfigDto } from './dto/update-model-config.dto';
+import { ListModelsDto } from './dto/list-models.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -49,6 +50,14 @@ export class ModelConfigController {
   @ApiOperation({ summary: '删除模型配置' })
   remove(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.modelConfigService.remove(userId, id);
+  }
+
+  @Post('models')
+  @ApiOperation({
+    summary: '探测提供商模型列表（GET /models，创建传 baseURL+key / 编辑传 configId）',
+  })
+  listModels(@CurrentUser('id') userId: string, @Body() dto: ListModelsDto) {
+    return this.modelConfigService.listRemoteModels(userId, dto);
   }
 
   @Post(':id/test')

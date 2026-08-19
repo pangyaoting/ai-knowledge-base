@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateModelConfigDto } from './dto/create-model-config.dto';
 import { UpdateModelConfigDto } from './dto/update-model-config.dto';
+import { ListModelsDto } from './dto/list-models.dto';
 
 /** 返回给前端的配置（绝不包含明文 key，只给掩码） */
 export interface SafeModelConfig {
@@ -185,6 +186,50 @@ export class ModelConfigService {
     } catch (err) {
       return { ok: false, message: (err as Error).message };
     }
+  }
+
+  /**
+   * 探测提供商模型列表（GET /models，OpenAI 兼容协议）：
+   * 前端"模型名下拉选择"用，避免用户手写模型名打错（如 char）。
+   * 创建时传 baseURL+apiKey（不落库）；编辑时传 configId 用已存的 key 探测。
+   */
+  async listRemoteModels(userId: string, dto: ListModelsDto) {
+    let baseURL = dto.baseURL?.trim();
+    let apiKey = dto.apiKey?.trim();
+    if (dto.configId) {
+      const config = await this.findOwned(userId, dto.configId);
+      baseURL = config.baseURL;
+      apiKey = this.decrypt(config.apiKey);
+    }
+    if (!baseURL || !apiKey) {
+      throw new BadRequestException('请填写接口地址和 API Key（新建时），或选择已有配置（编辑时）');
+    }
+    const url = `${baseURL.replace(/\/+$/, '')}/models`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new BadRequestException(
+        `获取模型列表失败：接口返回 ${res.status} ${text.slice(0, 120)}`,
+      );
+    }
+    const json = (await res.json().catch(() => null)) as unknown;
+    // OpenAI 规范：{ data: [{ id, ... }] }；个别网关直接返回数组或字符串数组，兼容处理
+    const data = Array.isArray((json as { data?: unknown })?.data)
+      ? (json as { data: unknown[] }).data
+      : Array.isArray(json)
+        ? json
+        : [];
+    const ids = data
+      .map((m: unknown) => {
+        if (typeof m === 'string') return m;
+        if (m && typeof m === 'object' && 'id' in m) return (m as { id: string }).id;
+        return null;
+      })
+      .filter((x: string | null): x is string => !!x);
+    return { models: [...new Set(ids)] };
   }
 
   /**

@@ -32,3 +32,8 @@ export function deleteModelConfig(id: string) {
 export function testModelConfig(id: string) {
   return request.post<unknown, { ok: boolean; message: string }>(`/model-configs/${id}/test`);
 }
+
+/** 探测提供商模型列表（模型名下拉选择用；创建传 baseURL+key / 编辑传 configId） */
+export function listRemoteModels(data: { baseURL?: string; apiKey?: string; configId?: string }) {
+  return request.post<unknown, { models: string[] }>('/model-configs/models', data);
+}

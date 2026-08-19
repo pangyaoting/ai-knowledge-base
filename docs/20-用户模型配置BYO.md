@@ -67,6 +67,7 @@ POST   /model-configs           新增（加密存储）
 GET    /model-configs           列表（掩码 key）
 PATCH  /model-configs/:id       更新（不传 apiKey 保留原 key）
 DELETE /model-configs/:id       删除
+POST   /model-configs/models    探测提供商模型列表（GET /models；创建传 baseURL+key / 编辑传 configId）
 POST   /model-configs/:id/test  测试连接（最小补全请求，只返回 ok/错误信息）
 PATCH  /chat/sessions/:id/model 切换会话模型（null = 跟随默认配置）
 ```
