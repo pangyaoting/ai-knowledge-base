@@ -12,6 +12,7 @@ import {
   Download,
   Menu,
   Search,
+  Cpu,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -22,12 +23,15 @@ import {
   getChatMessages,
   deleteChatSession,
   updateSessionKnowledgeBases,
+  updateSessionModel,
   exportSessionFile,
   askQuestion,
 } from '@/api/chat';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import { getKnowledgeBases } from '@/api/knowledge';
+import { getModelConfigs } from '@/api/model-configs';
 import type { KnowledgeBase } from '@/types/knowledge';
+import type { ModelConfig } from '@/types/model-config';
 import type {
   ChatSession,
   ChatMessage,
@@ -49,6 +53,36 @@ const useWebSearch = ref(false); // 联网检索开关
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 模型配置（BYO 大模型 API）：会话可选用户自带的 key
+const modelConfigs = ref<ModelConfig[]>([]);
+const modelDropdownOpen = ref(false);
+const defaultModelConfigId = computed(
+  () => modelConfigs.value.find((c) => c.isDefault)?.id ?? null,
+);
+
+/** 当前会话使用的模型名（null = 系统默认） */
+const currentModelName = computed(() => currentSession.value?.modelConfig?.name ?? '系统默认');
+
+async function loadModelConfigs() {
+  try {
+    modelConfigs.value = await getModelConfigs();
+  } catch {
+    modelConfigs.value = [];
+  }
+}
+
+/** 切换当前会话的模型配置（null = 系统默认） */
+async function selectModel(id: string | null) {
+  modelDropdownOpen.value = false;
+  if (!currentSessionId.value) return;
+  try {
+    await updateSessionModel(currentSessionId.value, id);
+    await loadSessions();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
 
 // 新建会话时选择问答来源：三种模式
 // none = 不使用知识库（纯对话）/ all = 全部知识库 / specific = 指定若干库
@@ -194,7 +228,10 @@ async function selectSession(id: string) {
 async function handleNewSession() {
   if (streaming.value) return;
   try {
-    const session = await createChatSession({});
+    // 默认用用户配置的默认模型（BYO key）
+    const session = await createChatSession({
+      ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+    });
     sessionSearch.value = ''; // 清掉搜索，保证新会话可见
     await loadSessions();
     await selectSession(session.id);
@@ -243,7 +280,11 @@ async function confirmCreateSession() {
       await updateSessionKnowledgeBases(currentSessionId.value, ids, useKb);
       await loadSessions();
     } else {
-      const session = await createChatSession({ knowledgeBaseIds: ids, useKnowledgeBase: useKb });
+      const session = await createChatSession({
+        knowledgeBaseIds: ids,
+        useKnowledgeBase: useKb,
+        ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+      });
       sessionSearch.value = ''; // 清掉搜索，保证新会话可见
       await loadSessions();
       await selectSession(session.id);
@@ -378,6 +419,7 @@ watch([messages, streamContent], async () => {
 
 // 初始化：加载会话，没有就新建
 onMounted(async () => {
+  loadModelConfigs(); // 模型下拉选项（BYO key）
   await loadSessions();
   if (sessions.value.length > 0) {
     await selectSession(sessions.value[0].id);
@@ -710,6 +752,52 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             <span class="truncate">{{ scopeLabel(currentScope, useKnowledgeBase) }}</span>
             <span class="shrink-0 text-muted-foreground">修改</span>
           </button>
+
+          <!-- 模型选择（BYO 大模型 API：系统默认 / 用户自带 Key） -->
+          <span class="shrink-0 text-muted-foreground">模型</span>
+          <div class="relative">
+            <button
+              class="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
+              :title="'当前模型：' + currentModelName + '（点击切换，Token 按所选模型计费）'"
+              @click="modelDropdownOpen = !modelDropdownOpen"
+            >
+              <Cpu class="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span class="max-w-[140px] truncate">{{ currentModelName }}</span>
+            </button>
+            <!-- 下拉面板 -->
+            <div
+              v-if="modelDropdownOpen"
+              class="absolute left-0 top-full z-40 mt-1.5 w-60 rounded-lg border bg-card py-1 shadow-lg"
+            >
+              <button
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                :class="!currentSession?.modelConfigId ? 'text-primary' : ''"
+                @click="selectModel(null)"
+              >
+                <span>系统默认</span>
+                <span v-if="!currentSession?.modelConfigId" class="text-xs">✓</span>
+              </button>
+              <p v-if="modelConfigs.length === 0" class="px-3 py-1.5 text-xs text-muted-foreground">
+                去「个人中心-模型配置」绑定你自己的 API Key
+              </p>
+              <template v-else>
+                <div class="border-t" />
+                <button
+                  v-for="c in modelConfigs"
+                  :key="c.id"
+                  class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                  :class="currentSession?.modelConfigId === c.id ? 'text-primary' : ''"
+                  @click="selectModel(c.id)"
+                >
+                  <span class="min-w-0 flex-1 truncate">{{ c.name }}</span>
+                  <span class="shrink-0 text-xs text-muted-foreground">{{ c.model }}</span>
+                  <span v-if="currentSession?.modelConfigId === c.id" class="shrink-0 text-xs"
+                    >✓</span
+                  >
+                </button>
+              </template>
+            </div>
+          </div>
         </div>
         <div class="mx-auto flex max-w-3xl items-end gap-2">
           <textarea

@@ -4,9 +4,10 @@ import { ChatService } from './chat.service';
 import { RagService } from './rag.service';
 import { WebSearchService } from './web-search.service';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { ModelsModule } from '../models/models.module'; // 解析会话绑定的模型配置（BYO key）
 
 @Module({
-  imports: [KnowledgeModule], // RagService 依赖 KnowledgeService（校验知识库归属）
+  imports: [KnowledgeModule, ModelsModule], // RagService 依赖 KnowledgeService（校验知识库归属）
   controllers: [ChatController],
   providers: [ChatService, RagService, WebSearchService],
   exports: [RagService], // 研究报告模块复用混合检索

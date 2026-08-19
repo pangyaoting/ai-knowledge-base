@@ -11,6 +11,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { ResearchModule } from './modules/research/research.module';
+import { ModelsModule } from './modules/models/models.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
 @Module({
@@ -29,6 +30,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     ChatModule,
     StatsModule,
     ResearchModule,
+    ModelsModule,
   ],
   providers: [
     // 全局 JWT 守卫：所有接口默认需要登录，用 @Public() 标记公开接口

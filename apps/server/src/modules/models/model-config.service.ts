@@ -1,0 +1,206 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { CreateModelConfigDto } from './dto/create-model-config.dto';
+import { UpdateModelConfigDto } from './dto/update-model-config.dto';
+
+/** 返回给前端的配置（绝不包含明文 key，只给掩码） */
+export interface SafeModelConfig {
+  id: string;
+  name: string;
+  baseURL: string;
+  model: string;
+  isDefault: boolean;
+  apiKeyMasked: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** 聊天实际使用的目标（解密后的 key） */
+export interface ChatTarget {
+  baseURL: string;
+  apiKey: string;
+  model: string;
+}
+
+/**
+ * 用户模型配置（BYO 大模型 API）：
+ * - apiKey 用 AES-256-GCM 加密落库，接口永远只返回掩码（sk-1234****abcd）；
+ * - 聊天时按会话绑定的配置解密 key，用用户的 key/baseURL/model 出回答——token 用户买单；
+ * - 测试连接：发一个最小补全请求验证 key/baseURL/model 可用。
+ */
+@Injectable()
+export class ModelConfigService {
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {}
+
+  /** AES-256 密钥：优先取 env MODEL_KEY_SECRET（64 位 hex），否则由 JWT_SECRET 派生 */
+  private get secret(): Buffer {
+    const s = this.configService.get<string>('MODEL_KEY_SECRET');
+    if (s && /^[0-9a-f]{64}$/i.test(s)) return Buffer.from(s, 'hex');
+    return createHash('sha256')
+      .update(this.configService.get<string>('JWT_SECRET', 'dev-secret'))
+      .digest();
+  }
+
+  private encrypt(plain: string): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.secret, iv);
+    const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString('base64')}:${tag.toString('base64')}:${enc.toString('base64')}`;
+  }
+
+  private decrypt(payload: string): string {
+    const [ivB64, tagB64, dataB64] = payload.split(':');
+    const decipher = createDecipheriv('aes-256-gcm', this.secret, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataB64, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+  }
+
+  private mask(key: string): string {
+    if (key.length <= 8) return '****';
+    return `${key.slice(0, 6)}****${key.slice(-4)}`;
+  }
+
+  private toSafe(c: {
+    id: string;
+    name: string;
+    baseURL: string;
+    apiKey: string;
+    model: string;
+    isDefault: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }): SafeModelConfig {
+    let plain = '';
+    try {
+      plain = this.decrypt(c.apiKey);
+    } catch {
+      plain = '';
+    }
+    return {
+      id: c.id,
+      name: c.name,
+      baseURL: c.baseURL,
+      model: c.model,
+      isDefault: c.isDefault,
+      apiKeyMasked: this.mask(plain),
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    };
+  }
+
+  /** 设为默认前先取消该用户其它默认 */
+  private async clearDefault(userId: string) {
+    await this.prisma.modelConfig.updateMany({
+      where: { ownerId: userId, isDefault: true },
+      data: { isDefault: false },
+    });
+  }
+
+  async create(userId: string, dto: CreateModelConfigDto) {
+    if (dto.isDefault) await this.clearDefault(userId);
+    const created = await this.prisma.modelConfig.create({
+      data: {
+        ownerId: userId,
+        name: dto.name.trim(),
+        baseURL: (dto.baseURL ?? 'https://api.deepseek.com').trim(),
+        apiKey: this.encrypt(dto.apiKey),
+        model: dto.model.trim(),
+        isDefault: dto.isDefault ?? false,
+      },
+    });
+    return this.toSafe(created);
+  }
+
+  async list(userId: string): Promise<SafeModelConfig[]> {
+    const configs = await this.prisma.modelConfig.findMany({
+      where: { ownerId: userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return configs.map((c) => this.toSafe(c));
+  }
+
+  private async findOwned(userId: string, id: string) {
+    const config = await this.prisma.modelConfig.findFirst({
+      where: { id, ownerId: userId },
+    });
+    if (!config) throw new NotFoundException('模型配置不存在');
+    return config;
+  }
+
+  async update(userId: string, id: string, dto: UpdateModelConfigDto) {
+    const config = await this.findOwned(userId, id);
+    if (dto.isDefault && !config.isDefault) await this.clearDefault(userId);
+    const updated = await this.prisma.modelConfig.update({
+      where: { id },
+      data: {
+        ...(dto.name != null ? { name: dto.name.trim() } : {}),
+        ...(dto.baseURL != null ? { baseURL: dto.baseURL.trim() } : {}),
+        ...(dto.model != null ? { model: dto.model.trim() } : {}),
+        ...(dto.isDefault != null ? { isDefault: dto.isDefault } : {}),
+        // 传了新 key 才重加密（不传则保留原 key）
+        ...(dto.apiKey ? { apiKey: this.encrypt(dto.apiKey) } : {}),
+      },
+    });
+    return this.toSafe(updated);
+  }
+
+  async remove(userId: string, id: string) {
+    await this.findOwned(userId, id);
+    await this.prisma.modelConfig.delete({ where: { id } });
+    return { success: true };
+  }
+
+  /** 测试连接：发最小补全请求，返回 ok/错误信息（不返回 key） */
+  async test(userId: string, id: string) {
+    const config = await this.findOwned(userId, id);
+    const apiKey = this.decrypt(config.apiKey);
+    try {
+      const res = await fetch(`${config.baseURL.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 5,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        return { ok: false, message: `接口返回 ${res.status}：${text.slice(0, 120)}` };
+      }
+      return { ok: true, message: '连接成功' };
+    } catch (err) {
+      return { ok: false, message: (err as Error).message };
+    }
+  }
+
+  /**
+   * 聊天用：解析会话绑定的配置 → 解密 key → 返回目标；未绑定/不存在返回 null（用系统默认）。
+   * 归属校验：配置不属于该用户则视为不存在（数据隔离）。
+   */
+  async resolveForChat(userId: string, configId?: string | null): Promise<ChatTarget | null> {
+    if (!configId) return null;
+    const config = await this.prisma.modelConfig.findFirst({
+      where: { id: configId, ownerId: userId },
+    });
+    if (!config) return null;
+    return {
+      baseURL: config.baseURL,
+      apiKey: this.decrypt(config.apiKey),
+      model: config.model,
+    };
+  }
+}

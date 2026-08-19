@@ -18,6 +18,7 @@ import { Response } from 'express';
 import { ChatService } from './chat.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { UpdateSessionKbsDto } from './dto/update-session-kbs.dto';
+import { UpdateSessionModelDto } from './dto/update-session-model.dto';
 import { AskDto } from './dto/ask.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -68,6 +69,16 @@ export class ChatController {
       dto.knowledgeBaseIds ?? [],
       dto.useKnowledgeBase ?? true,
     );
+  }
+
+  @Patch('sessions/:id/model')
+  @ApiOperation({ summary: '修改会话绑定的模型配置（BYO key；null = 系统默认）' })
+  updateSessionModel(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) sessionId: string,
+    @Body() dto: UpdateSessionModelDto,
+  ) {
+    return this.chatService.updateSessionModel(userId, sessionId, dto.modelConfigId);
   }
 
   @Get('sessions/:id/export')

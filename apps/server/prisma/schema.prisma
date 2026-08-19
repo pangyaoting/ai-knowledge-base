@@ -27,6 +27,7 @@ model User {
   knowledgeBases KnowledgeBase[]
   chatSessions   ChatSession[]
   reports        Report[]
+  modelConfigs   ModelConfig[]
 
   @@map("users")
 }
@@ -138,16 +139,18 @@ model Chunk {
 // useKnowledgeBase=false = 纯对话模式（不检索知识库）
 
 model ChatSession {
-  id               String   @id @default(uuid())
-  ownerId          String   @map("owner_id")
-  title            String   @default("新对话")
-  useKnowledgeBase Boolean  @default(true) @map("use_knowledge_base") // false = 纯对话，不检索知识库
+  id               String        @id @default(uuid())
+  ownerId          String        @map("owner_id")
+  title            String        @default("新对话")
+  useKnowledgeBase Boolean       @default(true) @map("use_knowledge_base") // false = 纯对话，不检索知识库
+  modelConfigId    String?       @map("model_config_id") // 用户自带的模型配置（null = 系统默认）
   messages         ChatMessage[]
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
 
   owner          User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   knowledgeBases SessionKnowledgeBase[]
+  modelConfig    ModelConfig?           @relation(fields: [modelConfigId], references: [id], onDelete: SetNull)
 
   @@index([ownerId])
   @@map("chat_sessions")
@@ -186,6 +189,30 @@ model Report {
 
   @@index([ownerId])
   @@map("reports")
+}
+
+// ==================== 用户模型配置（BYO 大模型 API） ====================
+// 用户自带大模型 key（Cherry Studio 思路）：token 由用户买单，平台零成本。
+// apiKey 用 AES-256-GCM 加密存储（密钥在服务端 env），接口永不返回明文。
+// 会话可选一个配置：回答走用户的 key/baseURL/model；不配置则回退系统默认。
+// 嵌入/检索仍用系统 key（保证检索质量一致、成本可控）。
+
+model ModelConfig {
+  id        String   @id @default(uuid())
+  ownerId   String   @map("owner_id")
+  name      String // 备注名，如"我的 DeepSeek"
+  baseURL   String   @default("https://api.deepseek.com") @map("base_url") // OpenAI 兼容接口地址
+  apiKey    String   @map("api_key") // AES-GCM 密文（iv:tag:data base64）
+  model     String // 模型名，如 deepseek-chat
+  isDefault Boolean  @default(false) @map("is_default") // 新建会话默认使用
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  chatSessions ChatSession[]
+
+  @@index([ownerId])
+  @@map("model_configs")
 }
 
 // ==================== 对话消息 ====================

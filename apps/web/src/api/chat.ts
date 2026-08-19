@@ -14,6 +14,7 @@ export function createChatSession(data: {
   title?: string;
   knowledgeBaseIds?: string[];
   useKnowledgeBase?: boolean;
+  modelConfigId?: string;
 }) {
   return request.post<unknown, ChatSession>('/chat/sessions', data);
 }
@@ -35,6 +36,13 @@ export function updateSessionKnowledgeBases(
   return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/knowledge-bases`, {
     knowledgeBaseIds,
     useKnowledgeBase,
+  });
+}
+
+/** 修改会话绑定的模型配置（null = 系统默认模型；BYO key） */
+export function updateSessionModel(sessionId: string, modelConfigId: string | null) {
+  return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/model`, {
+    modelConfigId,
   });
 }
 

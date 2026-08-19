@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
 import { WebSearchService, WebSource } from './web-search.service';
 import { GraphService } from '../knowledge/graph.service';
+import { ModelConfigService, ChatTarget } from '../models/model-config.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 
 interface StreamWriter {
@@ -27,12 +28,22 @@ export class ChatService {
     private ragService: RagService,
     private webSearchService: WebSearchService,
     private graphService: GraphService,
+    private modelConfigService: ModelConfigService,
     private configService: ConfigService,
   ) {
     this.client = new OpenAI({
       apiKey: this.configService.get<string>('DEEPSEEK_API_KEY'),
       baseURL: this.configService.get<string>('DEEPSEEK_BASE_URL'),
     });
+  }
+
+  /** 系统默认模型（对话之外的辅助调用：查询改写/标题等） */
+  private get systemTarget(): ChatTarget {
+    return {
+      apiKey: this.configService.get<string>('DEEPSEEK_API_KEY', ''),
+      baseURL: this.configService.get<string>('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
+      model: this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat'),
+    };
   }
 
   // ==================== 会话管理 ====================
@@ -50,17 +61,45 @@ export class ChatService {
         throw new NotFoundException('知识库不存在');
       }
     }
+    // 模型配置归属校验（BYO key：只能用自己的配置）
+    let modelConfigId: string | null = null;
+    if (dto.modelConfigId) {
+      const target = await this.modelConfigService.resolveForChat(userId, dto.modelConfigId);
+      if (!target) throw new NotFoundException('模型配置不存在');
+      modelConfigId = dto.modelConfigId;
+    }
     return this.prisma.chatSession.create({
       data: {
         ownerId: userId,
         title: dto.title || '新对话',
         useKnowledgeBase,
+        modelConfigId,
         ...(kbIds
           ? { knowledgeBases: { create: kbIds.map((id) => ({ knowledgeBaseId: id })) } }
           : {}),
       },
       include: {
         knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
+        modelConfig: { select: { id: true, name: true, model: true, baseURL: true } },
+      },
+    });
+  }
+
+  /** 修改会话绑定的模型配置（null = 回退系统默认） */
+  async updateSessionModel(userId: string, sessionId: string, modelConfigId?: string | null) {
+    await this.getSession(userId, sessionId);
+    let next: string | null = null;
+    if (modelConfigId) {
+      const target = await this.modelConfigService.resolveForChat(userId, modelConfigId);
+      if (!target) throw new NotFoundException('模型配置不存在');
+      next = modelConfigId;
+    }
+    return this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: { modelConfigId: next },
+      include: {
+        knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
+        modelConfig: { select: { id: true, name: true, model: true, baseURL: true } },
       },
     });
   }
@@ -83,6 +122,7 @@ export class ChatService {
         _count: { select: { messages: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { content: true } },
         knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
+        modelConfig: { select: { id: true, name: true, model: true } },
       },
       orderBy: { updatedAt: 'desc' },
       take: keyword ? 50 : undefined, // 搜索结果限定条数，避免超大列表
@@ -237,6 +277,12 @@ export class ChatService {
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
+    // 模型目标：会话绑定了用户模型配置（BYO key）→ 用用户的 key/baseURL/model 出回答，
+    // token 由用户买单；未绑定 → 系统默认模型。
+    const target =
+      (await this.modelConfigService.resolveForChat(userId, session.modelConfigId)) ??
+      this.systemTarget;
+    const answerClient = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
     signal.addEventListener('abort', onAbort, { once: true });
@@ -245,9 +291,9 @@ export class ChatService {
     // 流式 usage（stream_options.include_usage）：最后一个 chunk 携带本次请求的 token 用量
     let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
     try {
-      const stream = await this.client.chat.completions.create(
+      const stream = await answerClient.chat.completions.create(
         {
-          model: this.configService.get<string>('DEEPSEEK_MODEL', 'deepseek-chat'),
+          model: target.model,
           messages: [{ role: 'system', content: system }, ...messages],
           stream: true,
           stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它

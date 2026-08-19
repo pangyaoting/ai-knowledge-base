@@ -27,4 +27,13 @@ export class CreateSessionDto {
   @IsOptional()
   @IsBoolean({ message: 'useKnowledgeBase 格式不正确' })
   useKnowledgeBase?: boolean;
+
+  @ApiProperty({
+    example: 'uuid',
+    description: '会话绑定的用户模型配置ID（不传 = 系统默认模型）',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID('4', { message: '模型配置ID格式不正确' })
+  modelConfigId?: string;
 }
