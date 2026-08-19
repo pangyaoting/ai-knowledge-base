@@ -50,7 +50,9 @@ pause
 exit /b 1
 
 :db_fail
-echo [ERROR] Database not ready in 90s. Check WSL/Docker.
+echo [ERROR] Database not ready in 90s.
+
+echo   Fix: run keep-docker-running.sh inside WSL (project root),
 pause
 exit /b 1
 

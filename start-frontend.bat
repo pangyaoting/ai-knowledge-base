@@ -1,4 +1,10 @@
 @echo off
+rem Frontend start (idempotent: skip if port 5173 already in use)
+powershell -NoProfile -Command "if(Test-NetConnection -ComputerName localhost -Port 5173 -WarningAction SilentlyContinue -InformationLevel Quiet){ exit 0 } else { exit 1 }"
+if not errorlevel 1 (
+  echo [SKIP] Frontend already running on port 5173.
+  exit /b 0
+)
 cd /d "%~dp0apps\web"
 set PATH=C:\Program Files\nodejs;%PATH%
 echo Starting frontend dev server...
