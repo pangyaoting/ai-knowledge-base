@@ -15,6 +15,8 @@ import {
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
+import Skeleton from '@/components/ui/Skeleton.vue';
+import { toast } from '@/composables/useToast';
 import {
   getKnowledgeBases,
   createKnowledgeBase,
@@ -30,7 +32,6 @@ const list = ref<KnowledgeBase[]>([]);
 const loading = ref(false);
 const creating = ref(false);
 const seeding = ref(false);
-const error = ref('');
 const kbSearch = ref(''); // 知识库搜索（本地过滤）
 
 /** 按名称/描述过滤知识库（即时响应，无需请求后端） */
@@ -45,11 +46,10 @@ const description = ref('');
 
 async function load() {
   loading.value = true;
-  error.value = '';
   try {
     list.value = await getKnowledgeBases();
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     loading.value = false;
   }
@@ -61,12 +61,12 @@ onMounted(load);
 /** 一键导入示例数据 */
 async function handleSeed() {
   seeding.value = true;
-  error.value = '';
   try {
     await seedDemoData();
     await load();
+    toast.success('示例数据导入完成，正在后台向量化');
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     seeding.value = false;
   }
@@ -76,7 +76,6 @@ async function handleCreate() {
   const trimmed = name.value.trim();
   if (!trimmed) return;
   creating.value = true;
-  error.value = '';
   try {
     const created = await createKnowledgeBase({
       name: trimmed,
@@ -84,25 +83,28 @@ async function handleCreate() {
     });
     name.value = '';
     description.value = '';
+    toast.success(`知识库「${created.name}」已创建`);
     // 乐观插入：立即显示新知识库，不依赖第二次请求（避免后端偶发抖动时"创建了但看不到"）
     list.value.unshift(created);
     // 后台刷新拿完整数据（文档数统计等）；失败不影响已显示的新条目
     load().catch(() => undefined);
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     creating.value = false;
   }
 }
 
-async function handleDelete(id: string) {
+async function handleDelete(id: string, name: string) {
   // eslint-disable-next-line no-alert
-  if (!window.confirm('删除知识库将同时删除其中所有文档和向量数据，确定要删除吗？')) return;
+  if (!window.confirm(`删除知识库「${name}」将同时删除其中所有文档和向量数据，确定要删除吗？`))
+    return;
   try {
     await deleteKnowledgeBase(id);
     await load();
+    toast.success(`知识库「${name}」已删除`);
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   }
 }
 
@@ -124,7 +126,6 @@ async function saveEdit() {
   const trimmed = editName.value.trim();
   if (!trimmed) return;
   saving.value = true;
-  error.value = '';
   try {
     await updateKnowledgeBase(kb.id, {
       name: trimmed,
@@ -132,8 +133,9 @@ async function saveEdit() {
     });
     editing.value = null;
     await load();
+    toast.success('知识库信息已更新');
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     saving.value = false;
   }
@@ -175,12 +177,21 @@ async function saveEdit() {
           {{ creating ? '创建中...' : '创建知识库' }}
         </Button>
       </div>
-      <p v-if="error" class="mt-3 text-sm text-destructive">{{ error }}</p>
     </div>
 
     <!-- 列表 -->
-    <div v-if="loading" class="flex justify-center py-16">
-      <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+    <div v-if="loading">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div v-for="i in 6" :key="i" class="rounded-lg border bg-card p-5">
+          <Skeleton class="h-4 w-2/3" />
+          <Skeleton class="mt-3 h-3 w-full" />
+          <Skeleton class="mt-1.5 h-3 w-3/4" />
+          <div class="mt-5 flex items-center justify-between">
+            <Skeleton class="h-3 w-20" />
+            <Skeleton class="h-7 w-20" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-else-if="list.length === 0" class="rounded-lg border border-dashed py-16 text-center">
@@ -239,7 +250,7 @@ async function saveEdit() {
             <button
               class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
               :title="'删除 ' + kb.name"
-              @click="handleDelete(kb.id)"
+              @click="handleDelete(kb.id, kb.name)"
             >
               <Trash2 class="h-4 w-4" />
             </button>
@@ -278,7 +289,6 @@ async function saveEdit() {
             <Input v-model="editDesc" placeholder="描述（可选）" />
           </div>
         </div>
-        <p v-if="error" class="mt-3 text-sm text-destructive">{{ error }}</p>
         <div class="mt-5 flex justify-end gap-2">
           <Button variant="ghost" size="sm" @click="editing = null">取消</Button>
           <Button size="sm" :disabled="saving || !editName.trim()" @click="saveEdit">

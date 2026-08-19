@@ -17,6 +17,8 @@ import {
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
+import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
+import { toast } from '@/composables/useToast';
 import {
   getChatSessions,
   createChatSession,
@@ -204,7 +206,7 @@ async function loadSessions(q?: string) {
   try {
     sessions.value = await getChatSessions(q);
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     loadingSessions.value = false;
   }
@@ -309,8 +311,9 @@ async function handleDeleteSession(id: string) {
       messages.value = [];
     }
     await loadSessions();
+    toast.success('会话已删除');
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   }
 }
 
@@ -489,8 +492,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </div>
       </div>
       <div class="flex-1 overflow-y-auto px-2 pb-2">
-        <div v-if="loadingSessions" class="flex justify-center py-8">
-          <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+        <div v-if="loadingSessions" class="py-2">
+          <ListSkeleton :rows="8" />
         </div>
         <p
           v-else-if="sessionSearch.trim() && sessions.length === 0"

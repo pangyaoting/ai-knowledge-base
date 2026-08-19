@@ -11,6 +11,7 @@ import type { GraphNode, GraphEdge, EntityChunk } from '@/types/knowledge';
 import { getKnowledgeGraph, getEntityChunks, rebuildKnowledgeGraph } from '@/api/knowledge';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import Button from '@/components/ui/Button.vue';
+import Skeleton from '@/components/ui/Skeleton.vue';
 
 echarts.use([GraphChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
@@ -205,8 +206,20 @@ onBeforeUnmount(() => {
     <div class="flex min-h-0 flex-1">
       <!-- 图 -->
       <div class="relative min-w-0 flex-1">
-        <div v-if="loading" class="flex h-full items-center justify-center">
-          <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+        <div v-if="loading" class="flex h-full items-center justify-center p-8">
+          <div class="w-full max-w-2xl space-y-3">
+            <div class="flex items-center justify-center gap-6 py-4">
+              <Skeleton class="h-12 w-12 rounded-full" />
+              <Skeleton class="h-12 w-12 rounded-full" />
+              <Skeleton class="h-12 w-12 rounded-full" />
+            </div>
+            <Skeleton class="h-64 w-full" />
+            <div class="flex justify-center gap-4">
+              <Skeleton class="h-3 w-24" />
+              <Skeleton class="h-3 w-24" />
+              <Skeleton class="h-3 w-24" />
+            </div>
+          </div>
         </div>
         <p
           v-else-if="error"

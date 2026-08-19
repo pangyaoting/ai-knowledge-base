@@ -7,16 +7,10 @@ import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { ECharts } from 'echarts/core';
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
-import {
-  Database,
-  FileText,
-  Layers,
-  MessageSquare,
-  Coins,
-  TrendingUp,
-  Loader2,
-} from 'lucide-vue-next';
+import { Database, FileText, Layers, MessageSquare, Coins, TrendingUp } from 'lucide-vue-next';
 import { getOverview, type OverviewData } from '@/api/stats';
+import DashboardSkeleton from '@/components/skeletons/DashboardSkeleton.vue';
+import { toast } from '@/composables/useToast';
 
 const data = ref<OverviewData | null>(null);
 const loading = ref(true);
@@ -34,6 +28,7 @@ async function load() {
     data.value = await getOverview();
   } catch (e) {
     error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     loading.value = false;
   }
@@ -118,8 +113,8 @@ function fmtTokens(n: number): string {
       </p>
     </div>
 
-    <div v-if="loading" class="flex justify-center py-24">
-      <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
+    <div v-if="loading" class="py-4">
+      <DashboardSkeleton />
     </div>
 
     <p

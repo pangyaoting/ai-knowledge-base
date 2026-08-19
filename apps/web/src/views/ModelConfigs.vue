@@ -4,6 +4,8 @@ import { Loader2, Cpu, Plus, Trash2, Star, Pencil, FlaskConical, X, Info } from 
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
+import Skeleton from '@/components/ui/Skeleton.vue';
+import { toast } from '@/composables/useToast';
 import {
   getModelConfigs,
   createModelConfig,
@@ -19,7 +21,6 @@ const formOpen = ref(false);
 const editingId = ref<string | null>(null);
 const savingConfig = ref(false);
 const testingId = ref<string | null>(null);
-const configMsg = ref('');
 const configError = ref('');
 const testResults = ref<Record<string, string>>({});
 
@@ -36,7 +37,7 @@ async function loadConfigs() {
   try {
     configs.value = await getModelConfigs();
   } catch (e) {
-    configError.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     loadingConfigs.value = false;
   }
@@ -49,7 +50,6 @@ function openCreate() {
   configForm.apiKey = '';
   configForm.model = '';
   configForm.isDefault = false;
-  configMsg.value = '';
   configError.value = '';
   formOpen.value = true;
 }
@@ -61,7 +61,6 @@ function openEdit(c: ModelConfig) {
   configForm.apiKey = ''; // 编辑时 key 可留空（保留原 key）
   configForm.model = c.model;
   configForm.isDefault = c.isDefault;
-  configMsg.value = '';
   configError.value = '';
   formOpen.value = true;
 }
@@ -76,7 +75,6 @@ async function saveConfig() {
     return;
   }
   savingConfig.value = true;
-  configMsg.value = '';
   configError.value = '';
   try {
     if (editingId.value) {
@@ -87,7 +85,7 @@ async function saveConfig() {
         isDefault: configForm.isDefault,
         ...(configForm.apiKey.trim() ? { apiKey: configForm.apiKey.trim() } : {}),
       });
-      configMsg.value = '配置已更新';
+      toast.success('配置已更新');
     } else {
       await createModelConfig({
         name: configForm.name.trim(),
@@ -96,7 +94,7 @@ async function saveConfig() {
         model: configForm.model.trim(),
         isDefault: configForm.isDefault,
       });
-      configMsg.value = '配置已保存';
+      toast.success('配置已保存');
     }
     formOpen.value = false;
     await loadConfigs();
@@ -113,8 +111,9 @@ async function handleDelete(id: string, name: string) {
   try {
     await deleteModelConfig(id);
     await loadConfigs();
+    toast.success(`配置「${name}」已删除`);
   } catch (e) {
-    configError.value = (e as Error).message;
+    toast.error((e as Error).message);
   }
 }
 
@@ -122,8 +121,9 @@ async function handleSetDefault(id: string) {
   try {
     await updateModelConfig(id, { isDefault: true });
     await loadConfigs();
+    toast.success('已设为默认配置');
   } catch (e) {
-    configError.value = (e as Error).message;
+    toast.error((e as Error).message);
   }
 }
 
@@ -133,8 +133,10 @@ async function handleTest(id: string) {
   try {
     const res = await testModelConfig(id);
     testResults.value[id] = res.ok ? '✅ 连接成功' : `❌ ${res.message}`;
+    if (!res.ok) toast.error(res.message);
   } catch (e) {
     testResults.value[id] = `❌ ${(e as Error).message}`;
+    toast.error((e as Error).message);
   } finally {
     testingId.value = null;
   }
@@ -239,8 +241,14 @@ onMounted(loadConfigs);
       </div>
 
       <!-- 列表 -->
-      <div v-if="loadingConfigs" class="flex justify-center py-8">
-        <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+      <div v-if="loadingConfigs" class="mt-4 space-y-2">
+        <div v-for="i in 3" :key="i" class="flex items-center gap-3 rounded-lg border px-4 py-3">
+          <div class="min-w-0 flex-1 space-y-2">
+            <Skeleton class="h-3.5 w-32" />
+            <Skeleton class="h-3 w-52" />
+          </div>
+          <Skeleton class="h-7 w-24 shrink-0" />
+        </div>
       </div>
       <div
         v-else-if="configs.length === 0 && !formOpen"

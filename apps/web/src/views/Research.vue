@@ -14,6 +14,8 @@ import {
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
+import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
+import { toast } from '@/composables/useToast';
 import { getReports, getReport, createReport, deleteReport } from '@/api/research';
 import { getKnowledgeBases } from '@/api/knowledge';
 import { getModelConfigs } from '@/api/model-configs';
@@ -106,7 +108,7 @@ async function loadReports() {
   try {
     reports.value = await getReports();
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     loading.value = false;
   }
@@ -172,7 +174,6 @@ async function handleCreate() {
   const t = topic.value.trim();
   if (!t || creating.value) return;
   creating.value = true;
-  error.value = '';
   try {
     const kbIds = scope.value === 'specific' ? [...pickingKbIds.value] : [];
     const report = await createReport({ topic: t, knowledgeBaseIds: kbIds });
@@ -181,7 +182,7 @@ async function handleCreate() {
     pickingKbIds.value = [];
     await selectReport(report.id);
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     creating.value = false;
   }
@@ -198,8 +199,9 @@ async function handleDelete(id: string) {
       stopPolling();
     }
     await loadReports();
+    toast.success('研究报告已删除');
   } catch (e) {
-    error.value = (e as Error).message;
+    toast.error((e as Error).message);
   }
 }
 
@@ -263,8 +265,8 @@ onBeforeUnmount(stopPolling);
         </Button>
       </div>
       <div class="flex-1 overflow-y-auto px-2 pb-2">
-        <div v-if="loading" class="flex justify-center py-8">
-          <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+        <div v-if="loading" class="py-2">
+          <ListSkeleton :rows="6" />
         </div>
         <div
           v-for="r in reports"

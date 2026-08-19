@@ -7,25 +7,22 @@ import { Loader2, UserRound, KeyRound, Mail, ArrowUpRight } from 'lucide-vue-nex
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
+import { toast } from '@/composables/useToast';
 
 const auth = useAuthStore();
 
 // ===== 资料 =====
 const profileForm = reactive({ nickname: auth.user?.nickname ?? '' });
 const savingProfile = ref(false);
-const profileMsg = ref('');
-const profileError = ref('');
 
 async function saveProfile() {
   savingProfile.value = true;
-  profileMsg.value = '';
-  profileError.value = '';
   try {
     await updateProfile({ nickname: profileForm.nickname.trim() });
-    profileMsg.value = '资料已更新';
+    toast.success('资料已更新');
     auth.fetchProfile().catch(() => undefined);
   } catch (e) {
-    profileError.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     savingProfile.value = false;
   }
@@ -36,7 +33,6 @@ const bindForm = reactive({ email: '', code: '' });
 const sendingCode = ref(false);
 const countdown = ref(0);
 const binding = ref(false);
-const bindMsg = ref('');
 const bindError = ref('');
 const bindHint = ref('');
 
@@ -49,7 +45,6 @@ const canSendBind = computed(() => countdown.value <= 0 && !!bindForm.email.trim
 
 async function handleSendBindCode() {
   bindError.value = '';
-  bindMsg.value = '';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bindForm.email.trim())) {
     bindError.value = '请输入正确的邮箱地址';
     return;
@@ -85,7 +80,6 @@ async function handleSendBindCode() {
 
 async function handleBindEmail() {
   bindError.value = '';
-  bindMsg.value = '';
   if (!bindForm.code.trim() || bindForm.code.trim().length !== 6) {
     bindError.value = '请输入 6 位验证码';
     return;
@@ -97,7 +91,7 @@ async function handleBindEmail() {
       code: bindForm.code.trim(),
     });
     auth.user = updated; // 更新本地用户信息（邮箱已变）
-    bindMsg.value = '邮箱已更换成功';
+    toast.success('邮箱已更换成功');
     bindForm.email = '';
     bindForm.code = '';
     bindHint.value = '';
@@ -131,12 +125,12 @@ async function savePassword() {
       oldPassword: passwordForm.oldPassword,
       newPassword: passwordForm.newPassword,
     });
-    pwdMsg.value = '密码已修改，下次登录请使用新密码';
+    toast.success('密码已修改，下次登录请使用新密码');
     passwordForm.oldPassword = '';
     passwordForm.newPassword = '';
     passwordForm.confirm = '';
   } catch (e) {
-    pwdError.value = (e as Error).message;
+    toast.error((e as Error).message);
   } finally {
     savingPassword.value = false;
   }
@@ -180,8 +174,6 @@ async function savePassword() {
             <Label>昵称</Label>
             <Input v-model="profileForm.nickname" placeholder="你的昵称" />
           </div>
-          <p v-if="profileMsg" class="text-sm text-green-600">{{ profileMsg }}</p>
-          <p v-if="profileError" class="text-sm text-destructive">{{ profileError }}</p>
           <Button :disabled="savingProfile" @click="saveProfile">
             <Loader2 v-if="savingProfile" class="h-4 w-4 animate-spin" />
             保存资料
@@ -208,8 +200,6 @@ async function savePassword() {
             <Label>确认新密码</Label>
             <Input v-model="passwordForm.confirm" type="password" placeholder="再次输入新密码" />
           </div>
-          <p v-if="pwdMsg" class="text-sm text-green-600">{{ pwdMsg }}</p>
-          <p v-if="pwdError" class="text-sm text-destructive">{{ pwdError }}</p>
           <Button :disabled="savingPassword" @click="savePassword">
             <Loader2 v-if="savingPassword" class="h-4 w-4 animate-spin" />
             修改密码
@@ -254,7 +244,6 @@ async function savePassword() {
           </div>
           <p v-if="bindHint" class="text-xs text-green-600">{{ bindHint }}</p>
         </div>
-        <p v-if="bindMsg" class="text-sm text-green-600">{{ bindMsg }}</p>
         <p v-if="bindError" class="text-sm text-destructive">{{ bindError }}</p>
         <Button :disabled="binding" @click="handleBindEmail">
           <Loader2 v-if="binding" class="h-4 w-4 animate-spin" />
