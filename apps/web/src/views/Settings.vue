@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { updateProfile, changePassword } from '@/api/user';
+import { generate2fa, enable2fa, disable2fa } from '@/api/auth';
+import QRCode from 'qrcode';
 import {
   Loader2,
   UserRound,
@@ -13,6 +15,8 @@ import {
   Pencil,
   FlaskConical,
   X,
+  ShieldCheck,
+  ShieldAlert,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -25,6 +29,7 @@ import {
   testModelConfig,
 } from '@/api/model-configs';
 import type { ModelConfig } from '@/types/model-config';
+import type { TwoFactorSetup } from '@/types/auth';
 
 const auth = useAuthStore();
 
@@ -80,6 +85,73 @@ async function savePassword() {
     pwdError.value = (e as Error).message;
   } finally {
     savingPassword.value = false;
+  }
+}
+
+// ===== 双因素认证（TOTP）=====
+const totpEnabled = computed(() => auth.user?.totpEnabled ?? false);
+const setup = ref<TwoFactorSetup | null>(null); // 绑定中（待验证码确认）
+const setupQr = ref(''); // 二维码 dataURL
+const setupCode = ref('');
+const enabling = ref(false);
+const recoveryCodes = ref<string[] | null>(null); // 启用成功后的一次性恢复码
+const disablePwd = ref('');
+const disabling = ref(false);
+const totpMsg = ref('');
+const totpError = ref('');
+
+/** 第一步：生成绑定材料（密钥 + 二维码） */
+async function startSetup() {
+  totpError.value = '';
+  totpMsg.value = '';
+  try {
+    const s = await generate2fa();
+    setup.value = s;
+    setupQr.value = await QRCode.toDataURL(s.otpauthUrl, { width: 180, margin: 1 });
+  } catch (e) {
+    totpError.value = (e as Error).message;
+  }
+}
+
+/** 第二步：输入验证器动态码 → 启用，返回一次性恢复码 */
+async function confirmEnable() {
+  if (!setupCode.value.trim()) {
+    totpError.value = '请输入验证器 App 上的 6 位动态码';
+    return;
+  }
+  enabling.value = true;
+  totpError.value = '';
+  try {
+    const res = await enable2fa(setupCode.value.trim());
+    recoveryCodes.value = res.recoveryCodes;
+    setup.value = null;
+    setupQr.value = '';
+    setupCode.value = '';
+    auth.fetchProfile().catch(() => undefined); // 刷新 2FA 状态
+  } catch (e) {
+    totpError.value = (e as Error).message;
+  } finally {
+    enabling.value = false;
+  }
+}
+
+/** 关闭 2FA：验证当前密码 */
+async function handleDisable() {
+  if (!disablePwd.value) {
+    totpError.value = '请输入密码确认关闭';
+    return;
+  }
+  disabling.value = true;
+  totpError.value = '';
+  try {
+    await disable2fa(disablePwd.value);
+    disablePwd.value = '';
+    totpMsg.value = '双因素认证已关闭';
+    auth.fetchProfile().catch(() => undefined);
+  } catch (e) {
+    totpError.value = (e as Error).message;
+  } finally {
+    disabling.value = false;
   }
 }
 
@@ -273,6 +345,98 @@ onMounted(loadConfigs);
           </Button>
         </div>
       </div>
+    </div>
+
+    <!-- 双因素认证（TOTP） -->
+    <div class="mt-6 rounded-lg border bg-card p-6">
+      <div class="flex flex-wrap items-center gap-2">
+        <ShieldCheck v-if="totpEnabled" class="h-4 w-4 text-green-600" />
+        <ShieldAlert v-else class="h-4 w-4 text-primary" />
+        <h2 class="font-semibold">双因素认证（2FA）</h2>
+        <span
+          class="rounded px-1.5 py-0.5 text-[10px]"
+          :class="totpEnabled ? 'bg-green-50 text-green-700' : 'bg-muted text-muted-foreground'"
+        >
+          {{ totpEnabled ? '已开启' : '未开启' }}
+        </span>
+        <p class="w-full text-xs text-muted-foreground">
+          TOTP 验证器（Google Authenticator / Microsoft Authenticator
+          等）扫码绑定，登录时除密码外还需 6 位动态码
+        </p>
+      </div>
+
+      <!-- 绑定中：二维码 + 密钥 + 验证码确认 -->
+      <div
+        v-if="setup"
+        class="mt-4 flex flex-col items-center rounded-lg border border-primary/30 bg-muted/30 p-4 text-center"
+      >
+        <p class="text-sm font-medium">用验证器 App 扫描二维码（或手动输入密钥）</p>
+        <img :src="setupQr" alt="2FA 二维码" class="mt-3 rounded bg-white p-1" width="180" />
+        <p class="mt-2 break-all font-mono text-xs text-muted-foreground">{{ setup.secret }}</p>
+        <div class="mt-3 flex items-center gap-2">
+          <Input
+            v-model="setupCode"
+            type="text"
+            placeholder="输入 6 位动态码"
+            class="w-40"
+            :disabled="enabling"
+          />
+          <Button size="sm" :disabled="enabling" @click="confirmEnable">
+            <Loader2 v-if="enabling" class="h-4 w-4 animate-spin" />
+            确认启用
+          </Button>
+        </div>
+      </div>
+
+      <!-- 启用成功：一次性恢复码（醒目提示） -->
+      <div
+        v-else-if="recoveryCodes"
+        class="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 p-4"
+      >
+        <p class="text-sm font-semibold text-destructive">⚠️ 保存好这些恢复码！</p>
+        <p class="mt-1 text-xs text-muted-foreground">
+          每个恢复码只能用一次（丢失验证器时用它登录）。此页面关闭后不再显示，请立即复制保存。
+        </p>
+        <div class="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+          <code
+            v-for="c in recoveryCodes"
+            :key="c"
+            class="rounded bg-muted px-2 py-1 text-center text-xs font-mono"
+            >{{ c }}</code
+          >
+        </div>
+        <Button
+          size="sm"
+          class="mt-3"
+          @click="
+            recoveryCodes = null;
+            totpMsg = '双因素认证已启用';
+          "
+        >
+          我已保存
+        </Button>
+      </div>
+
+      <!-- 已开启：禁用 -->
+      <div v-else-if="totpEnabled" class="mt-4 flex flex-wrap items-center gap-2">
+        <Input
+          v-model="disablePwd"
+          type="password"
+          placeholder="输入密码确认关闭"
+          class="w-52"
+          :disabled="disabling"
+        />
+        <Button variant="outline" size="sm" :disabled="disabling" @click="handleDisable">
+          <Loader2 v-if="disabling" class="h-4 w-4 animate-spin" />
+          关闭双因素认证
+        </Button>
+      </div>
+
+      <!-- 未开启：启用 -->
+      <Button v-else class="mt-4" size="sm" @click="startSetup">启用双因素认证</Button>
+
+      <p v-if="totpMsg" class="mt-3 text-sm text-green-600">{{ totpMsg }}</p>
+      <p v-if="totpError" class="mt-3 text-sm text-destructive">{{ totpError }}</p>
     </div>
 
     <!-- 模型配置（BYO 大模型 API） -->
