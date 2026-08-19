@@ -43,8 +43,10 @@ port_bound() {
 }
 
 # ============ 1. dockerd ============
+# NOTE: keep log messages pure ASCII -- the script's stdout is shown in cmd's GBK
+# console via the one-click bat; UTF-8 Chinese renders as mojibake there.
 if ! docker ps >/dev/null 2>&1; then
-  log "dockerd 不可用，清理残留进程与 socket..."
+  log "dockerd unavailable, cleaning stale processes and sockets..."
   # 彻底清理：dockerd + 其子进程 containerd + runc shim（残留 containerd 会占住 socket 导致新 dockerd 起不来）
   pkill -9 -f 'dockerd' 2>/dev/null
   pkill -9 -f 'containerd' 2>/dev/null
@@ -53,29 +55,31 @@ if ! docker ps >/dev/null 2>&1; then
   rm -rf /var/run/docker
   nohup dockerd > /var/log/dockerd.log 2>&1 &
   if wait_docker; then
-    log "dockerd 已就绪"
+    log "dockerd ready"
   else
-    log "ERROR: dockerd 60s 内未就绪，请查看 /var/log/dockerd.log"
+    log "ERROR: dockerd not ready in 60s, check /var/log/dockerd.log"
     exit 1
   fi
 else
-  log "dockerd 正常"
+  log "dockerd OK"
 fi
 
 # ============ 2. 容器 ============
-cd /mnt/d/项目/主项目 || exit 1
+# 项目根目录 = 脚本所在目录（脚本就放在项目根）；移动/复制项目到别处也自动适配
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+cd "$SCRIPT_DIR" || exit 1
 docker compose -p kb up -d 2>&1
 
 for c in kb-postgres kb-redis; do
   if wait_healthy "$c"; then
     log "$c healthy"
   else
-    log "ERROR: $c 60s 内未 healthy，尝试重启一次"
+    log "ERROR: $c not healthy in 60s, trying one restart"
     docker restart "$c" >/dev/null 2>&1
     if wait_healthy "$c"; then
       log "$c healthy (restarted)"
     else
-      log "ERROR: $c 仍不健康，请 docker logs $c 排查"
+      log "ERROR: $c still unhealthy, run 'docker logs $c' to debug"
       exit 1
     fi
   fi
@@ -90,9 +94,9 @@ while [ $i -lt 30 ]; do
   i=$((i+1)); sleep 2
 done
 if port_bound 5432 && port_bound 6379; then
-  log "端口 5432/6379 已绑定"
+  log "ports 5432/6379 bound"
 else
-  log "WARN: 端口绑定异常，可能被本机进程占用（如 rediszt3 服务占 IPv4 6379；项目已用 ::1 规避）"
+  log "WARN: port binding issue (maybe a local service holds IPv4 6379; project uses ::1 workaround)"
   # 不致命：redis 走 ::1 仍可用，postgres 若绑定失败则后端连不上——再给 postgres 一次重启
   if ! port_bound 5432; then
     docker restart kb-postgres >/dev/null 2>&1

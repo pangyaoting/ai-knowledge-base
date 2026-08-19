@@ -1,7 +1,6 @@
 @echo off
 setlocal
 set "ROOT=%~dp0"
-set "ROOTN=%ROOT:~0,-1%"
 echo ============================================
 echo   AI Knowledge Base - One-Click Start
 echo ============================================
@@ -11,9 +10,21 @@ rem [1/4] Boot WSL, hang keepalive (prevent idle recycle), then run docker-ready
 rem The ready script only exits 0 after containers are healthy AND ports are bound,
 rem so no more "Database not ready in 90s" false alarms from slow Test-NetConnection.
 echo [1/4] Starting WSL2 Docker and database containers...
-rem ROOTN has no trailing backslash so wslpath quoting stays balanced
-for /f "delims=" %%i in ('wsl -d alpine -- wslpath "%ROOTN%"') do set "WSLROOT=%%i"
-if not defined WSLROOT goto :wslpath_fail
+rem IMPORTANT: build the WSL path WITHOUT wslpath. wslpath's UTF-8 stdout is decoded as GBK
+rem by cmd's for /f pipe, mangling any non-ASCII directory name (the project folder is under
+rem D:\<chinese>\<chinese>). Constructing /mnt/<drive>/<rest> here and passing it as a wsl.exe
+rem argument works, because wsl.exe converts the Unicode argument to UTF-8 for Linux correctly.
+set "ROOTN=%ROOT:~0,-1%"
+set "DRIVE=%ROOTN:~0,1%"
+if /i "%DRIVE%"=="C" set "DRIVE=c"
+if /i "%DRIVE%"=="D" set "DRIVE=d"
+if /i "%DRIVE%"=="E" set "DRIVE=e"
+if /i "%DRIVE%"=="F" set "DRIVE=f"
+if /i "%DRIVE%"=="G" set "DRIVE=g"
+if /i "%DRIVE%"=="H" set "DRIVE=h"
+set "WSLROOT=/mnt/%DRIVE%/%ROOTN:~3%"
+set "WSLROOT=%WSLROOT:\=/%"
+if "%WSLROOT%"=="/mnt//" goto :wsl_fail
 start "KB-Keepalive" /min wsl -d alpine -- sh "%WSLROOT%/keepalive.sh"
 echo   Running docker ready-check (containers must be healthy, max ~2min)...
 wsl -d alpine -- sh "%WSLROOT%/keep-docker-running.sh"
@@ -47,8 +58,8 @@ pause >nul
 start http://localhost:5173
 exit /b 0
 
-:wslpath_fail
-echo [ERROR] Cannot resolve WSL path. Is WSL2 available?
+:wsl_fail
+echo [ERROR] Cannot build WSL path from "%ROOTN%". Is WSL2 available?
 pause
 exit /b 1
 
