@@ -41,7 +41,7 @@ export class ReportProcessor {
     private modelConfigService: ModelConfigService,
   ) {}
 
-  /** 一次 LLM 补全（非流式，使用用户自己的模型配置） */
+  /** 一次 LLM 补全（非流式，使用用户自己的模型配置）；输出撞到 max_tokens 上限时记录日志 */
   private async complete(
     target: ChatTarget,
     system: string,
@@ -58,7 +58,13 @@ export class ReportProcessor {
       max_tokens: maxTokens,
       temperature: 0.3,
     });
-    return res.choices[0]?.message?.content?.trim() ?? '';
+    const choice = res.choices[0];
+    if (choice?.finish_reason === 'length') {
+      this.logger.warn(
+        `LLM 输出达到 max_tokens(${maxTokens}) 上限，内容可能被截断：${user.slice(0, 40)}…`,
+      );
+    }
+    return choice?.message?.content?.trim() ?? '';
   }
 
   /** 执行报告生成（任何异常把报告标记为 failed，不阻塞队列） */
@@ -118,9 +124,9 @@ export class ReportProcessor {
       );
       sections.sort((a, b) => a.index - b.index);
 
-      // ③ 汇总成完整报告
+      // ③ 组装完整报告（引言/结论单独写，正文拼各小节原文——杜绝复述全文被截断）
       await this.prisma.report.update({ where: { id: reportId }, data: { step: 3 } });
-      const content = await this.mergeReport(target, report.topic, sections);
+      const content = await this.assembleReport(target, report.topic, sections);
       await this.prisma.report.update({
         where: { id: reportId },
         data: {
@@ -184,22 +190,34 @@ export class ReportProcessor {
       target,
       '你是严谨的研究撰写助手。根据【资料】撰写本小节内容，引用时标注 [来源N]（编号与资料一致）；资料没有的信息不要编造，可基于自身知识补充并注明"（补充）"。输出 Markdown。',
       `【资料】\n${sourceText}\n\n【小节主题】\n${question}`,
-      1000,
+      2000,
     );
   }
 
-  /** 汇总：引言 + 各小节 + 结论 */
-  private async mergeReport(
+  /**
+   * 组装完整报告：引言 / 结论由 LLM 单独写（短调用），正文直接拼各小节原文。
+   * 背景：旧实现让模型一次"复述"整份报告（引言+全部小节+结论），输出上限一到就被截断
+   * （实测报告 4.2k 字结尾断句、缺结论）。改成代码拼接后，正文绝不截断，只剩短段落有上限。
+   */
+  private async assembleReport(
     target: ChatTarget,
     topic: string,
     sections: ReportSection[],
   ): Promise<string> {
-    const body = sections.map((s) => `### ${s.question}\n\n${s.content}`).join('\n\n');
-    return this.complete(
+    const titles = sections.map((s) => s.question).join('；');
+    const intro = await this.complete(
       target,
-      '你是研究报告主编。根据各小节内容输出一份完整的研究报告 Markdown：标题、引言（说明研究主题与资料范围）、正文（按小节组织，保留各小节的 [来源N] 标注）、结论（总结要点与资料局限）。不要遗漏小节内容，不要编造来源编号。',
-      `【研究主题】\n${topic}\n\n【各小节内容】\n\n${body}`,
-      2500,
+      '你是研究报告主编。根据研究主题与各小节标题，写一段 120~200 字的引言：说明研究主题、资料范围与报告结构。只输出引言段落本身，不要标题。',
+      `研究主题：${topic}\n各小节标题：${titles}`,
+      300,
     );
+    const conclusion = await this.complete(
+      target,
+      '你是研究报告主编。根据研究主题与各小节标题，写一段 150~250 字的结论：总结核心要点与资料局限。只输出结论段落本身，不要标题。',
+      `研究主题：${topic}\n各小节标题：${titles}`,
+      400,
+    );
+    const body = sections.map((s) => `### ${s.question}\n\n${s.content}`).join('\n\n');
+    return `# ${topic}\n\n## 引言\n\n${intro}\n\n${body}\n\n## 结论\n\n${conclusion}`;
   }
 }
