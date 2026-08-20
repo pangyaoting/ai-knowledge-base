@@ -96,8 +96,10 @@ const selectedMinutes = computed(() => estimateMinutes(selectedTokens.value));
 
 const budgetPercent = computed(() => {
   const t = current.value;
-  if (!t || !t.tokenBudget) return 0;
-  return Math.min(100, Math.round((t.tokensUsed / t.tokenBudget) * 100));
+  // 总预算 = 研究预算 + 固定 8k 报告整理预算（停止/完成时自动把笔记整理成正式报告）
+  const total = (t?.tokenBudget ?? 0) + 8000;
+  if (!total) return 0;
+  return Math.min(100, Math.round(((t?.tokensUsed ?? 0) / total) * 100));
 });
 
 const remainingMs = computed(() => {
@@ -305,7 +307,7 @@ async function handleStop() {
   if (!t || !['pending', 'running'].includes(t.status)) return;
   try {
     current.value = await stopAgentTask(t.id);
-    toast.success('已请求停止，正在整理阶段成果...');
+    toast.success('已请求停止，正在整理成正式报告...');
     startPolling();
   } catch (e) {
     toast.error((e as Error).message);
@@ -602,7 +604,8 @@ onBeforeUnmount(() => {
               }}
             </Button>
             <p class="mt-2 text-center text-[11px] text-muted-foreground">
-              停止条件：token 预算用尽永远停止；否则到达你设定的结束时间即停止；手动停止保留阶段成果
+              停止条件：token 预算用尽永远停止；否则到达你设定的结束时间即停止；手动停止随时生效。
+              无论怎么停，都会先把手头笔记整理成正式报告（整理费另计 8k token，不占研究预算）
             </p>
           </div>
         </div>
@@ -666,7 +669,11 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-2 text-xs text-muted-foreground">
             <Zap class="h-3.5 w-3.5" />
             <span>
-              token 已用 {{ fmtTokens(current.tokensUsed) }} / {{ fmtTokens(current.tokenBudget) }}
+              token 已用 {{ fmtTokens(current.tokensUsed) }} /
+              {{ fmtTokens(current.tokenBudget + 8000) }}
+              <span class="text-[10px]">
+                （研究 {{ fmtTokens(current.tokenBudget) }} + 报告整理 8k）
+              </span>
             </span>
             <span class="ml-auto flex items-center gap-1">
               <Timer class="h-3.5 w-3.5" />
@@ -706,7 +713,7 @@ onBeforeUnmount(() => {
                 </p>
               </div>
               <p v-if="current.status === 'stopped'" class="mt-1 text-xs text-muted-foreground">
-                已停止，正在整理阶段成果...
+                已停止，正在整理成正式报告...
               </p>
               <div v-if="current.directions?.length" class="mt-4 space-y-2">
                 <div
@@ -766,7 +773,7 @@ onBeforeUnmount(() => {
               <p class="text-amber-800">
                 ⏸ 研究已停止（{{
                   stopReasonText[current.stopReason || ''] || '已停止'
-                }}），已保留阶段成果。 可继续研究：追加 token 预算和/或研究时长，Agent
+                }}），已整理出正式报告（含来源）。 可继续研究：追加 token 预算和/或研究时长， Agent
                 会从断点继续，不会从头再来。
               </p>
               <Button size="sm" class="shrink-0" @click="openExtend">
@@ -781,7 +788,7 @@ onBeforeUnmount(() => {
               v-html="renderMarkdown(current.report)"
             />
             <p v-else class="py-8 text-center text-sm text-muted-foreground">
-              已停止，暂无阶段成果
+              已停止，暂无可整理的研究内容（可继续研究，让 Agent 先读一些资料）
             </p>
           </div>
 

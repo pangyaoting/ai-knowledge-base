@@ -73,6 +73,12 @@ class BudgetMutex {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** 单个方向最多研究轮数（防止 LLM 判断失灵无限循环） */
 const MAX_ROUNDS_PER_DIRECTION = 8;
+/**
+ * 独立"报告组装预算"（token）：与用户设定的研究预算分开，专门用于把研究笔记
+ * 润色成正式报告（引言/结论/小节撰写）。任何停止（预算/时间/手动）都会先花这笔钱
+ * 把正式报告交付——用户不需要追加 token 才能拿到报告；研究预算的停止规则不变。
+ */
+const ASSEMBLY_BUDGET = 8000;
 
 /**
  * 限时·限量·自主研究 Agent 执行器（BullMQ worker 后台执行）：
@@ -92,6 +98,8 @@ export class AgentRunner {
   private readonly logger = new Logger(AgentRunner.name);
   /** 预算互斥锁：worker 并发为 1，每次 processTask 开始时重置，不会跨任务串锁 */
   private mutex = new BudgetMutex();
+  /** 记账（研究+组装合计 token，进度条/续跑基数）：worker 并发 1，实例字段安全 */
+  private tokenCounter = { total: 0 };
 
   constructor(
     private prisma: PrismaService,
@@ -122,7 +130,11 @@ export class AgentRunner {
     }
 
     const budget = new BudgetBox(task.tokenBudget);
-    budget.spend(task.tokensUsed); // 续跑：已消耗部分计入预算
+    budget.spend(task.tokensUsed); // 续跑：已消耗部分计入研究预算
+    // 组装预算独立于研究预算：研究怎么停都行，报告整理的钱是预留好的
+    const assembly = new BudgetBox(ASSEMBLY_BUDGET);
+    // 记账：研究 + 组装的全部 token（进度条/续跑基数用）
+    this.tokenCounter = { total: task.tokensUsed };
     const stop: StopFlag = { flag: false, reason: '' };
     const counters = { searchRounds: task.searchRounds, pagesRead: task.pagesRead };
     this.mutex = new BudgetMutex();
@@ -178,7 +190,7 @@ export class AgentRunner {
             notes: '',
           })),
         };
-        await this.saveProgress(taskId, progress, counters, budget);
+        await this.saveProgress(taskId, progress, counters);
         this.logger.log(
           `自主研究启动: ${taskId}（${task.mode}），${progress.directions.length} 个方向`,
         );
@@ -197,9 +209,9 @@ export class AgentRunner {
         stop.reason = 'time_exhausted';
       }
 
-      // ④ 收尾：按停止原因落终态 + 组装（阶段或完整）报告
-      const { report, sources } = await this.assemble(target, task, progress, budget, stop);
-      await this.saveProgress(taskId, progress, counters, budget);
+      // ④ 收尾：按停止原因落终态 + 组装（用独立组装预算，任何停止都交付正式报告）
+      const { report, sources } = await this.assemble(target, task, progress, assembly);
+      await this.saveProgress(taskId, progress, counters);
       if (stop.reason === 'budget_exhausted' || budget.exhausted) {
         await this.finish(taskId, 'budget_exhausted', 'stopped', report, sources, progress, null);
       } else if (stop.reason === 'time_exhausted') {
@@ -220,7 +232,7 @@ export class AgentRunner {
         await this.finish(taskId, 'completed', 'done', report, sources, progress, null);
       }
       this.logger.log(
-        `自主研究结束: ${taskId} → ${stop.reason || 'completed'}（已用 ${budget.used}/${task.tokenBudget} token）`,
+        `自主研究结束: ${taskId} → ${stop.reason || 'completed'}（研究 ${budget.used}/${task.tokenBudget}，含整理 ${this.tokenCounter.total} token）`,
       );
     } catch (err) {
       this.logger.warn(`自主研究异常: ${taskId} → ${(err as Error).message}`);
@@ -310,7 +322,7 @@ export class AgentRunner {
         await this.extractNotes(target, taskId, dir, src, content, budget, stop);
         if (stop.flag) break;
         // 每轮精读后保存断点（续跑从这恢复）
-        await this.saveProgress(taskId, progress, counters, budget);
+        await this.saveProgress(taskId, progress, counters);
       }
       dir.rounds += 1;
     }
@@ -329,8 +341,7 @@ export class AgentRunner {
   // ==================== LLM 调用 ====================
 
   /**
-   * 一次非流式补全（走用户自己的模型配置），自动扣预算。
-   * 预算用尽 / 已触发停止 → 返回 null，调用方据此收尾。
+   * 研究用 LLM 调用：扣"研究预算"，预算用尽立即触发全局停止。
    * LLM 调用串行执行（BudgetMutex）：多方向并发只发生在不耗 token 的搜索/提取上，
    * 保证预算用尽时最多只有一个在途调用（软超支 ≈ 单次调用），不会整批超支。
    */
@@ -343,8 +354,38 @@ export class AgentRunner {
     budget: BudgetBox,
     stop: StopFlag,
   ): Promise<{ text: string; totalTokens: number } | null> {
+    return this.llmCall(target, taskId, system, user, maxTokens, budget, stop, false);
+  }
+
+  /**
+   * 报告组装用 LLM 调用：扣独立的"组装预算"，不受研究停止标记影响——
+   * 研究停了，把手头的笔记整理成正式报告这个收尾动作仍会执行完。
+   */
+  private async assembleCall(
+    target: ChatTarget,
+    taskId: string,
+    system: string,
+    user: string,
+    maxTokens: number,
+    assembly: BudgetBox,
+  ): Promise<{ text: string; totalTokens: number } | null> {
+    return this.llmCall(target, taskId, system, user, maxTokens, assembly, null, true);
+  }
+
+  /** 一次非流式补全（走用户自己的模型配置），自动扣预算并记账 */
+  private async llmCall(
+    target: ChatTarget,
+    taskId: string,
+    system: string,
+    user: string,
+    maxTokens: number,
+    box: BudgetBox,
+    stop: StopFlag | null,
+    ignoreStop: boolean,
+  ): Promise<{ text: string; totalTokens: number } | null> {
     return this.mutex.run(async () => {
-      if (budget.exhausted || stop.flag) return null;
+      // 组装调用（ignoreStop=true）只看组装预算；研究调用还看停止标记
+      if (box.exhausted || (!ignoreStop && stop?.flag)) return null;
       const client = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
       const res = await client.chat.completions.create({
         model: target.model,
@@ -358,16 +399,17 @@ export class AgentRunner {
       const usage = res.usage;
       const total =
         usage?.total_tokens ?? (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0);
-      budget.spend(total);
-      // 预算用尽 → 立即触发全局停止（用户锁定规则：token 用完永远停）
-      if (budget.exhausted) {
+      box.spend(total);
+      this.tokenCounter.total += total;
+      // 研究预算用尽 → 立即触发全局停止（用户锁定规则：token 用完永远停）
+      if (box.exhausted && !ignoreStop && stop) {
         stop.flag = true;
         stop.reason = 'budget_exhausted';
       }
-      // 实时同步已用 token（进度条）
+      // 实时同步已用 token（进度条 = 研究 + 组装合计）
       await this.prisma.agentTask.update({
         where: { id: taskId },
-        data: { tokensUsed: budget.used },
+        data: { tokensUsed: this.tokenCounter.total },
       });
       const choice = res.choices[0];
       if (choice?.finish_reason === 'length') {
@@ -553,75 +595,82 @@ export class AgentRunner {
   // ==================== 报告组装 ====================
 
   /**
-   * 把各方向研究笔记写成 Markdown 报告。
-   * - 正常运行（未停止）：为有笔记的方向做 LLM 润色小节（已缓存的小节正文直接复用，续跑不重复花 token），
-   *   再生成引言/结论；
-   * - 停止收尾（预算/时间/手动）：不再花任何 token，有笔记的方向直接拼原始研究笔记作为"阶段成果"，
-   *   保证用户停止后立刻能看到已经研究到的内容（后续续跑完成时会被正式报告替换）。
+   * 把各方向研究笔记写成 Markdown 报告（用独立的组装预算，任何停止都交付正式报告）：
+   * ① 引言（短调用）→ ② 按笔记量从多到少逐方向润色小节（组装预算耗尽即停，
+   * 已缓存的小节正文直接复用，续跑不重复花 token）→ ③ 结论（短调用）。
+   * 组装预算不够润色的方向，正文直接拼原始研究笔记——报告结构始终完整
+   * （有主题/引言/结论），用户不需要追加 token 就能拿到正式报告。
    */
   private async assemble(
     target: ChatTarget,
     task: { id: string; goal: string | null },
     progress: AgentProgress,
-    budget: BudgetBox,
-    stop: StopFlag,
+    assembly: BudgetBox,
   ): Promise<{
     report: string | null;
     sources: Array<{ number: number; title: string; url: string }>;
   }> {
-    const canCall = !stop.flag && !budget.exhausted;
-    if (canCall) {
-      // 逐方向生成小节正文（跳过已缓存 / 无笔记的方向）
-      for (const dir of progress.directions) {
-        if (dir.sectionContent || !dir.notes) continue;
-        const content = await this.writeSection(target, task.id, dir, budget, stop);
-        // 只有真正写出正文才标记完成：预算中途耗尽返回空时保持待研究，续跑会补写并润色
-        if (content) {
-          dir.sectionContent = content;
-          dir.status = 'done';
-        }
+    // 没有任何研究内容 → 不组装
+    const hasContent = progress.directions.some((d) => d.sectionContent || d.notes);
+    if (!hasContent) return { report: null, sources: [] };
+
+    const topic = task.goal?.trim() || '自主探索研究报告';
+    const titles = progress.directions
+      .filter((d) => d.sectionContent || d.notes)
+      .map((d) => d.title)
+      .join('；');
+
+    // ① 引言（组装预算，不受研究停止影响）
+    const intro = await this.assembleCall(
+      target,
+      task.id,
+      '你是研究报告主编。根据研究主题与各小节标题，写一段 120~200 字的引言：说明研究主题、资料来源与研究结构。只输出引言段落本身，不要标题。',
+      `研究主题：${topic}\n各小节标题：${titles}`,
+      300,
+      assembly,
+    );
+
+    // ② 逐方向润色小节：笔记多的方向优先（信息量大、最值得精读成文）
+    const pending = progress.directions
+      .filter((d) => !d.sectionContent && d.notes)
+      .sort((a, b) => b.notes.length - a.notes.length);
+    for (const dir of pending) {
+      if (assembly.exhausted) break;
+      const content = await this.writeSection(target, task.id, dir, assembly);
+      // 只有真正写出正文才标记完成：组装预算耗尽返回空时保持待研究，续跑会补写润色
+      if (content) {
+        dir.sectionContent = content;
+        dir.status = 'done';
       }
     }
 
-    // 按原始顺序组装正文：有正式小节的用正式小节，否则有笔记的用原始笔记（阶段成果）
-    const bodyParts: string[] = [];
-    for (const d of progress.directions) {
-      if (d.sectionContent) bodyParts.push(`## ${d.title}\n\n${d.sectionContent}`);
-      else if (d.notes) bodyParts.push(`## ${d.title}\n\n${d.notes}`);
-    }
-    if (!bodyParts.length) return { report: null, sources: [] };
-
-    const topic = task.goal?.trim() || '自主探索研究报告';
-    const reportParts: string[] = [`# ${topic}`];
-    if (canCall) {
-      const titles = progress.directions
-        .filter((d) => d.sectionContent || d.notes)
-        .map((d) => d.title)
-        .join('；');
-      const intro = await this.complete(
-        target,
-        task.id,
-        '你是研究报告主编。根据研究主题与各小节标题，写一段 120~200 字的引言：说明研究主题、资料来源与研究结构。只输出引言段落本身，不要标题。',
-        `研究主题：${topic}\n各小节标题：${titles}`,
-        300,
-        budget,
-        stop,
-      );
-      const conclusion = await this.complete(
+    // ③ 结论（组装预算还有余量才写）
+    let conclusion = '';
+    if (!assembly.exhausted) {
+      const res = await this.assembleCall(
         target,
         task.id,
         '你是研究报告主编。根据研究主题与各小节标题，写一段 150~250 字的结论：总结核心要点与资料局限。只输出结论段落本身，不要标题。',
         `研究主题：${topic}\n各小节标题：${titles}`,
         400,
-        budget,
-        stop,
+        assembly,
       );
-      if (intro?.text) reportParts.push(`## 引言\n\n${intro.text}`);
-      reportParts.push(bodyParts.join('\n\n'));
-      if (conclusion?.text) reportParts.push(`## 结论\n\n${conclusion.text}`);
-    } else {
-      reportParts.push(bodyParts.join('\n\n'));
+      conclusion = res?.text ?? '';
     }
+
+    // 组装正文：有正式小节的用正式小节，否则用原始笔记
+    const bodyParts: string[] = [];
+    for (const d of progress.directions) {
+      if (d.sectionContent) bodyParts.push(`## ${d.title}\n\n${d.sectionContent}`);
+      else if (d.notes) bodyParts.push(`## ${d.title}\n\n${d.notes}`);
+    }
+
+    const reportParts: string[] = [`# ${topic}`];
+    if (intro?.text) reportParts.push(`## 引言\n\n${intro.text}`);
+    reportParts.push(bodyParts.join('\n\n'));
+    if (conclusion) reportParts.push(`## 结论\n\n${conclusion}`);
+    // 组装预算连引言都不够（极小预算 + 组装预算也耗尽）时，保证至少有正文
+    if (reportParts.length === 1) reportParts.push(bodyParts.join('\n\n'));
 
     // 来源：全部已精读页面，按方向顺序全局编号
     const sources: Array<{ number: number; title: string; url: string }> = [];
@@ -636,15 +685,14 @@ export class AgentRunner {
     return { report: reportParts.join('\n\n'), sources };
   }
 
-  /** 单个方向小节：研究笔记 → Markdown 小节 */
+  /** 单个方向小节：研究笔记 → Markdown 小节（走组装预算） */
   private async writeSection(
     target: ChatTarget,
     taskId: string,
     dir: AgentProgress['directions'][number],
-    budget: BudgetBox,
-    stop: StopFlag,
+    assembly: BudgetBox,
   ): Promise<string> {
-    const res = await this.complete(
+    const res = await this.assembleCall(
       target,
       taskId,
       '你是严谨的研究撰写助手。根据【研究笔记】撰写该方向的小节，输出 Markdown。要求：' +
@@ -652,8 +700,7 @@ export class AgentRunner {
         '资料没有的信息不要编造，可基于自身知识补充并注明"（补充）"。',
       `【方向】${dir.title}\n【问题】${dir.question}\n【研究笔记】\n${(dir.notes || '').slice(0, 6000)}`,
       2000,
-      budget,
-      stop,
+      assembly,
     );
     return res?.text ?? '';
   }
@@ -665,7 +712,6 @@ export class AgentRunner {
     taskId: string,
     progress: AgentProgress,
     counters: { searchRounds: number; pagesRead: number },
-    budget: BudgetBox,
   ) {
     await this.prisma.agentTask.update({
       where: { id: taskId },
@@ -673,7 +719,7 @@ export class AgentRunner {
         progress: JSON.parse(JSON.stringify(progress)),
         searchRounds: counters.searchRounds,
         pagesRead: counters.pagesRead,
-        tokensUsed: budget.used,
+        tokensUsed: this.tokenCounter.total,
       },
     });
   }
