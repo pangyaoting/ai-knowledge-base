@@ -70,4 +70,36 @@ export class WebSearchService {
       return [];
     }
   }
+
+  /**
+   * 网页正文提取（Tavily Extract API）：自主研究 Agent 精读用。
+   * 拿不到正文（无 key / 免费额度限制 / 页面无法提取）时返回 null，调用方回退到搜索摘要。
+   */
+  async extract(url: string): Promise<string | null> {
+    const key = this.apiKey;
+    if (!key) return null;
+    try {
+      const res = await fetch('https://api.tavily.com/extract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({ urls: [url], extract_depth: 'basic' }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) {
+        this.logger.warn(`网页提取失败: HTTP ${res.status}（${url.slice(0, 60)}）`);
+        return null;
+      }
+      const data = (await res.json()) as {
+        results?: Array<{ raw_content?: string | null }>;
+      };
+      const raw = data.results?.[0]?.raw_content?.trim();
+      return raw && raw.length > 200 ? raw : null;
+    } catch (err) {
+      this.logger.warn(`网页提取异常: ${(err as Error).message}`);
+      return null;
+    }
+  }
 }

@@ -27,6 +27,7 @@ model User {
   knowledgeBases KnowledgeBase[]
   chatSessions   ChatSession[]
   reports        Report[]
+  agentTasks     AgentTask[]
   modelConfigs   ModelConfig[]
 
   @@map("users")
@@ -232,4 +233,38 @@ model ChatMessage {
 
   @@index([sessionId])
   @@map("chat_messages")
+}
+
+// ==================== 自主研究 Agent ====================
+// 限时·限量：用户设定 时间窗 + token 预算 + 研究目标（可选），
+// Agent 在窗口内自主"搜索→筛选→精读→提炼"多来源资料并成稿。
+// 停止（预算用尽 / 时间到 / 手动）后保留部分成果，可续时/加预算从断点继续。
+// progress 是续跑断点：各方向研究笔记、已精读 URL、已用搜索词、已缓存小节正文。
+
+model AgentTask {
+  id           String    @id @default(uuid())
+  ownerId      String    @map("owner_id")
+  mode         String    @default("targeted") // targeted=定向研究（有目标）/ open=自主探索（无目标，从知识库挖掘方向）
+  goal         String? // 研究目标（open 模式为空）
+  startAt      DateTime  @map("start_at") // 时间窗开始
+  endAt        DateTime  @map("end_at") // 时间窗结束（停止硬上限）
+  tokenBudget  Int       @map("token_budget") // token 预算上限（停止硬上限）
+  tokensUsed   Int       @default(0) @map("tokens_used") // 已消耗 token（续跑时累加）
+  searchRounds Int       @default(0) @map("search_rounds") // 已执行的联网搜索轮数
+  pagesRead    Int       @default(0) @map("pages_read") // 已精读页面数
+  status       String    @default("pending") // pending / running / stopped / done / failed
+  stopReason   String?   @map("stop_reason") // budget_exhausted / time_exhausted / user_stopped / completed / error
+  directions   Json? // [{ title, question, status(pending|active|done), rounds }]
+  progress     Json? // 续跑断点：{ directions: [{ notes, readUrls, searchTerms, sectionContent }] }
+  report       String? // 最终（或阶段性）Markdown 报告
+  sources      Json? // [{ number, title, url }] 引用来源（网页）
+  error        String? // 失败原因
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("agent_tasks")
 }

@@ -10,6 +10,6 @@ import { ModelsModule } from '../models/models.module'; // 解析会话绑定的
   imports: [KnowledgeModule, ModelsModule], // RagService 依赖 KnowledgeService（校验知识库归属）
   controllers: [ChatController],
   providers: [ChatService, RagService, WebSearchService],
-  exports: [RagService], // 研究报告模块复用混合检索
+  exports: [RagService, WebSearchService], // 研究报告模块复用混合检索；自主研究 Agent 复用联网搜索/正文提取
 })
 export class ChatModule {}

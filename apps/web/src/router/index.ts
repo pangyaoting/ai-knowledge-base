@@ -57,6 +57,11 @@ const router = createRouter({
           component: () => import('@/views/Research.vue'),
         },
         {
+          path: 'research-agent',
+          name: 'research-agent',
+          component: () => import('@/views/ResearchAgent.vue'),
+        },
+        {
           path: 'dashboard',
           name: 'dashboard',
           component: () => import('@/views/Dashboard.vue'),

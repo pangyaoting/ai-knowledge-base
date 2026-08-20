@@ -11,6 +11,7 @@ import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { ResearchModule } from './modules/research/research.module';
+import { ResearchAgentModule } from './modules/research-agent/research-agent.module';
 import { ModelsModule } from './modules/models/models.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 
@@ -30,6 +31,7 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
     ChatModule,
     StatsModule,
     ResearchModule,
+    ResearchAgentModule,
     ModelsModule,
   ],
   providers: [
