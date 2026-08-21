@@ -1,13 +1,24 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { Brain, LogOut, User as UserIcon, ChevronDown, Settings, Menu } from 'lucide-vue-next';
+import {
+  Brain,
+  LogOut,
+  User as UserIcon,
+  ChevronDown,
+  Settings,
+  Menu,
+  Sun,
+  Moon,
+} from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
+import { useTheme } from '@/composables/useTheme';
 import Button from '@/components/ui/Button.vue';
 
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
+const theme = useTheme();
 
 const menuOpen = ref(false); // 用户菜单
 const mobileNavOpen = ref(false); // 移动端导航面板
@@ -134,6 +145,17 @@ async function handleLogout() {
         </template>
 
         <div class="flex items-center gap-3">
+          <!-- 暗色/浅色切换 -->
+          <button
+            class="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="theme.isDark ? '切换到浅色模式' : '切换到暗色模式'"
+            aria-label="切换主题"
+            @click="theme.toggleTheme"
+          >
+            <Sun v-if="theme.isDark" class="h-4 w-4" />
+            <Moon v-else class="h-4 w-4" />
+          </button>
+
           <!-- 用户菜单：点头像/名称弹出 个人中心 + 退出 -->
           <div class="relative">
             <button

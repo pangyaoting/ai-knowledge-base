@@ -1022,7 +1022,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   padding: 0.9em 1em;
   font-size: 0.85em;
   line-height: 1.5;
-  background: #f6f8fa;
+  background: hsl(var(--muted));
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;

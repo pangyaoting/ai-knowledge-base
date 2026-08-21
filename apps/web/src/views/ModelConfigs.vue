@@ -372,7 +372,11 @@ onMounted(loadConfigs);
             <p
               v-if="testResults[c.id]"
               class="mt-0.5 text-xs"
-              :class="testResults[c.id]!.startsWith('✅') ? 'text-green-600' : 'text-destructive'"
+              :class="
+                testResults[c.id]!.startsWith('✅')
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-destructive'
+              "
             >
               {{ testResults[c.id] }}
             </p>

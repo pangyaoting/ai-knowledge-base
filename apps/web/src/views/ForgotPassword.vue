@@ -121,9 +121,13 @@ async function handleSubmit() {
 
 <template>
   <div
-    class="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4"
+    class="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4"
   >
-    <Card class="w-full max-w-md">
+    <!-- 品牌氛围光斑（暗色下自动变暗） -->
+    <div
+      class="pointer-events-none absolute -top-24 left-1/2 h-72 w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
+    />
+    <Card class="relative w-full max-w-md shadow-xl">
       <CardHeader class="text-center">
         <div
           class="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
@@ -139,7 +143,7 @@ async function handleSubmit() {
       <CardContent>
         <!-- 成功：跳转登录 -->
         <div v-if="success" class="space-y-4 text-center">
-          <CheckCircle2 class="mx-auto h-12 w-12 text-green-600" />
+          <CheckCircle2 class="mx-auto h-12 w-12 text-green-600 dark:text-green-400" />
           <p class="text-sm text-muted-foreground">密码已重置成功，请使用新密码登录。</p>
           <Button class="w-full" @click="router.push('/login')">去登录</Button>
         </div>
@@ -191,7 +195,7 @@ async function handleSubmit() {
                 {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
               </Button>
             </div>
-            <p v-if="codeHint" class="text-xs text-green-600">{{ codeHint }}</p>
+            <p v-if="codeHint" class="text-xs text-green-600 dark:text-green-400">{{ codeHint }}</p>
           </div>
 
           <Button type="submit" class="w-full" :disabled="!form.email.trim() || !form.code.trim()">

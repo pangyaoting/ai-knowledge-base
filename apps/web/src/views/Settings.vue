@@ -328,7 +328,9 @@ async function handleForgotReset() {
                     {{ forgotCountdown > 0 ? `${forgotCountdown}s 后重发` : '发送验证码' }}
                   </Button>
                 </div>
-                <p v-if="forgotHint" class="text-xs text-green-600">{{ forgotHint }}</p>
+                <p v-if="forgotHint" class="text-xs text-green-600 dark:text-green-400">
+                  {{ forgotHint }}
+                </p>
               </div>
               <div class="space-y-1.5">
                 <Label>新密码</Label>
@@ -338,7 +340,9 @@ async function handleForgotReset() {
                 <Label>确认新密码</Label>
                 <Input v-model="forgotForm.confirm" type="password" placeholder="再次输入新密码" />
               </div>
-              <p v-if="forgotMsg" class="text-sm text-green-600">{{ forgotMsg }}</p>
+              <p v-if="forgotMsg" class="text-sm text-green-600 dark:text-green-400">
+                {{ forgotMsg }}
+              </p>
               <p v-if="forgotError" class="text-sm text-destructive">{{ forgotError }}</p>
               <Button :disabled="forgotResetting" @click="handleForgotReset">
                 <Loader2 v-if="forgotResetting" class="h-4 w-4 animate-spin" />
@@ -384,7 +388,7 @@ async function handleForgotReset() {
               {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
             </Button>
           </div>
-          <p v-if="bindHint" class="text-xs text-green-600">{{ bindHint }}</p>
+          <p v-if="bindHint" class="text-xs text-green-600 dark:text-green-400">{{ bindHint }}</p>
         </div>
         <p v-if="bindError" class="text-sm text-destructive">{{ bindError }}</p>
         <Button :disabled="binding" @click="handleBindEmail">

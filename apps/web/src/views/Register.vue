@@ -141,9 +141,13 @@ async function handleSubmit() {
 
 <template>
   <div
-    class="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4"
+    class="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4"
   >
-    <Card class="w-full max-w-md">
+    <!-- 品牌氛围光斑（暗色下自动变暗） -->
+    <div
+      class="pointer-events-none absolute -top-24 left-1/2 h-72 w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
+    />
+    <Card class="relative w-full max-w-md shadow-xl">
       <CardHeader class="text-center">
         <div
           class="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
@@ -204,7 +208,7 @@ async function handleSubmit() {
                 {{ countdown > 0 ? `${countdown}s 后重发` : '发送验证码' }}
               </Button>
             </div>
-            <p v-if="codeHint" class="text-xs text-green-600">{{ codeHint }}</p>
+            <p v-if="codeHint" class="text-xs text-green-600 dark:text-green-400">{{ codeHint }}</p>
           </div>
 
           <Button
@@ -222,7 +226,7 @@ async function handleSubmit() {
           <div
             class="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground"
           >
-            <MailCheck class="h-4 w-4 text-green-600" />
+            <MailCheck class="h-4 w-4 text-green-600 dark:text-green-400" />
             <span class="truncate">已验证邮箱：{{ form.email }}</span>
           </div>
 

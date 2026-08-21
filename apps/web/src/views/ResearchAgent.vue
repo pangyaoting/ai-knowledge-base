@@ -142,13 +142,13 @@ const statusText: Record<AgentTask['status'], string> = {
 function statusClass(s: AgentTask['status']): string {
   switch (s) {
     case 'done':
-      return 'bg-green-50 text-green-700';
+      return 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-400';
     case 'failed':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400';
     case 'stopped':
-      return 'bg-amber-50 text-amber-700';
+      return 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
     default:
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400';
   }
 }
 
@@ -725,7 +725,7 @@ onBeforeUnmount(() => {
                       d.status === 'active'
                         ? 'animate-spin text-primary'
                         : d.status === 'done'
-                          ? 'text-green-600'
+                          ? 'text-green-600 dark:text-green-400'
                           : 'text-muted-foreground'
                     "
                   />
@@ -734,7 +734,7 @@ onBeforeUnmount(() => {
                     class="shrink-0 rounded px-1.5 py-0.5 text-[10px]"
                     :class="
                       d.status === 'done'
-                        ? 'bg-green-50 text-green-700'
+                        ? 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-400'
                         : d.status === 'active'
                           ? 'bg-primary/10 text-primary'
                           : 'bg-muted text-muted-foreground'
@@ -764,9 +764,9 @@ onBeforeUnmount(() => {
           <!-- 已停止但有报告：阶段成果 + 继续研究提示 -->
           <div v-else-if="current.status === 'stopped'" class="mx-auto max-w-3xl px-4 py-6">
             <div
-              class="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm"
+              class="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10"
             >
-              <p class="text-amber-800">
+              <p class="text-amber-800 dark:text-amber-300">
                 ⏸ 研究已停止（{{
                   stopReasonText[current.stopReason || ''] || '已停止'
                 }}），已整理出正式报告（含来源）。 可继续研究：追加 token 预算和/或研究时长， Agent
@@ -983,7 +983,7 @@ onBeforeUnmount(() => {
   padding: 0.9em 1em;
   font-size: 0.85em;
   line-height: 1.5;
-  background: #f6f8fa;
+  background: hsl(var(--muted));
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;

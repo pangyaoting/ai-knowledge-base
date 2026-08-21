@@ -76,16 +76,16 @@ const generating = computed(
   () => current.value?.status === 'pending' || current.value?.status === 'processing',
 );
 
-/** 状态徽章样式 */
+/** 状态徽章样式（含暗色适配） */
 function statusClass(s: Report['status']): string {
   switch (s) {
     case 'done':
-      return 'bg-green-50 text-green-700';
+      return 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-400';
     case 'failed':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400';
     case 'processing':
     case 'pending':
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400';
   }
 }
 const statusText: Record<Report['status'], string> = {
@@ -595,7 +595,7 @@ onBeforeUnmount(stopPolling);
   padding: 0.9em 1em;
   font-size: 0.85em;
   line-height: 1.5;
-  background: #f6f8fa;
+  background: hsl(var(--muted));
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;

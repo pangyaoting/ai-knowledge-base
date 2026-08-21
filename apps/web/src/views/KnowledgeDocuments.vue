@@ -521,11 +521,11 @@ const statusText: Record<string, string> = {
 function statusClass(status: string): string {
   switch (status) {
     case 'done':
-      return 'bg-green-50 text-green-700';
+      return 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-400';
     case 'failed':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400';
     default:
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400';
   }
 }
 

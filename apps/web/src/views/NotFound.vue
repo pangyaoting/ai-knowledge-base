@@ -8,8 +8,11 @@ const router = useRouter();
 
 <template>
   <div
-    class="flex min-h-screen flex-col items-center justify-center gap-4 bg-gradient-to-b from-slate-50 to-white p-4 text-center"
+    class="relative flex min-h-screen flex-col items-center justify-center gap-4 overflow-hidden bg-background p-4 text-center"
   >
+    <div
+      class="pointer-events-none absolute -top-24 left-1/2 h-72 w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
+    />
     <div class="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
       <Compass class="h-8 w-8" />
     </div>

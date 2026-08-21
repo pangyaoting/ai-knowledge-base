@@ -47,9 +47,16 @@ async function handleSubmit() {
 
 <template>
   <div
-    class="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4"
+    class="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4"
   >
-    <Card class="w-full max-w-md">
+    <!-- 品牌氛围光斑（暗色下自动变暗） -->
+    <div
+      class="pointer-events-none absolute -top-24 left-1/2 h-72 w-[36rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
+    />
+    <div
+      class="pointer-events-none absolute -bottom-32 right-1/4 h-64 w-96 rounded-full bg-primary/5 blur-3xl"
+    />
+    <Card class="relative w-full max-w-md shadow-xl">
       <CardHeader class="text-center">
         <div
           class="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"

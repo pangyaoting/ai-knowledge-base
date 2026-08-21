@@ -11,7 +11,7 @@ const iconMap = {
 } as const;
 
 const colorMap = {
-  success: 'text-green-600',
+  success: 'text-green-600 dark:text-green-400',
   error: 'text-destructive',
   info: 'text-primary',
 } as const;
