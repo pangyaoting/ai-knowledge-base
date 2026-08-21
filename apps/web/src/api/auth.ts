@@ -38,6 +38,11 @@ export function bindEmail(data: { email: string; code: string }) {
   return request.post<unknown, UserInfo>('/auth/bind-email', data);
 }
 
+// 注销账号（永久删除账号及全部数据，需输入当前密码确认）
+export function deleteAccount(password: string) {
+  return request.post<unknown, { success: boolean }>('/auth/delete-account', { password });
+}
+
 // 登出
 export function logout(refreshToken: string) {
   return request.post('/auth/logout', { refreshToken });

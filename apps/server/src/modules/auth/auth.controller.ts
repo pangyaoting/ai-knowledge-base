@@ -8,6 +8,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { BindEmailDto } from './dto/bind-email.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -82,6 +83,15 @@ export class AuthController {
   @ApiOperation({ summary: '获取当前登录用户信息' })
   getProfile(@CurrentUser('id') userId: string) {
     return this.authService.getProfile(userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @Post('delete-account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '注销账号（永久删除账号及全部数据，需输入当前密码确认）' })
+  deleteAccount(@CurrentUser('id') userId: string, @Body() dto: DeleteAccountDto) {
+    return this.authService.deleteAccount(userId, dto);
   }
 
   @UseGuards(JwtAuthGuard)

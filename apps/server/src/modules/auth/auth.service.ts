@@ -16,6 +16,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { BindEmailDto } from './dto/bind-email.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
+import { DeleteAccountDto } from './dto/delete-account.dto';
 import { JwtPayload, AuthResult } from './interfaces/auth.interface';
 
 @Injectable()
@@ -149,6 +150,20 @@ export class AuthService {
     await this.prisma.user.update({ where: { id: userId }, data: { email } });
     this.logger.log(`用户 ${userId} 更换邮箱为 ${email}`);
     return this.getProfile(userId);
+  }
+
+  /**
+   * 注销账号：校验当前密码 → 删除用户（CASCADE 级联删除全部关联数据）。
+   * 删除后旧 accessToken 因 JWT 策略查库失败而自动失效，前端会收到 401 并登出。
+   */
+  async deleteAccount(userId: string, dto: DeleteAccountDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('用户不存在');
+    const isPasswordValid = await bcrypt.compare(dto.password, user.password);
+    if (!isPasswordValid) throw new UnauthorizedException('密码错误，无法注销');
+    await this.prisma.user.delete({ where: { id: userId } });
+    this.logger.log(`用户注销: ${user.email}`);
+    return { success: true };
   }
 
   /** 当前用户信息 */

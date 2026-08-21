@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { updateProfile, changePassword } from '@/api/user';
-import { sendCode, bindEmail, forgotPassword } from '@/api/auth';
-import { Loader2, UserRound, KeyRound, Mail, ArrowUpRight } from 'lucide-vue-next';
+import { sendCode, bindEmail, forgotPassword, deleteAccount } from '@/api/auth';
+import { Loader2, UserRound, KeyRound, Mail, ArrowUpRight, Trash2 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
 import { toast } from '@/composables/useToast';
 
 const auth = useAuthStore();
+const router = useRouter();
 
 // ===== 资料 =====
 const profileForm = reactive({ nickname: auth.user?.nickname ?? '' });
@@ -223,6 +225,36 @@ async function handleForgotReset() {
     forgotResetting.value = false;
   }
 }
+
+// ===== 注销账号 =====
+const deleteForm = reactive({ password: '' });
+const deleting = ref(false);
+
+async function handleDeleteAccount() {
+  if (!deleteForm.password) {
+    toast.error('请输入当前密码确认注销');
+    return;
+  }
+  // eslint-disable-next-line no-alert
+  if (
+    !window.confirm(
+      '确定要注销账号吗？账号及全部数据（知识库、文档、对话、研究报告、自主研究任务、模型配置）将被永久删除，且不可恢复。',
+    )
+  ) {
+    return;
+  }
+  deleting.value = true;
+  try {
+    await deleteAccount(deleteForm.password);
+    auth.clearAuth();
+    toast.success('账号已注销，感谢使用');
+    router.push('/login');
+  } catch (e) {
+    toast.error((e as Error).message);
+  } finally {
+    deleting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -394,6 +426,32 @@ async function handleForgotReset() {
         <Button :disabled="binding" @click="handleBindEmail">
           <Loader2 v-if="binding" class="h-4 w-4 animate-spin" />
           确认更换
+        </Button>
+      </div>
+    </div>
+
+    <!-- 注销账号（危险操作） -->
+    <div class="mt-6 rounded-lg border border-destructive/30 bg-destructive/5 p-6">
+      <div class="flex items-center gap-2">
+        <Trash2 class="h-4 w-4 text-destructive" />
+        <h2 class="font-semibold text-destructive">注销账号</h2>
+      </div>
+      <p class="mt-2 text-sm text-muted-foreground">
+        注销后账号及全部数据（知识库、文档、对话、研究报告、自主研究任务、模型配置）将被永久删除，不可恢复。请谨慎操作。
+      </p>
+      <div class="mt-4 flex max-w-xl items-end gap-3">
+        <div class="flex-1 space-y-1.5">
+          <Label>当前密码</Label>
+          <Input
+            v-model="deleteForm.password"
+            type="password"
+            placeholder="输入当前密码确认注销"
+            autocomplete="off"
+          />
+        </div>
+        <Button variant="destructive" :disabled="deleting" @click="handleDeleteAccount">
+          <Loader2 v-if="deleting" class="h-4 w-4 animate-spin" />
+          注销账号
         </Button>
       </div>
     </div>
