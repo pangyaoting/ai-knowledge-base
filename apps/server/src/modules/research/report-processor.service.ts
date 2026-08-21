@@ -34,6 +34,8 @@ interface ReportSource {
 @Injectable()
 export class ReportProcessor {
   private readonly logger = new Logger(ReportProcessor.name);
+  /** 本份报告累计消耗的 token（complete 内累计，结束时落库给数据看板统计） */
+  private tokensUsed = 0;
 
   constructor(
     private prisma: PrismaService,
@@ -58,6 +60,10 @@ export class ReportProcessor {
       max_tokens: maxTokens,
       temperature: 0.3,
     });
+    const usage = res.usage;
+    const total =
+      usage?.total_tokens ?? (usage?.prompt_tokens ?? 0) + (usage?.completion_tokens ?? 0);
+    this.tokensUsed += total;
     const choice = res.choices[0];
     if (choice?.finish_reason === 'length') {
       this.logger.warn(
@@ -70,6 +76,7 @@ export class ReportProcessor {
   /** 执行报告生成（任何异常把报告标记为 failed，不阻塞队列） */
   async processReport(data: ReportJobData) {
     const { userId, reportId } = data;
+    this.tokensUsed = 0;
     const report = await this.prisma.report.findFirst({
       where: { id: reportId, ownerId: userId },
     });
@@ -133,18 +140,19 @@ export class ReportProcessor {
           status: 'done',
           step: 4,
           content,
+          tokensUsed: this.tokensUsed,
           sections: JSON.parse(JSON.stringify(sections)),
           sources: JSON.parse(
             JSON.stringify([...sourceMap.values()].sort((a, b) => a.number - b.number)),
           ),
         },
       });
-      this.logger.log(`研究报告完成: ${reportId}，${sections.length} 节`);
+      this.logger.log(`研究报告完成: ${reportId}，${sections.length} 节，${this.tokensUsed} token`);
     } catch (err) {
       this.logger.warn(`研究报告失败: ${reportId} → ${(err as Error).message}`);
       await this.prisma.report.update({
         where: { id: reportId },
-        data: { status: 'failed', error: (err as Error).message },
+        data: { status: 'failed', error: (err as Error).message, tokensUsed: this.tokensUsed },
       });
     }
   }

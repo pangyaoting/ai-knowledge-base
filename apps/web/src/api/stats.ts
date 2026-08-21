@@ -14,6 +14,8 @@ export interface OverviewData {
     total: number;
     promptTotal: number;
     completionTotal: number;
+    reportTokens: number;
+    agentTaskTokens: number;
   };
   daily: Array<{ day: string; questions: number; tokens: number }>;
   topKbs: Array<{ id: string; name: string; documents: number }>;

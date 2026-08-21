@@ -18,7 +18,8 @@ import Button from '@/components/ui/Button.vue';
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
-const theme = useTheme();
+// 解构顶层 ref：模板中自动解包（直接 theme.isDark 拿到的是 Ref 对象，恒为真值）
+const { isDark, toggleTheme } = useTheme();
 
 const menuOpen = ref(false); // 用户菜单
 const mobileNavOpen = ref(false); // 移动端导航面板
@@ -33,9 +34,9 @@ const navItems = [
   { to: '/dashboard', label: '数据看板' },
 ] as const;
 
-/** 当前导航是否高亮：首页精确匹配 "/"，其余按前缀匹配（含子路由） */
+/** 当前导航是否高亮：精确匹配，或按"路径段"前缀匹配（避免 /research 误配 /research-agent） */
 function isNavActive(to: string): boolean {
-  return to === '/' ? route.path === '/' : route.path.startsWith(to);
+  return route.path === to || route.path.startsWith(to + '/');
 }
 
 // 路由变化时收起移动端导航
@@ -78,8 +79,12 @@ async function handleLogout() {
     <header class="sticky top-0 z-50 border-b bg-background/80 backdrop-blur">
       <div class="container flex h-16 items-center justify-between">
         <RouterLink to="/" class="flex items-center gap-2">
-          <Brain class="h-6 w-6" />
-          <span class="text-lg font-semibold">AI 知识库</span>
+          <span
+            class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-violet-600 text-primary-foreground shadow-sm"
+          >
+            <Brain class="h-5 w-5" />
+          </span>
+          <span class="text-lg font-semibold tracking-tight">AI 知识库</span>
         </RouterLink>
 
         <div class="flex items-center gap-1">
@@ -100,8 +105,8 @@ async function handleLogout() {
               :to="item.to"
               :class="
                 isNavActive(item.to)
-                  ? 'rounded-md bg-primary/10 text-primary'
-                  : 'rounded-md text-muted-foreground hover:bg-accent hover:text-foreground'
+                  ? 'rounded-md bg-accent font-medium text-primary shadow-sm'
+                  : 'rounded-md font-medium text-foreground/80 hover:bg-accent/60 hover:text-primary'
               "
             >
               <Button variant="ghost" size="sm" :class="isNavActive(item.to) ? 'text-primary' : ''">
@@ -109,7 +114,11 @@ async function handleLogout() {
               </Button>
             </RouterLink>
             <RouterLink to="/model-configs">
-              <Button variant="outline" size="sm" class="ml-1 border-primary/40 text-primary">
+              <Button
+                variant="outline"
+                size="sm"
+                class="ml-1 border-primary/40 font-medium text-primary"
+              >
                 模型配置
               </Button>
             </RouterLink>
@@ -127,7 +136,11 @@ async function handleLogout() {
               :key="item.to"
               :to="item.to"
               @click="mobileNavOpen = false"
-              :class="isNavActive(item.to) ? 'rounded-md bg-primary/10 text-primary' : ''"
+              :class="
+                isNavActive(item.to)
+                  ? 'rounded-md bg-accent font-medium text-primary'
+                  : 'font-medium text-foreground/80'
+              "
             >
               <Button
                 variant="ghost"
@@ -148,11 +161,11 @@ async function handleLogout() {
           <!-- 暗色/浅色切换 -->
           <button
             class="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :title="theme.isDark ? '切换到浅色模式' : '切换到暗色模式'"
+            :title="isDark ? '切换到浅色模式' : '切换到暗色模式'"
             aria-label="切换主题"
-            @click="theme.toggleTheme"
+            @click="toggleTheme"
           >
-            <Sun v-if="theme.isDark" class="h-4 w-4" />
+            <Sun v-if="isDark" class="h-4 w-4" />
             <Moon v-else class="h-4 w-4" />
           </button>
 

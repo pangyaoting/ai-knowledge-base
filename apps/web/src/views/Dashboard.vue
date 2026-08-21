@@ -197,6 +197,20 @@ function fmtTokens(n: number): string {
             输入 {{ fmtTokens(data.tokens.promptTotal) }} · 输出
             {{ fmtTokens(data.tokens.completionTotal) }}
           </p>
+          <div class="mt-2 space-y-0.5 border-t pt-2 text-[11px] text-muted-foreground">
+            <p class="flex justify-between">
+              <span>研究报告</span>
+              <span class="font-medium text-foreground">{{
+                fmtTokens(data.tokens.reportTokens)
+              }}</span>
+            </p>
+            <p class="flex justify-between">
+              <span>自主研究</span>
+              <span class="font-medium text-foreground">{{
+                fmtTokens(data.tokens.agentTaskTokens)
+              }}</span>
+            </p>
+          </div>
         </div>
       </div>
 

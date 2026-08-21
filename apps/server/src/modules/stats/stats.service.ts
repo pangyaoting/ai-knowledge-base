@@ -27,6 +27,8 @@ export class StatsService {
       topKbs,
       reports,
       agentTasksDone,
+      reportTokenAgg,
+      agentTaskTokenAgg,
     ] = await Promise.all([
       this.prisma.knowledgeBase.count({ where: { ownerId: userId } }),
       this.prisma.document.count({ where: { knowledgeBase: { ownerId: userId } } }),
@@ -61,6 +63,14 @@ export class StatsService {
       }),
       this.prisma.report.count({ where: { ownerId: userId, status: 'done' } }),
       this.prisma.agentTask.count({ where: { ownerId: userId, status: 'done' } }),
+      this.prisma.report.aggregate({
+        where: { ownerId: userId },
+        _sum: { tokensUsed: true },
+      }),
+      this.prisma.agentTask.aggregate({
+        where: { ownerId: userId },
+        _sum: { tokensUsed: true },
+      }),
     ]);
 
     const promptTotal = tokenAgg._sum.promptTokens ?? 0;
@@ -80,6 +90,9 @@ export class StatsService {
         total: promptTotal + completionTotal,
         promptTotal,
         completionTotal,
+        // 研究报告 / 自主研究 消耗的 token（与对话 token 分开统计）
+        reportTokens: reportTokenAgg._sum.tokensUsed ?? 0,
+        agentTaskTokens: agentTaskTokenAgg._sum.tokensUsed ?? 0,
       },
       daily: this.fillLast7Days(
         dailyRows.map((r) => ({
