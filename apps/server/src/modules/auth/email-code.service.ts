@@ -77,13 +77,23 @@ export class EmailCodeService {
 
   /** 校验验证码并消费（一次性）：通过返回 true，否则抛错 */
   async verifyCode(email: string, type: EmailCodeType, code: string) {
+    this.verifyOnly(email, type, code);
+    const key = CODE_PREFIX + type + ':' + email.toLowerCase();
+    await this.redis.del(key);
+    await this.redis.del(key + ':sent');
+    return true;
+  }
+
+  /**
+   * 只校验不消费（不删键）：注册第一步"点下一步"时先验证邮箱唯一 + 验证码正确/未过期，
+   * 验证码保留到第二步提交注册时再真正消费。
+   */
+  async verifyOnly(email: string, type: EmailCodeType, code: string) {
     const key = CODE_PREFIX + type + ':' + email.toLowerCase();
     const stored = await this.redis.get(key);
     if (!stored || stored !== code.trim()) {
       throw new BadRequestException('验证码错误或已过期');
     }
-    await this.redis.del(key);
-    await this.redis.del(key + ':sent');
     return true;
   }
 }

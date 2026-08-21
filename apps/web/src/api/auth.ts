@@ -14,6 +14,15 @@ export function login(data: LoginPayload) {
   return request.post<unknown, AuthResult>('/auth/login', data);
 }
 
+// 校验验证码（只校验不消费：注册第一步"点下一步"先验证邮箱唯一 + 验证码有效）
+export function verifyCode(data: {
+  email: string;
+  type: 'register' | 'forgot' | 'bind';
+  code: string;
+}) {
+  return request.post<unknown, { success: boolean }>('/auth/verify-code', data);
+}
+
 // 注册（邮箱 + 验证码 + 密码）
 export function register(data: RegisterPayload) {
   return request.post<unknown, AuthResult>('/auth/register', data);

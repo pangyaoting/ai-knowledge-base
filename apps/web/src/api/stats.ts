@@ -7,6 +7,8 @@ export interface OverviewData {
     chunks: number;
     messages: number;
     questionsToday: number;
+    reports: number;
+    agentTasks: number;
   };
   tokens: {
     total: number;

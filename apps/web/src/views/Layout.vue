@@ -12,6 +12,21 @@ const auth = useAuthStore();
 const menuOpen = ref(false); // 用户菜单
 const mobileNavOpen = ref(false); // 移动端导航面板
 
+/** 导航项：to + 文案（桌面端与移动端共用） */
+const navItems = [
+  { to: '/', label: '首页' },
+  { to: '/knowledge', label: '知识库' },
+  { to: '/chat', label: '对话' },
+  { to: '/research', label: '研究报告' },
+  { to: '/research-agent', label: '自主研究' },
+  { to: '/dashboard', label: '数据看板' },
+] as const;
+
+/** 当前导航是否高亮：首页精确匹配 "/"，其余按前缀匹配（含子路由） */
+function isNavActive(to: string): boolean {
+  return to === '/' ? route.path === '/' : route.path.startsWith(to);
+}
+
 // 路由变化时收起移动端导航
 watch(
   () => route.fullPath,
@@ -68,20 +83,19 @@ async function handleLogout() {
 
           <!-- 导航（桌面端常驻） -->
           <nav class="mr-2 hidden items-center gap-1 sm:flex">
-            <RouterLink to="/knowledge">
-              <Button variant="ghost" size="sm">知识库</Button>
-            </RouterLink>
-            <RouterLink to="/chat">
-              <Button variant="ghost" size="sm">对话</Button>
-            </RouterLink>
-            <RouterLink to="/research">
-              <Button variant="ghost" size="sm">研究报告</Button>
-            </RouterLink>
-            <RouterLink to="/research-agent">
-              <Button variant="ghost" size="sm">自主研究</Button>
-            </RouterLink>
-            <RouterLink to="/dashboard">
-              <Button variant="ghost" size="sm">数据看板</Button>
+            <RouterLink
+              v-for="item in navItems"
+              :key="item.to"
+              :to="item.to"
+              :class="
+                isNavActive(item.to)
+                  ? 'rounded-md bg-primary/10 text-primary'
+                  : 'rounded-md text-muted-foreground hover:bg-accent hover:text-foreground'
+              "
+            >
+              <Button variant="ghost" size="sm" :class="isNavActive(item.to) ? 'text-primary' : ''">
+                {{ item.label }}
+              </Button>
             </RouterLink>
             <RouterLink to="/model-configs">
               <Button variant="outline" size="sm" class="ml-1 border-primary/40 text-primary">
@@ -97,20 +111,21 @@ async function handleLogout() {
           <nav
             class="absolute inset-x-0 top-full z-50 flex flex-col gap-0.5 border-b bg-card px-3 py-2 shadow-lg md:hidden"
           >
-            <RouterLink to="/knowledge" @click="mobileNavOpen = false">
-              <Button variant="ghost" size="sm" class="w-full justify-start">知识库</Button>
-            </RouterLink>
-            <RouterLink to="/chat" @click="mobileNavOpen = false">
-              <Button variant="ghost" size="sm" class="w-full justify-start">对话</Button>
-            </RouterLink>
-            <RouterLink to="/research" @click="mobileNavOpen = false">
-              <Button variant="ghost" size="sm" class="w-full justify-start">研究报告</Button>
-            </RouterLink>
-            <RouterLink to="/research-agent" @click="mobileNavOpen = false">
-              <Button variant="ghost" size="sm" class="w-full justify-start">自主研究</Button>
-            </RouterLink>
-            <RouterLink to="/dashboard" @click="mobileNavOpen = false">
-              <Button variant="ghost" size="sm" class="w-full justify-start">数据看板</Button>
+            <RouterLink
+              v-for="item in navItems"
+              :key="item.to"
+              :to="item.to"
+              @click="mobileNavOpen = false"
+              :class="isNavActive(item.to) ? 'rounded-md bg-primary/10 text-primary' : ''"
+            >
+              <Button
+                variant="ghost"
+                size="sm"
+                class="w-full justify-start"
+                :class="isNavActive(item.to) ? 'text-primary' : ''"
+              >
+                {{ item.label }}
+              </Button>
             </RouterLink>
             <RouterLink to="/model-configs" @click="mobileNavOpen = false">
               <Button variant="ghost" size="sm" class="w-full justify-start">模型配置</Button>

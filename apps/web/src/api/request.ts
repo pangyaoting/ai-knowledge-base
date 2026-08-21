@@ -11,6 +11,19 @@ let isRefreshing = false;
 // 等待 token 刷新的请求队列
 let pendingQueue: Array<(token: string) => void> = [];
 
+/**
+ * 这些公开接口的 401 是业务错误（邮箱/密码/验证码错误），不是 token 过期，
+ * 绝不能触发"刷新 token"流程——否则登录输错密码会被误判成登录态失效，
+ * 刷新失败后硬跳登录页，把用户正在填的表单清空。
+ */
+const PUBLIC_AUTH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/send-code',
+  '/auth/forgot-password',
+  '/auth/verify-code',
+];
+
 // 请求拦截器：自动带上 accessToken
 request.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
@@ -37,8 +50,12 @@ request.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // 如果是 401 且不是刷新 token 的请求、且没有重试过
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // 如果是 401 且不是刷新 token 的请求、且没有重试过、且不是公开接口的业务错误
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !PUBLIC_AUTH_PATHS.some((p) => (originalRequest.url || '').includes(p))
+    ) {
       // 如果已经在刷新，把当前请求加入队列等待
       if (isRefreshing) {
         return new Promise((resolve) => {

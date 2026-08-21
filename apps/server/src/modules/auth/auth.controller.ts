@@ -7,6 +7,7 @@ import { SendCodeDto } from './dto/send-code.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { BindEmailDto } from './dto/bind-email.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { VerifyCodeDto } from './dto/verify-code.dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -22,6 +23,16 @@ export class AuthController {
   @ApiOperation({ summary: '发送邮箱验证码（注册/忘记密码/换绑邮箱；开发模式验证码随响应返回）' })
   sendCode(@Body() dto: SendCodeDto) {
     return this.authService.sendCode(dto.email, dto.type);
+  }
+
+  @Public()
+  @Post('verify-code')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: '校验验证码（只校验不消费；注册第二步进入前先验证邮箱唯一 + 验证码有效）',
+  })
+  verifyCode(@Body() dto: VerifyCodeDto) {
+    return this.authService.verifyCode(dto);
   }
 
   @Public()

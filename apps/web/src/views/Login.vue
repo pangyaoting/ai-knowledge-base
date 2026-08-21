@@ -76,7 +76,7 @@ async function handleSubmit() {
               v-model="form.email"
               type="email"
               placeholder="you@example.com"
-              autocomplete="email"
+              autocomplete="off"
             />
           </div>
 
@@ -95,7 +95,7 @@ async function handleSubmit() {
               v-model="form.password"
               type="password"
               placeholder="••••••••"
-              autocomplete="current-password"
+              autocomplete="new-password"
             />
           </div>
 

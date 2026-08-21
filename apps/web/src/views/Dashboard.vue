@@ -7,7 +7,16 @@ import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { ECharts } from 'echarts/core';
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
-import { Database, FileText, Layers, MessageSquare, Coins, TrendingUp } from 'lucide-vue-next';
+import {
+  Database,
+  FileText,
+  Layers,
+  MessageSquare,
+  Coins,
+  TrendingUp,
+  BookOpen,
+  Bot,
+} from 'lucide-vue-next';
 import { getOverview, type OverviewData } from '@/api/stats';
 import DashboardSkeleton from '@/components/skeletons/DashboardSkeleton.vue';
 import { toast } from '@/composables/useToast';
@@ -154,6 +163,22 @@ function fmtTokens(n: number): string {
             <span class="text-xs">消息总数</span>
           </div>
           <p class="mt-2 text-2xl font-bold">{{ data.counts.messages }}</p>
+        </div>
+        <div class="rounded-lg border bg-card p-5">
+          <div class="flex items-center gap-2 text-muted-foreground">
+            <BookOpen class="h-4 w-4" />
+            <span class="text-xs">研究报告</span>
+          </div>
+          <p class="mt-2 text-2xl font-bold">{{ data.counts.reports }}</p>
+          <p class="mt-1 text-xs text-muted-foreground">已完成</p>
+        </div>
+        <div class="rounded-lg border bg-card p-5">
+          <div class="flex items-center gap-2 text-muted-foreground">
+            <Bot class="h-4 w-4" />
+            <span class="text-xs">自主研究</span>
+          </div>
+          <p class="mt-2 text-2xl font-bold">{{ data.counts.agentTasks }}</p>
+          <p class="mt-1 text-xs text-muted-foreground">已完成</p>
         </div>
         <div class="rounded-lg border bg-card p-5">
           <div class="flex items-center gap-2 text-muted-foreground">

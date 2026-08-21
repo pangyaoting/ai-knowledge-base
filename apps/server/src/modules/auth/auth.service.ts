@@ -15,6 +15,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { BindEmailDto } from './dto/bind-email.dto';
+import { VerifyCodeDto } from './dto/verify-code.dto';
 import { JwtPayload, AuthResult } from './interfaces/auth.interface';
 
 @Injectable()
@@ -41,6 +42,23 @@ export class AuthService {
       if (exists) throw new ConflictException('该邮箱已被注册');
     }
     return this.emailCodeService.sendCode(email, type);
+  }
+
+  /**
+   * 校验验证码（只校验不消费）：注册流程"点下一步"时用——
+   * 先查邮箱是否已注册，再验证验证码正确且未过期；通过后进入设置密码步骤，
+   * 验证码保留到提交注册时再真正消费。
+   */
+  async verifyCode(dto: VerifyCodeDto) {
+    const email = dto.email.toLowerCase();
+    if (dto.type === 'register') {
+      const existing = await this.prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        throw new ConflictException('该邮箱已被注册');
+      }
+    }
+    await this.emailCodeService.verifyOnly(email, dto.type, dto.code);
+    return { success: true };
   }
 
   /**
@@ -157,8 +175,10 @@ export class AuthService {
     }
 
     const stored = await this.redis.get(this.REFRESH_PREFIX + refreshToken);
-    if (!stored) {
-      throw new UnauthorizedException('refreshToken 已失效，请重新登录');
+    // 容错：Redis 重启会清空键，但 JWT 本身仍有效 → 允许换新，避免用户被莫名踢出登录
+    // （登出吊销依然生效：logout 会删除键，删除后再 refresh 才会被拒）
+    if (stored) {
+      await this.redis.del(this.REFRESH_PREFIX + refreshToken);
     }
 
     const user = await this.prisma.user.findUnique({

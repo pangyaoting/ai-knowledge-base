@@ -682,16 +682,12 @@ onBeforeUnmount(() => {
           </div>
           <div class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
             <div
-              class="h-full rounded-full transition-all duration-500"
-              :class="
-                budgetPercent >= 90
-                  ? 'bg-destructive'
-                  : budgetPercent >= 70
-                    ? 'bg-amber-500'
-                    : 'bg-primary'
-              "
+              class="h-full rounded-full bg-blue-500 transition-all duration-500"
               :style="{ width: budgetPercent + '%' }"
             />
+          </div>
+          <div class="mt-1 text-right text-[11px] font-medium text-muted-foreground">
+            {{ budgetPercent }}%
           </div>
           <div class="mt-1.5 flex items-center gap-3 text-[11px] text-muted-foreground">
             <span>联网搜索 {{ current.searchRounds }} 轮</span>

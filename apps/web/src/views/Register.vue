@@ -3,7 +3,7 @@ import { ref, reactive, computed, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { Brain, Loader2, MailCheck } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
-import { sendCode } from '@/api/auth';
+import { sendCode, verifyCode } from '@/api/auth';
 import Card from '@/components/ui/Card.vue';
 import CardHeader from '@/components/ui/CardHeader.vue';
 import CardTitle from '@/components/ui/CardTitle.vue';
@@ -24,6 +24,7 @@ const form = reactive({
   code: '',
 });
 const sending = ref(false);
+const checking = ref(false); // 第一步"点下一步"校验中
 const countdown = ref(0);
 const stepError = ref('');
 const codeHint = ref(''); // 开发模式：验证码随响应返回，自动填入并提示
@@ -78,8 +79,12 @@ async function handleSendCode() {
   }
 }
 
-/** 第一步校验通过 → 设置密码 */
-function goNext() {
+/**
+ * 第一步校验通过 → 设置密码。
+ * 点「下一步」就调后端校验：邮箱是否已被注册 + 验证码是否正确/未过期
+ * （只校验不消费，验证码保留到第二步提交注册时再真正使用）。
+ */
+async function goNext() {
   stepError.value = '';
   if (!emailValid.value) {
     stepError.value = '请输入正确的邮箱地址';
@@ -89,7 +94,15 @@ function goNext() {
     stepError.value = '请输入 6 位邮箱验证码（先点击「发送验证码」）';
     return;
   }
-  step.value = 2;
+  checking.value = true;
+  try {
+    await verifyCode({ email: form.email.trim(), type: 'register', code: form.code.trim() });
+    step.value = 2;
+  } catch (e) {
+    stepError.value = (e as Error).message;
+  } finally {
+    checking.value = false;
+  }
 }
 
 function goBack() {
@@ -160,7 +173,7 @@ async function handleSubmit() {
               v-model="form.email"
               type="email"
               placeholder="you@example.com"
-              autocomplete="email"
+              autocomplete="off"
             />
             <p class="text-xs text-muted-foreground">
               验证码会发送到这个邮箱，请确认可以正常接收。
@@ -194,8 +207,13 @@ async function handleSubmit() {
             <p v-if="codeHint" class="text-xs text-green-600">{{ codeHint }}</p>
           </div>
 
-          <Button type="submit" class="w-full" :disabled="!form.email.trim() || !form.code.trim()">
-            下一步
+          <Button
+            type="submit"
+            class="w-full"
+            :disabled="!form.email.trim() || !form.code.trim() || checking"
+          >
+            <Loader2 v-if="checking" class="h-4 w-4 animate-spin" />
+            {{ checking ? '校验中...' : '下一步' }}
           </Button>
         </form>
 
@@ -244,7 +262,7 @@ async function handleSubmit() {
               v-model="pwdForm.nickname"
               type="text"
               placeholder="你的昵称"
-              autocomplete="nickname"
+              autocomplete="off"
             />
           </div>
 

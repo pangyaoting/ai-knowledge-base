@@ -168,12 +168,18 @@ export class AgentRunner {
             ? await this.mineDirections(target, taskId, userId, budget, stop)
             : await this.splitDirections(target, taskId, task.goal ?? '', budget, stop);
         if (!dirs.length) {
-          // 预算太小连方向都没拆出来：如实告知
+          // 走到这里只剩真实停止条件（预算耗尽 / 时间到 / 手动停止），按原因如实告知
+          const reason: 'budget_exhausted' | 'time_exhausted' =
+            stop.reason === 'time_exhausted' ? 'time_exhausted' : 'budget_exhausted';
+          const msg =
+            reason === 'time_exhausted'
+              ? '时间窗已过，未能启动研究'
+              : '预算不足，未能拆解出研究方向';
           await this.finish(
             taskId,
-            'budget_exhausted',
+            reason,
             'stopped',
-            '# 研究未启动\n\n预算过小，未能拆解出研究方向。可点击「继续研究」追加预算后重试。',
+            `# 研究未启动\n\n${msg}。可点击「继续研究」追加预算或时长后重试。`,
             [],
             null,
             null,
@@ -525,11 +531,19 @@ export class AgentRunner {
         '只输出 JSON 数组，每项含 title（方向名，8~20 字）和 question（该方向要研究回答的具体问题，20~50 字）。' +
         '示例：[{"title":"技术原理","question":"RAG 检索增强生成的核心原理是什么"}]。不要任何其它内容。',
       `研究目标：${goal}`,
-      500,
+      900, // 5 个方向的 JSON 输出较长，留足空间避免截断导致解析失败
       budget,
       stop,
     );
-    return this.parseDirections(res?.text ?? '');
+    const dirs = this.parseDirections(res?.text ?? '');
+    if (dirs.length) return dirs;
+    // 解析失败兜底（仅当预算未耗尽）：把目标本身作为唯一方向继续研究，
+    // 而不是误报"预算不足"——否则用户追加预算重跑也永远卡在同一处
+    if (!budget.exhausted && !stop.flag) {
+      this.logger.warn(`方向拆解解析失败，回退为单一方向: ${taskId}`);
+      return [{ title: goal.slice(0, 20) || '自主研究', question: goal }];
+    }
+    return [];
   }
 
   /** 开放探索：没有目标，从用户知识库的主题中挖掘研究方向 */
@@ -561,11 +575,23 @@ export class AgentRunner {
       '你是自主研究规划助手。用户没有给出明确研究目标，请你从用户知识库的主题中挖掘 3~5 个值得深入研究的方向，用于自主联网研究。' +
         '只输出 JSON 数组，每项含 title（方向名）和 question（该方向要研究的具体问题）。不要任何其它内容。',
       `${kbText}\n\n知识库内容样本：\n${seed || '（无）'}\n\n若知识库为空，则基于 AI、效率方法、行业趋势等通用高价值主题提出方向。`,
-      500,
+      900,
       budget,
       stop,
     );
-    return this.parseDirections(res?.text ?? '');
+    const dirs = this.parseDirections(res?.text ?? '');
+    if (dirs.length) return dirs;
+    // 解析失败兜底：知识库主题作为方向（预算未耗尽时），避免误报预算不足
+    if (!budget.exhausted && !stop.flag) {
+      this.logger.warn(`开放探索方向解析失败，回退为知识库主题: ${taskId}`);
+      return [
+        {
+          title: kbs[0]?.name?.slice(0, 20) || '自主探索',
+          question: kbs[0]?.name || '基于当前热点与通用高价值主题的自主研究',
+        },
+      ];
+    }
+    return [];
   }
 
   /** 解析方向 JSON（失败回退到按行拆分） */

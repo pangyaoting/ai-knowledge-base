@@ -16,24 +16,34 @@ export class StatsService {
   constructor(private prisma: PrismaService) {}
 
   async overview(userId: string) {
-    const [kbs, documents, chunks, messages, tokenAgg, questionsToday, dailyRows, topKbs] =
-      await Promise.all([
-        this.prisma.knowledgeBase.count({ where: { ownerId: userId } }),
-        this.prisma.document.count({ where: { knowledgeBase: { ownerId: userId } } }),
-        this.prisma.chunk.count({ where: { document: { knowledgeBase: { ownerId: userId } } } }),
-        this.prisma.chatMessage.count({ where: { session: { ownerId: userId } } }),
-        this.prisma.chatMessage.aggregate({
-          where: { session: { ownerId: userId }, role: 'assistant' },
-          _sum: { promptTokens: true, completionTokens: true },
-        }),
-        this.prisma.chatMessage.count({
-          where: {
-            session: { ownerId: userId },
-            role: 'user',
-            createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-          },
-        }),
-        this.prisma.$queryRaw<Array<{ day: Date; questions: bigint; tokens: bigint | null }>>`
+    const [
+      kbs,
+      documents,
+      chunks,
+      messages,
+      tokenAgg,
+      questionsToday,
+      dailyRows,
+      topKbs,
+      reports,
+      agentTasksDone,
+    ] = await Promise.all([
+      this.prisma.knowledgeBase.count({ where: { ownerId: userId } }),
+      this.prisma.document.count({ where: { knowledgeBase: { ownerId: userId } } }),
+      this.prisma.chunk.count({ where: { document: { knowledgeBase: { ownerId: userId } } } }),
+      this.prisma.chatMessage.count({ where: { session: { ownerId: userId } } }),
+      this.prisma.chatMessage.aggregate({
+        where: { session: { ownerId: userId }, role: 'assistant' },
+        _sum: { promptTokens: true, completionTokens: true },
+      }),
+      this.prisma.chatMessage.count({
+        where: {
+          session: { ownerId: userId },
+          role: 'user',
+          createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        },
+      }),
+      this.prisma.$queryRaw<Array<{ day: Date; questions: bigint; tokens: bigint | null }>>`
           SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date AS day,
                  COUNT(*) FILTER (WHERE role = 'user') AS questions,
                  SUM(prompt_tokens + completion_tokens) FILTER (WHERE role = 'assistant') AS tokens
@@ -43,13 +53,15 @@ export class StatsService {
           GROUP BY day
           ORDER BY day
         `,
-        this.prisma.knowledgeBase.findMany({
-          where: { ownerId: userId },
-          include: { _count: { select: { documents: true } } },
-          orderBy: { updatedAt: 'desc' },
-          take: 5,
-        }),
-      ]);
+      this.prisma.knowledgeBase.findMany({
+        where: { ownerId: userId },
+        include: { _count: { select: { documents: true } } },
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+      }),
+      this.prisma.report.count({ where: { ownerId: userId, status: 'done' } }),
+      this.prisma.agentTask.count({ where: { ownerId: userId, status: 'done' } }),
+    ]);
 
     const promptTotal = tokenAgg._sum.promptTokens ?? 0;
     const completionTotal = tokenAgg._sum.completionTokens ?? 0;
@@ -61,6 +73,8 @@ export class StatsService {
         chunks,
         messages,
         questionsToday,
+        reports,
+        agentTasks: agentTasksDone,
       },
       tokens: {
         total: promptTotal + completionTotal,
