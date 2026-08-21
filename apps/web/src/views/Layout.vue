@@ -80,7 +80,7 @@ async function handleLogout() {
       <div class="container flex h-16 items-center justify-between">
         <RouterLink to="/" class="flex items-center gap-2">
           <span
-            class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-violet-600 text-primary-foreground shadow-sm"
+            class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-primary-foreground shadow-sm"
           >
             <Brain class="h-5 w-5" />
           </span>
