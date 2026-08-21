@@ -218,9 +218,26 @@ async function handleLogout() {
       </div>
     </header>
 
-    <!-- 页面内容 -->
-    <main>
-      <RouterView />
+    <!-- 页面内容（带路由切换过渡） -->
+    <main class="relative">
+      <RouterView v-slot="{ Component }">
+        <Transition name="page" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </RouterView>
     </main>
+
+    <!-- 全局氛围背景：蓝色光斑缓慢漂移（暗色下更亮，不影响内容可读性） -->
+    <div class="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
+      <div
+        class="absolute -top-40 left-1/4 h-[28rem] w-[28rem] rounded-full bg-blue-500/10 blur-3xl dark:bg-blue-500/20 animate-float-slow"
+      />
+      <div
+        class="absolute -right-32 top-1/3 h-80 w-80 rounded-full bg-cyan-400/10 blur-3xl dark:bg-cyan-400/20 animate-float-slower"
+      />
+      <div
+        class="absolute -bottom-40 left-1/6 h-96 w-[30rem] rounded-full bg-blue-600/10 blur-3xl dark:bg-blue-600/20 animate-float-slow"
+      />
+    </div>
   </div>
 </template>

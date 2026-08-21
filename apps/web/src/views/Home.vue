@@ -29,7 +29,7 @@ onMounted(async () => {
 <template>
   <div class="container flex flex-col items-center py-20 text-center">
     <!-- 欢迎区 -->
-    <div class="max-w-xl">
+    <div class="max-w-xl animate-fade-up">
       <h1 class="text-3xl font-bold tracking-tight">
         你好，{{ auth.user?.nickname || auth.user?.email }} 👋
       </h1>
@@ -63,7 +63,7 @@ onMounted(async () => {
     <!-- 模型绑定引导（BYO：所有 AI 功能的前提） -->
     <div
       v-if="loaded"
-      class="mt-10 w-full max-w-xl rounded-lg border p-6 text-left"
+      class="mt-10 w-full max-w-xl animate-fade-up-slow rounded-lg border p-6 text-left"
       :class="
         modelConfigs.length === 0
           ? 'border-primary/40 bg-primary/5'
@@ -107,7 +107,7 @@ onMounted(async () => {
     </div>
 
     <!-- 使用引导（纯文字，功能入口都在顶部导航） -->
-    <div class="mt-12 max-w-xl">
+    <div class="mt-12 max-w-xl animate-fade-up-slow">
       <p class="text-sm text-muted-foreground">
         从顶部导航开始：<span class="text-foreground">知识库</span> 上传资料 →
         <span class="text-foreground">对话</span> 问答与溯源 →
