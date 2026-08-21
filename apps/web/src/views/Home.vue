@@ -25,7 +25,40 @@ onMounted(async () => {
   loaded.value = true;
 });
 
-// ===== 首页氛围背景：漂浮粒子（随机位置/大小/速度，一次性生成） =====
+// ===== 星空背景（暗色模式全效）：星星 / 流星 =====
+const rand = (min: number, max: number) => Math.random() * (max - min) + min;
+
+interface Star {
+  left: string;
+  top: string;
+  size: number;
+  delay: string;
+  duration: string;
+}
+/** 120 颗星星：1px 小星为主、少量 2-3px 亮星 */
+const stars: Star[] = Array.from({ length: 120 }, (_, i) => ({
+  left: `${rand(1, 99)}%`,
+  top: `${rand(1, 96)}%`,
+  size: i % 8 === 0 ? rand(2.2, 3.2) : i % 3 === 0 ? rand(1.5, 2.2) : rand(1, 1.5),
+  delay: `${rand(0, 5)}s`,
+  duration: `${rand(2.2, 6)}s`,
+}));
+
+interface Meteor {
+  left: string;
+  top: string;
+  delay: string;
+  duration: string;
+}
+/** 4 条流星：从右上往左下划过 */
+const meteors: Meteor[] = Array.from({ length: 4 }, () => ({
+  left: `${rand(55, 95)}%`,
+  top: `${rand(-5, 8)}%`,
+  delay: `${rand(2, 12)}s`,
+  duration: `${rand(5, 9)}s`,
+}));
+
+/** 浅色模式的漂浮粒子（星空下隐藏，避免与星星重复） */
 interface Particle {
   left: string;
   top: string;
@@ -34,7 +67,6 @@ interface Particle {
   duration: string;
   opacity: number;
 }
-const rand = (min: number, max: number) => Math.random() * (max - min) + min;
 const particles: Particle[] = Array.from({ length: 24 }, () => ({
   left: `${rand(2, 96)}%`,
   top: `${rand(4, 92)}%`,
@@ -49,11 +81,13 @@ const particles: Particle[] = Array.from({ length: 24 }, () => ({
   <div
     class="relative flex min-h-[calc(100vh-4rem)] flex-col items-center overflow-hidden py-20 text-center"
   >
-    <!-- 首页动态氛围背景（极光渐变 + 光斑 + 粒子，全部 pointer-events-none） -->
+    <!-- 背景层：暗色=星空全效（深空渐变+星云+星星+流星）；浅色=极光+粒子 -->
     <div class="pointer-events-none absolute inset-0" aria-hidden="true">
-      <!-- 缓慢流动的极光渐变 -->
+      <!-- 星空底（暗色启用）：深空渐变 + 星云 -->
+      <div class="starfield absolute inset-0" />
+      <!-- 浅色极光渐变 -->
       <div class="home-aurora absolute inset-0" />
-      <!-- 蓝色光斑（漂移） -->
+      <!-- 星云光斑（漂移） -->
       <div
         class="absolute -top-32 left-[12%] h-[26rem] w-[26rem] rounded-full bg-blue-500/15 blur-3xl dark:bg-blue-500/25 animate-float-slow"
       />
@@ -63,10 +97,38 @@ const particles: Particle[] = Array.from({ length: 24 }, () => ({
       <div
         class="absolute bottom-[-6rem] left-1/3 h-96 w-[28rem] rounded-full bg-blue-600/15 blur-3xl dark:bg-blue-600/25 animate-float-slow"
       />
-      <!-- 漂浮粒子 -->
+      <!-- 星星（暗色显示）：闪烁 + 整体缓慢漂移 -->
+      <div class="star-layer absolute inset-0">
+        <span
+          v-for="(s, i) in stars"
+          :key="'s' + i"
+          class="star"
+          :style="{
+            left: s.left,
+            top: s.top,
+            width: s.size + 'px',
+            height: s.size + 'px',
+            animationDelay: s.delay,
+            animationDuration: s.duration,
+          }"
+        />
+      </div>
+      <!-- 流星（暗色显示） -->
+      <span
+        v-for="(m, i) in meteors"
+        :key="'m' + i"
+        class="meteor"
+        :style="{
+          left: m.left,
+          top: m.top,
+          animationDelay: m.delay,
+          animationDuration: m.duration,
+        }"
+      />
+      <!-- 浅色模式的漂浮粒子 -->
       <span
         v-for="(p, i) in particles"
-        :key="i"
+        :key="'p' + i"
         class="home-particle"
         :style="{
           left: p.left,
@@ -176,7 +238,7 @@ const particles: Particle[] = Array.from({ length: 24 }, () => ({
 </template>
 
 <style scoped>
-/* 极光渐变背景：缓慢缩放旋转流动 */
+/* ==================== 浅色：极光渐变 ==================== */
 .home-aurora {
   background:
     radial-gradient(ellipse 80% 55% at 18% -10%, hsla(221, 83%, 62%, 0.22), transparent 60%),
@@ -193,15 +255,104 @@ const particles: Particle[] = Array.from({ length: 24 }, () => ({
   }
 }
 
-/* 漂浮粒子：缓慢上浮 + 左右轻摆 */
+/* ==================== 暗色：星空 ==================== */
+/* 深空渐变底 + 星云（暗色启用，浅色隐藏） */
+.starfield {
+  display: none;
+  background:
+    radial-gradient(ellipse 55% 40% at 18% 12%, rgba(59, 130, 246, 0.14), transparent 65%),
+    radial-gradient(ellipse 45% 35% at 85% 25%, rgba(139, 92, 246, 0.12), transparent 65%),
+    radial-gradient(ellipse 60% 45% at 55% 105%, rgba(56, 189, 248, 0.1), transparent 65%),
+    linear-gradient(180deg, #04060f 0%, #070d22 45%, #0a1430 100%);
+}
+.dark .starfield {
+  display: block;
+}
+
+/* 星星层：整体缓慢漂移 */
+.star-layer {
+  animation: star-drift 60s ease-in-out infinite alternate;
+}
+@keyframes star-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-30px, 16px, 0);
+  }
+}
+
+/* 星星：闪烁（暗色显示） */
+.star {
+  position: absolute;
+  display: none;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+  animation-name: twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.dark .star {
+  display: block;
+}
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.12;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.15);
+  }
+}
+
+/* 流星：右上往左下划过（暗色显示） */
+.meteor {
+  position: absolute;
+  display: none;
+  width: 150px;
+  height: 1.5px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.85));
+  animation-name: meteor-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.dark .meteor {
+  display: block;
+}
+@keyframes meteor-fall {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-45deg);
+    opacity: 0;
+  }
+  3% {
+    opacity: 1;
+  }
+  11% {
+    transform: translate3d(-460px, 460px, 0) rotate(-45deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(-460px, 460px, 0) rotate(-45deg);
+    opacity: 0;
+  }
+}
+
+/* 浅色漂浮粒子（暗色下隐藏，避免与星星重复） */
 .home-particle {
   position: absolute;
+  display: block;
   border-radius: 9999px;
   background: hsla(221, 83%, 65%, 0.9);
-  animation: particle-float 10s ease-in-out infinite;
+  animation-name: particle-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
 }
 .dark .home-particle {
-  background: hsla(221, 90%, 70%, 0.9);
+  display: none;
 }
 @keyframes particle-float {
   0%,
