@@ -77,7 +77,8 @@ export class EmailCodeService {
 
   /** 校验验证码并消费（一次性）：通过返回 true，否则抛错 */
   async verifyCode(email: string, type: EmailCodeType, code: string) {
-    this.verifyOnly(email, type, code);
+    // 必须 await：verifyOnly 失败时抛 BadRequestException，不 await 会成为未处理 rejection 直接打崩进程
+    await this.verifyOnly(email, type, code);
     const key = CODE_PREFIX + type + ':' + email.toLowerCase();
     await this.redis.del(key);
     await this.redis.del(key + ':sent');
