@@ -114,6 +114,16 @@ const defaultModelConfigId = computed(
   () => modelConfigs.value.find((c) => c.isDefault)?.id ?? null,
 );
 
+/** 视觉模型名启发式（与后端一致）：vision / VL / 4V / Omni / GLM-4V 等 */
+const VISION_RE = /vision|[-/]vl\b|vl[-.\d]|4v|omni|glm-4v|internvl|minicpm/i;
+
+/** 当前会话实际使用的模型 ID（会话绑定 → 默认配置；用于发图时判断是否会自动路由） */
+const activeModelId = computed(() => {
+  const sid = currentSession.value?.modelConfigId;
+  if (sid) return modelConfigs.value.find((c) => c.id === sid)?.model ?? null;
+  return modelConfigs.value.find((c) => c.isDefault)?.model ?? null;
+});
+
 /** 当前会话使用的模型名（未绑定 = 跟随默认配置；没有默认配置时提示未绑定） */
 const currentModelName = computed(() => {
   const bound = currentSession.value?.modelConfig;
@@ -396,6 +406,12 @@ async function handleSend() {
   const question = input.value.trim();
   const image = pendingImage.value;
   if ((!question && !image) || streaming.value || !currentSessionId.value) return;
+
+  // 发图提示：当前模型不支持视觉但用户配置里有视觉模型 → 后端会自动路由（对话仍用当前模型）
+  if (image && activeModelId.value && !VISION_RE.test(activeModelId.value)) {
+    const v = modelConfigs.value.find((c) => VISION_RE.test(c.model));
+    if (v) toast.info(`图片将自动使用视觉模型 ${v.model} 识别，文字对话仍用当前模型`);
+  }
 
   input.value = '';
   pendingImage.value = null;

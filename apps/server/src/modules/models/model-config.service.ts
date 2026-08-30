@@ -25,6 +25,11 @@ export interface ChatTarget {
   model: string;
 }
 
+/** 模型名是否视觉模型（启发式：vision / VL / 4V / Omni / GLM-4V 等） */
+export function isVisionModelName(model: string): boolean {
+  return /vision|[-/]vl\b|vl[-.\d]|4v|omni|glm-4v|internvl|minicpm/i.test(model);
+}
+
 /**
  * 用户模型配置（BYO 大模型 API）：
  * - apiKey 用 AES-256-GCM 加密落库，接口永远只返回掩码（sk-1234****abcd）；
@@ -263,5 +268,27 @@ export class ModelConfigService {
       apiKey: this.decrypt(config.apiKey),
       model: config.model,
     };
+  }
+
+  /**
+   * 找用户的视觉模型配置（聊天发图片时自动路由用）：
+   * 遍历用户全部配置，模型名含 vision/VL/4V/Omni 等关键字即视为视觉模型；
+   * 默认配置优先。找不到 → null（调用方继续用原模型，报错时提示切换）。
+   */
+  async resolveVisionForUser(userId: string): Promise<ChatTarget | null> {
+    const configs = await this.prisma.modelConfig.findMany({
+      where: { ownerId: userId },
+      orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
+    });
+    for (const c of configs) {
+      if (isVisionModelName(c.model)) {
+        return {
+          baseURL: c.baseURL,
+          apiKey: this.decrypt(c.apiKey),
+          model: c.model,
+        };
+      }
+    }
+    return null;
   }
 }

@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
 import { WebSearchService, WebSource } from './web-search.service';
-import { ModelConfigService, ChatTarget } from '../models/model-config.service';
+import { ModelConfigService, ChatTarget, isVisionModelName } from '../models/model-config.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 
 interface StreamWriter {
@@ -207,6 +207,21 @@ export class ChatService {
           '使用前请先在「模型配置」里绑定你自己的大模型 API Key（设置 → 模型配置，或对话页右上角「模型」入口）。绑定后本会话所有 AI 消耗都由你的 Key 承担。',
       });
       return;
+    }
+    // 带图自动路由：当前模型不支持视觉时，自动换用用户配置里的视觉模型
+    // （如 deepseek-v4-flash-vision-exp、Qwen3-VL）——文本对话仍用会话/默认模型，
+    // 两个模型各司其职，不用手动切换；没有视觉配置则保持原模型（报错会提示切换）
+    if (imageDataUrl && !isVisionModelName(target.model)) {
+      const visionTarget = await this.modelConfigService.resolveVisionForUser(userId);
+      if (visionTarget) {
+        this.logger.log(
+          `会话 ${sessionId} 图片路由: ${target.model} → ${visionTarget.model}（识别图片）`,
+        );
+        // 只改这一次调用的目标，不改变会话绑定
+        target.model = visionTarget.model;
+        target.baseURL = visionTarget.baseURL;
+        target.apiKey = visionTarget.apiKey;
+      }
     }
 
     // ① 历史对话（最近 3 轮）：先按时间倒序取最近 N 条，再反转回时间正序
