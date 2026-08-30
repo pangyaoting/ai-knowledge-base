@@ -1,16 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import {
-  Brain,
-  LogOut,
-  User as UserIcon,
-  ChevronDown,
-  Settings,
-  Menu,
-  Sun,
-  Moon,
-} from 'lucide-vue-next';
+import { Brain, LogOut, ChevronDown, Settings, Menu, Sun, Moon } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
 import { useTheme } from '@/composables/useTheme';
 import Button from '@/components/ui/Button.vue';
@@ -181,7 +172,12 @@ async function handleLogout() {
                 class="h-4 w-4 shrink-0 rounded-full object-cover"
                 alt=""
               />
-              <UserIcon v-else class="h-4 w-4 shrink-0" />
+              <span
+                v-else
+                class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary"
+              >
+                {{ (auth.user?.email || '?')[0].toUpperCase() }}
+              </span>
               <span class="min-w-0 flex-1 truncate">
                 {{ auth.user?.nickname || auth.user?.email }}
               </span>
