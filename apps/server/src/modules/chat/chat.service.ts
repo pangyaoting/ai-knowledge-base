@@ -67,7 +67,12 @@ export class ChatService {
   }
 
   /** 修改会话绑定的模型配置（null = 回退系统默认） */
-  async updateSessionModel(userId: string, sessionId: string, modelConfigId?: string | null) {
+  async updateSessionModel(
+    userId: string,
+    sessionId: string,
+    modelConfigId?: string | null,
+    reasoningEffort?: string | null,
+  ) {
     await this.getSession(userId, sessionId);
     let next: string | null = null;
     if (modelConfigId) {
@@ -77,7 +82,11 @@ export class ChatService {
     }
     return this.prisma.chatSession.update({
       where: { id: sessionId },
-      data: { modelConfigId: next },
+      data: {
+        modelConfigId: next,
+        // reasoningEffort 传了才更新（null = 清空回默认；undefined = 不修改）
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      },
       include: {
         knowledgeBases: { select: { knowledgeBase: { select: { id: true, name: true } } } },
         modelConfig: { select: { id: true, name: true, model: true, baseURL: true } },
@@ -292,6 +301,8 @@ export class ChatService {
           messages: [{ role: 'system', content: system }, ...messages],
           stream: true,
           stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
+          // 会话推理等级（low=关闭/高/max）→ 透传给支持 reasoning_effort 的模型（DeepSeek V4 等）
+          ...(session.reasoningEffort ? { reasoning_effort: session.reasoningEffort } : {}),
         },
         { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
       );

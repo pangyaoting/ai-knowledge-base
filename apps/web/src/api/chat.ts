@@ -39,10 +39,15 @@ export function updateSessionKnowledgeBases(
   });
 }
 
-/** 修改会话绑定的模型配置（null = 跟随用户默认配置；BYO key） */
-export function updateSessionModel(sessionId: string, modelConfigId: string | null) {
+/** 修改会话绑定的模型配置与推理等级（null = 跟随默认；reasoningEffort: low/high/max） */
+export function updateSessionModel(
+  sessionId: string,
+  modelConfigId: string | null,
+  reasoningEffort?: string | null,
+) {
   return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/model`, {
     modelConfigId,
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
   });
 }
 

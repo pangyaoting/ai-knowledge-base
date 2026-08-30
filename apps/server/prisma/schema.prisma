@@ -102,6 +102,7 @@ model ChatSession {
   title            String        @default("新对话")
   useKnowledgeBase Boolean       @default(true) @map("use_knowledge_base") // false = 纯对话，不检索知识库
   modelConfigId    String?       @map("model_config_id") // 用户自带的模型配置（null = 系统默认）
+  reasoningEffort  String?       @map("reasoning_effort") // 推理等级：low(关闭≈最低) / high / max；null=默认
   messages         ChatMessage[]
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")

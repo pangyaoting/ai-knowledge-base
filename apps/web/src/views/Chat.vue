@@ -14,6 +14,7 @@ import {
   Search,
   Cpu,
   X,
+  ImagePlus,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -102,6 +103,22 @@ function compressImage(file: File): Promise<string> {
 function removePendingImage() {
   pendingImage.value = null;
 }
+
+// ==================== 上传本地图片（选择文件，与粘贴同一压缩链路） ====================
+const imageInput = ref<HTMLInputElement | null>(null);
+
+async function onPickImage(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    pendingImage.value = await compressImage(file);
+  } catch (err) {
+    toast.error((err as Error).message);
+  } finally {
+    input.value = '';
+  }
+}
 const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
@@ -174,12 +191,33 @@ async function loadModelConfigs() {
   }
 }
 
-/** 切换当前会话的模型配置（null = 跟随用户默认配置） */
+/** 切换当前会话的模型配置（null = 跟随用户默认配置）；保持下拉打开，可继续调推理等级 */
 async function selectModel(id: string | null) {
-  modelDropdownOpen.value = false;
   if (!currentSessionId.value) return;
   try {
     await updateSessionModel(currentSessionId.value, id);
+    await loadSessions();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+
+// ===== 推理等级（低≈关闭 / 高 / 最高）=====
+const REASONING_OPTIONS: Array<{ value: string; label: string; desc: string }> = [
+  { value: 'low', label: '关闭', desc: '最低推理 · 最快最省' },
+  { value: 'high', label: '高', desc: '深度思考 · 更准确' },
+  { value: 'max', label: '最高', desc: '最强推理 · 最贵最慢' },
+];
+const currentReasoning = computed(() => currentSession.value?.reasoningEffort ?? null);
+
+async function setReasoningEffort(effort: string | null) {
+  if (!currentSessionId.value) return;
+  try {
+    await updateSessionModel(
+      currentSessionId.value,
+      currentSession.value?.modelConfigId ?? null,
+      effort,
+    );
     await loadSessions();
   } catch (e) {
     error.value = (e as Error).message;
@@ -921,6 +959,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 去「模型配置」绑定自己的 API Key →
               </RouterLink>
               <template v-else>
+                <p class="px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">选择模型</p>
                 <button
                   v-for="c in modelConfigs"
                   :key="c.id"
@@ -934,11 +973,43 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                     >✓</span
                   >
                 </button>
+                <p class="border-t px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">
+                  推理等级（思考越多越准也越贵）
+                </p>
+                <button
+                  v-for="e in REASONING_OPTIONS"
+                  :key="e.value"
+                  class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                  :class="currentReasoning === e.value ? 'text-primary' : ''"
+                  @click="setReasoningEffort(e.value)"
+                >
+                  <span>{{ e.label }}</span>
+                  <span class="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+                    {{ e.desc }}
+                  </span>
+                  <span v-if="currentReasoning === e.value" class="shrink-0 text-xs">✓</span>
+                </button>
               </template>
             </div>
           </div>
         </div>
         <div class="mx-auto flex max-w-3xl items-end gap-2">
+          <!-- 上传本地图片 -->
+          <button
+            type="button"
+            class="shrink-0 rounded-md border p-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="上传图片（支持视觉的模型可识别）"
+            @click="imageInput?.click()"
+          >
+            <ImagePlus class="h-4 w-4" />
+          </button>
+          <input
+            ref="imageInput"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="onPickImage"
+          />
           <!-- 粘贴图片预览 -->
           <div v-if="pendingImage" class="relative shrink-0">
             <img

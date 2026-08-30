@@ -8,6 +8,8 @@ export interface ChatSession {
   /** 会话绑定的用户模型配置（null = 跟随用户默认配置；BYO key） */
   modelConfigId: string | null;
   modelConfig: { id: string; name: string; model: string } | null;
+  /** 推理等级：low(关闭≈最低) / high / max；null = 默认（跟随模型） */
+  reasoningEffort: string | null;
   /** 会话绑定的知识库（空数组 = 检索全部知识库） */
   knowledgeBases: Array<{ knowledgeBase: { id: string; name: string } }>;
   createdAt: string;

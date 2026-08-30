@@ -103,8 +103,8 @@ const selectedMinutes = computed(() => estimateMinutes(selectedTokens.value));
 
 const budgetPercent = computed(() => {
   const t = current.value;
-  // 总预算 = 研究预算 + 固定 8k 报告整理预算（停止/完成时自动把笔记整理成正式报告）
-  const total = (t?.tokenBudget ?? 0) + 8000;
+  // 总预算 = 研究预算 + 固定 12k 报告整理预算（停止/完成时自动把笔记整理成正式报告）
+  const total = (t?.tokenBudget ?? 0) + 12000;
   if (!total) return 0;
   return Math.min(100, Math.round(((t?.tokensUsed ?? 0) / total) * 100));
 });
@@ -761,7 +761,7 @@ onBeforeUnmount(() => {
             </Button>
             <p class="mt-2 text-center text-[11px] text-muted-foreground">
               停止条件：token 预算用尽永远停止；否则到达你设定的结束时间即停止；手动停止随时生效。
-              无论怎么停，都会先把手头笔记整理成正式报告（整理费另计 8k token，不占研究预算）
+              无论怎么停，都会先把手头笔记整理成正式报告（整理费另计 12k token，不占研究预算）
             </p>
           </div>
         </div>
@@ -826,9 +826,9 @@ onBeforeUnmount(() => {
             <Zap class="h-3.5 w-3.5" />
             <span>
               token 已用 {{ fmtTokens(current.tokensUsed) }} /
-              {{ fmtTokens(current.tokenBudget + 8000) }}
+              {{ fmtTokens(current.tokenBudget + 12000) }}
               <span class="text-[10px]">
-                （研究 {{ fmtTokens(current.tokenBudget) }} + 报告整理 8k）
+                （研究 {{ fmtTokens(current.tokenBudget) }} + 报告整理 12k）
               </span>
             </span>
             <span class="ml-auto flex items-center gap-1">

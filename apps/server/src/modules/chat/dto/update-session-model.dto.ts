@@ -1,7 +1,11 @@
-import { IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-/** 修改会话绑定的模型配置（null = 回退系统默认模型） */
+/** 推理等级：low=关闭（最低推理，最快最省）/ high=高 / max=最高（思考更深，token 更多） */
+export const REASONING_EFFORTS = ['low', 'high', 'max'] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** 修改会话绑定的模型配置 + 推理等级（null = 回退系统默认模型/默认推理） */
 export class UpdateSessionModelDto {
   @ApiProperty({
     example: 'uuid',
@@ -12,4 +16,15 @@ export class UpdateSessionModelDto {
   @IsOptional()
   @IsUUID('4', { message: '模型配置ID格式不正确' })
   modelConfigId?: string | null;
+
+  @ApiProperty({
+    example: 'high',
+    enum: REASONING_EFFORTS,
+    description: '推理等级：low=关闭(最低) / high / max；null/不传 = 不修改',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsEnum(REASONING_EFFORTS, { message: '推理等级只能是 low / high / max' })
+  reasoningEffort?: ReasoningEffort | null;
 }

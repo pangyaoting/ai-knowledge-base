@@ -72,13 +72,18 @@ export class ChatController {
   }
 
   @Patch('sessions/:id/model')
-  @ApiOperation({ summary: '修改会话绑定的模型配置（BYO key；null = 系统默认）' })
+  @ApiOperation({ summary: '修改会话绑定的模型配置与推理等级（BYO key；null = 系统默认）' })
   updateSessionModel(
     @CurrentUser('id') userId: string,
     @Param('id', ParseUUIDPipe) sessionId: string,
     @Body() dto: UpdateSessionModelDto,
   ) {
-    return this.chatService.updateSessionModel(userId, sessionId, dto.modelConfigId);
+    return this.chatService.updateSessionModel(
+      userId,
+      sessionId,
+      dto.modelConfigId,
+      dto.reasoningEffort,
+    );
   }
 
   @Get('sessions/:id/export')
