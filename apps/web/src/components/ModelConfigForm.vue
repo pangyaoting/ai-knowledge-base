@@ -30,6 +30,11 @@ const configForm = reactive({
   model: props.editing?.model ?? '',
 });
 
+// 编辑时：当前模型名直接显示在下拉里（不依赖"获取模型列表"），一眼看到在改谁
+if (props.editing) {
+  modelOptions.value = [props.editing.model];
+}
+
 /** 获取模型列表按钮是否可用：新建需 baseURL+key；编辑直接用已存 key */
 const canFetchModels = computed(() => {
   if (props.editing) return true;
@@ -45,14 +50,20 @@ async function fetchModels() {
         ? { configId: props.editing.id }
         : { baseURL: configForm.baseURL.trim(), apiKey: configForm.apiKey.trim() },
     );
-    modelOptions.value = res.models;
-    if (modelOptions.value.length === 0) {
+    // 探测结果与当前值合并：编辑时当前模型不在探测列表里也保留（不悄悄改掉用户选的模型）
+    const fetched = res.models;
+    const merged =
+      fetched.includes(configForm.model) || !configForm.model
+        ? fetched
+        : [configForm.model, ...fetched];
+    modelOptions.value = merged;
+    if (merged.length === 0) {
       modelFetchError.value = '该接口没有返回可用模型，可切换「手动输入」';
       return;
     }
-    // 当前模型不在列表里时默认选第一个（新建）；在列表里则保持
-    if (!modelOptions.value.includes(configForm.model)) {
-      configForm.model = modelOptions.value[0];
+    // 新建且未选模型 → 默认选第一个
+    if (!configForm.model) {
+      configForm.model = merged[0];
     }
   } catch (e) {
     modelFetchError.value = (e as Error).message;
