@@ -17,7 +17,7 @@ export interface OverviewData {
     reportTokens: number;
     agentTaskTokens: number;
   };
-  daily: Array<{ day: string; questions: number; tokens: number }>;
+  daily: Array<{ day: string; questions: number; tokens: number; researchTokens: number }>;
   topKbs: Array<{ id: string; name: string; documents: number }>;
 }
 

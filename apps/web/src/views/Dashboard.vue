@@ -74,16 +74,26 @@ function renderCharts() {
     tokensInst ??= echarts.init(tokensChart.value);
     tokensInst.setOption({
       tooltip: { trigger: 'axis' },
-      grid: { left: 50, right: 16, top: 30, bottom: 28 },
+      legend: { top: 0, data: ['对话', '研究'] },
+      grid: { left: 50, right: 16, top: 34, bottom: 28 },
       xAxis: { type: 'category', data: d.daily.map((x) => x.day.slice(5)) },
       yAxis: { type: 'value' },
       series: [
         {
-          name: 'Token 消耗',
+          name: '对话',
           type: 'bar',
+          stack: 'tokens',
+          barMaxWidth: 28,
+          itemStyle: { borderRadius: [0, 0, 0, 0] },
+          data: d.daily.map((x) => x.tokens),
+        },
+        {
+          name: '研究',
+          type: 'bar',
+          stack: 'tokens',
           barMaxWidth: 28,
           itemStyle: { borderRadius: [4, 4, 0, 0] },
-          data: d.daily.map((x) => x.tokens),
+          data: d.daily.map((x) => x.researchTokens),
         },
       ],
     });
@@ -190,14 +200,16 @@ function fmtTokens(n: number): string {
         <div class="rounded-lg border bg-card p-5">
           <div class="flex items-center gap-2 text-muted-foreground">
             <Coins class="h-4 w-4" />
-            <span class="text-xs">Token 总消耗</span>
+            <span class="text-xs">Token 总消耗（对话 + 研究）</span>
           </div>
           <p class="mt-2 text-2xl font-bold">{{ fmtTokens(data.tokens.total) }}</p>
-          <p class="mt-1 text-xs text-muted-foreground">
-            输入 {{ fmtTokens(data.tokens.promptTotal) }} · 输出
-            {{ fmtTokens(data.tokens.completionTotal) }}
-          </p>
           <div class="mt-2 space-y-0.5 border-t pt-2 text-[11px] text-muted-foreground">
+            <p class="flex justify-between">
+              <span>对话（输入 + 输出）</span>
+              <span class="font-medium text-foreground">{{
+                fmtTokens(data.tokens.promptTotal + data.tokens.completionTotal)
+              }}</span>
+            </p>
             <p class="flex justify-between">
               <span>研究报告</span>
               <span class="font-medium text-foreground">{{

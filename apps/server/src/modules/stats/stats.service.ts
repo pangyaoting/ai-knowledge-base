@@ -4,7 +4,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 export interface DailyStat {
   day: string; // YYYY-MM-DD
   questions: number;
-  tokens: number;
+  tokens: number; // 对话 token
+  researchTokens: number; // 研究报告 + 自主研究 token
 }
 
 /**
@@ -29,6 +30,7 @@ export class StatsService {
       agentTasksDone,
       reportTokenAgg,
       agentTaskTokenAgg,
+      researchDailyRows,
     ] = await Promise.all([
       this.prisma.knowledgeBase.count({ where: { ownerId: userId } }),
       this.prisma.document.count({ where: { knowledgeBase: { ownerId: userId } } }),
@@ -71,10 +73,22 @@ export class StatsService {
         where: { ownerId: userId },
         _sum: { tokensUsed: true },
       }),
+      // 研究类 token 按天聚合（研究报告 + 自主研究），供"近 7 日 Token"图表单独画一条线
+      this.prisma.$queryRaw<Array<{ day: Date; tokens: bigint | null }>>`
+          SELECT day, SUM(tokens) AS tokens FROM (
+            SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date AS day, tokens_used AS tokens
+            FROM reports WHERE owner_id = ${userId} AND created_at >= now() - interval '6 days'
+            UNION ALL
+            SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date AS day, tokens_used AS tokens
+            FROM agent_tasks WHERE owner_id = ${userId} AND created_at >= now() - interval '6 days'
+          ) t GROUP BY day
+        `,
     ]);
 
     const promptTotal = tokenAgg._sum.promptTokens ?? 0;
     const completionTotal = tokenAgg._sum.completionTokens ?? 0;
+    const reportTokens = reportTokenAgg._sum.tokensUsed ?? 0;
+    const agentTaskTokens = agentTaskTokenAgg._sum.tokensUsed ?? 0;
 
     return {
       counts: {
@@ -87,12 +101,13 @@ export class StatsService {
         agentTasks: agentTasksDone,
       },
       tokens: {
-        total: promptTotal + completionTotal,
+        // 总消耗 = 对话 + 研究报告 + 自主研究（卡片顶部展示全量）
+        total: promptTotal + completionTotal + reportTokens + agentTaskTokens,
         promptTotal,
         completionTotal,
         // 研究报告 / 自主研究 消耗的 token（与对话 token 分开统计）
-        reportTokens: reportTokenAgg._sum.tokensUsed ?? 0,
-        agentTaskTokens: agentTaskTokenAgg._sum.tokensUsed ?? 0,
+        reportTokens,
+        agentTaskTokens,
       },
       daily: this.fillLast7Days(
         dailyRows.map((r) => ({
@@ -100,6 +115,7 @@ export class StatsService {
           questions: Number(r.questions),
           tokens: Number(r.tokens ?? 0),
         })),
+        new Map(researchDailyRows.map((r) => [this.fmt(r.day), Number(r.tokens ?? 0)])),
       ),
       topKbs: topKbs.map((kb) => ({
         id: kb.id,
@@ -112,6 +128,7 @@ export class StatsService {
   /** 补全最近 7 天（没有数据的日期补 0，保证图表连续） */
   private fillLast7Days(
     rows: Array<{ day: Date; questions: number; tokens: number }>,
+    researchMap: Map<string, number>,
   ): DailyStat[] {
     const map = new Map(rows.map((r) => [this.fmt(r.day), r]));
     const out: DailyStat[] = [];
@@ -124,6 +141,7 @@ export class StatsService {
         day: key,
         questions: map.get(key)?.questions ?? 0,
         tokens: map.get(key)?.tokens ?? 0,
+        researchTokens: researchMap.get(key) ?? 0,
       });
     }
     return out;
