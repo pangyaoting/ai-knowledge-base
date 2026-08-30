@@ -1,4 +1,4 @@
-import { IsString, MaxLength, IsOptional, IsBoolean } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class AskDto {
@@ -18,11 +18,23 @@ export class AskDto {
 
   @ApiProperty({
     example: 'data:image/jpeg;base64,...',
-    description: '粘贴图片（data URL，需支持视觉的模型如 Qwen-VL 才能识别）',
+    description: '单张图片（data URL，需支持视觉的模型；兼容旧客户端）',
     required: false,
   })
   @IsOptional()
   @IsString({ message: '图片必须是字符串' })
   @MaxLength(6_000_000, { message: '图片过大' })
   imageDataUrl?: string;
+
+  @ApiProperty({
+    example: ['data:image/jpeg;base64,...'],
+    description: '图片数组（一次最多 6 张，data URL）',
+    required: false,
+  })
+  @IsOptional()
+  @IsArray({ message: '图片必须是数组' })
+  @ArrayMaxSize(6, { message: '一次最多 6 张图片' })
+  @IsString({ each: true, message: '图片必须是字符串' })
+  @MaxLength(6_000_000, { each: true, message: '单张图片过大' })
+  imageDataUrls?: string[];
 }

@@ -183,7 +183,8 @@ model ChatMessage {
   sessionId        String   @map("session_id")
   role             String // user / assistant
   content          String // 完整消息内容
-  imageDataUrl     String?  @map("image_data_url") // 粘贴图片（data URL，用户消息）
+  imageDataUrl     String?  @map("image_data_url") // 图片（data URL，用户消息；单图/兼容旧数据）
+  imageDataUrls    String?  @map("image_data_urls") // 多图（JSON 数组字符串，用户消息）
   sources          Json? // 引用来源：[{ documentId, filename, chunkIndex, content, similarity }]
   promptTokens     Int?     @map("prompt_tokens") // 流式请求输入 token（数据看板用）
   completionTokens Int?     @map("completion_tokens") // 流式请求输出 token

@@ -28,7 +28,9 @@ const classes = computed(() =>
     :value="modelValue"
     :placeholder="placeholder"
     :disabled="disabled"
+    :autocomplete="type === 'password' ? 'new-password' : undefined"
     :class="classes"
+    v-bind="$attrs"
     @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
   />
 </template>

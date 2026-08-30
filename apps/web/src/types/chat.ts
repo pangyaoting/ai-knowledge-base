@@ -23,7 +23,8 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
-  imageDataUrl?: string | null; // 粘贴图片（data URL）
+  imageDataUrl?: string | null; // 单图（data URL，兼容旧数据）
+  imageDataUrls?: string[] | null; // 多图（data URL 数组）
   sources: ChatSources | null;
   createdAt: string;
 }

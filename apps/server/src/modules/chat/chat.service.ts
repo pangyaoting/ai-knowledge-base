@@ -197,12 +197,13 @@ export class ChatService {
     useWebSearch: boolean,
     writer: StreamWriter,
     signal: AbortSignal,
-    imageDataUrl?: string,
+    imageDataUrls?: string[],
   ) {
     const session = await this.getSession(userId, sessionId);
+    const images = (imageDataUrls ?? []).filter((u) => !!u && u.length > 0);
     // 只发图片（不带文字）也允许：content 为空但有图片
-    if (!(question ?? '').trim() && !imageDataUrl) {
-      throw new BadRequestException('请填写问题或粘贴图片');
+    if (!(question ?? '').trim() && images.length === 0) {
+      throw new BadRequestException('请填写问题或粘贴/上传图片');
     }
     // 是否使用知识库（false = 纯对话模式，不检索知识库）
     const useKnowledgeBase = session.useKnowledgeBase !== false; // 兼容旧数据（列默认 true）
@@ -224,7 +225,7 @@ export class ChatService {
     // 带图自动路由：当前模型不支持视觉时，自动换用用户配置里的视觉模型
     // （如 deepseek-v4-flash-vision-exp、Qwen3-VL）——文本对话仍用会话/默认模型，
     // 两个模型各司其职，不用手动切换；没有视觉配置则保持原模型（报错会提示切换）
-    if (imageDataUrl && !isVisionModelName(target.model)) {
+    if (images.length > 0 && !isVisionModelName(target.model)) {
       const visionTarget = await this.modelConfigService.resolveVisionForUser(userId);
       if (visionTarget) {
         this.logger.log(
@@ -269,9 +270,15 @@ export class ChatService {
     const kbSources: RetrievalSource[] = retrieved;
     writer('sources', { kb: kbSources, web: webSources });
 
-    // ④ 保存用户消息（含粘贴图片 data URL）
+    // ④ 保存用户消息（含图片 data URL 数组；单图兼容字段存第一张）
     await this.prisma.chatMessage.create({
-      data: { sessionId, role: 'user', content: question, imageDataUrl: imageDataUrl ?? null },
+      data: {
+        sessionId,
+        role: 'user',
+        content: question,
+        imageDataUrl: images[0] ?? null,
+        imageDataUrls: images.length ? JSON.stringify(images) : null,
+      },
     });
 
     // ⑤ 组装 Prompt（知识库资料 + 网络资料一起注入；LLM 看到的是用户原问题）
@@ -281,7 +288,7 @@ export class ChatService {
       webSources,
       history,
       useKnowledgeBase,
-      imageDataUrl,
+      images,
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
@@ -323,7 +330,7 @@ export class ChatService {
         this.logger.log(`会话 ${sessionId} 被客户端中止`);
         return;
       }
-      const translated = this.translateLLMError(err, !!imageDataUrl);
+      const translated = this.translateLLMError(err, images.length > 0);
       this.logger.warn(
         `会话 ${sessionId} LLM 调用失败: ${(err as Error).message} → ${translated.message}`,
       );
@@ -366,7 +373,7 @@ export class ChatService {
     webSources: WebSource[],
     history: Array<{ role: string; content: string }>,
     useKnowledgeBase: boolean,
-    imageDataUrl?: string,
+    imageDataUrls: string[],
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
     // - 使用知识库：强调以知识库资料为准，标注 [来源N]
@@ -434,20 +441,25 @@ export class ChatService {
       history.length ? `【历史对话】\n${historyText}` : '',
       '【用户问题】',
       // 只发图片时没有文字问题 → 给模型一个明确指令（否则模型只看到"【用户问题】"空标题）
-      (question ?? '').trim() || '请描述这张图片的内容',
+      (question ?? '').trim() ||
+        (imageDataUrls.length > 1 ? '请描述这些图片的内容' : '请描述这张图片的内容'),
     ]
       .filter((s) => s !== '')
       .join('\n');
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      // 有粘贴图片 → 用 OpenAI 视觉消息格式（content 数组：文字 + image_url）
-      // 注意：需要支持视觉的模型（如 Qwen-VL）才能识别；DeepSeek 等纯文本模型会报错
-      imageDataUrl
+      // 有图片 → OpenAI 视觉消息格式（content 数组：文字 + 多张 image_url）
+      // 注意：需要支持视觉的模型（如 deepseek-v4-flash-vision-exp、Qwen-VL）才能识别；
+      // 纯文本模型会报错（自动路由会优先换视觉模型）
+      imageDataUrls.length > 0
         ? {
             role: 'user',
             content: [
               { type: 'text', text: userPrompt },
-              { type: 'image_url', image_url: { url: imageDataUrl } },
+              ...imageDataUrls.map((url) => ({
+                type: 'image_url' as const,
+                image_url: { url },
+              })),
             ],
           }
         : { role: 'user', content: userPrompt },

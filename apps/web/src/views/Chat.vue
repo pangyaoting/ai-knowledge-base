@@ -52,24 +52,29 @@ const messages = ref<ChatMessage[]>([]);
 const input = ref('');
 /** 每个会话独立的输入草稿：切换会话时保存/恢复，不串台也不丢失 */
 const inputDrafts = ref<Record<string, string>>({});
-const imageDrafts = ref<Record<string, string | null>>({});
+const imageDrafts = ref<Record<string, string[]>>({});
 
-// ==================== 粘贴图片（需支持视觉的模型如 Qwen-VL 才能识别） ====================
-const pendingImage = ref<string | null>(null);
+// ==================== 图片（粘贴 / 上传，最多 6 张，压缩后进消息） ====================
+const MAX_IMAGES = 6;
+const pendingImages = ref<string[]>([]);
 
-/** 粘贴图片：压缩到最长边 1024、JPEG 0.8，转 data URL（控制体积再入库/进模型） */
+/** 粘贴图片：收集剪贴板全部图片 → 压缩 → 加入待发送列表 */
 async function onPasteImage(e: ClipboardEvent) {
   const items = e.clipboardData?.items;
   if (!items) return;
+  const files: File[] = [];
   for (const item of items) {
     if (item.type.startsWith('image/')) {
       const file = item.getAsFile();
-      if (!file) return;
-      e.preventDefault();
-      pendingImage.value = await compressImage(file);
-      return;
+      if (file) files.push(file);
     }
   }
+  if (!files.length) return;
+  e.preventDefault();
+  const imgs = await Promise.all(files.map(compressImage));
+  const room = MAX_IMAGES - pendingImages.value.length;
+  pendingImages.value.push(...imgs.slice(0, Math.max(0, room)));
+  if (imgs.length > room) toast.info(`一次最多 ${MAX_IMAGES} 张图片`);
 }
 
 function compressImage(file: File): Promise<string> {
@@ -100,19 +105,22 @@ function compressImage(file: File): Promise<string> {
   });
 }
 
-function removePendingImage() {
-  pendingImage.value = null;
+function removeImage(i: number) {
+  pendingImages.value.splice(i, 1);
 }
 
-// ==================== 上传本地图片（选择文件，与粘贴同一压缩链路） ====================
+// ==================== 上传本地图片（选择文件，可多选，与粘贴同一压缩链路） ====================
 const imageInput = ref<HTMLInputElement | null>(null);
 
 async function onPickImage(e: Event) {
   const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
+  const files = input.files ? Array.from(input.files) : [];
+  if (!files.length) return;
   try {
-    pendingImage.value = await compressImage(file);
+    const imgs = await Promise.all(files.map(compressImage));
+    const room = MAX_IMAGES - pendingImages.value.length;
+    pendingImages.value.push(...imgs.slice(0, Math.max(0, room)));
+    if (imgs.length > room) toast.info(`一次最多 ${MAX_IMAGES} 张图片`);
   } catch (err) {
     toast.error((err as Error).message);
   } finally {
@@ -358,10 +366,10 @@ async function selectSession(id: string) {
   // 按会话保存/恢复输入草稿：切走时存当前输入，切回时恢复（不串台也不丢失）
   if (currentSessionId.value) {
     inputDrafts.value[currentSessionId.value] = input.value;
-    imageDrafts.value[currentSessionId.value] = pendingImage.value;
+    imageDrafts.value[currentSessionId.value] = [...pendingImages.value];
   }
   input.value = inputDrafts.value[id] ?? '';
-  pendingImage.value = imageDrafts.value[id] ?? null;
+  pendingImages.value = imageDrafts.value[id] ?? [];
   currentSessionId.value = id;
   error.value = '';
   messages.value = [];
@@ -478,24 +486,24 @@ async function handleExportSession(id: string) {
 
 const canSend = computed(
   () =>
-    (input.value.trim().length > 0 || pendingImage.value !== null) &&
+    (input.value.trim().length > 0 || pendingImages.value.length > 0) &&
     !streaming.value &&
     !!currentSessionId.value,
 );
 
 async function handleSend() {
   const question = input.value.trim();
-  const image = pendingImage.value;
-  if ((!question && !image) || streaming.value || !currentSessionId.value) return;
+  const images = [...pendingImages.value];
+  if ((!question && images.length === 0) || streaming.value || !currentSessionId.value) return;
 
   // 发图提示：当前模型不支持视觉但用户配置里有视觉模型 → 后端会自动路由（对话仍用当前模型）
-  if (image && activeModelId.value && !VISION_RE.test(activeModelId.value)) {
+  if (images.length > 0 && activeModelId.value && !VISION_RE.test(activeModelId.value)) {
     const v = modelConfigs.value.find((c) => VISION_RE.test(c.model));
     if (v) toast.info(`图片将自动使用视觉模型 ${v.model} 识别，文字对话仍用当前模型`);
   }
 
   input.value = '';
-  pendingImage.value = null;
+  pendingImages.value = [];
   error.value = '';
   streaming.value = true;
   streamContent.value = '';
@@ -507,7 +515,8 @@ async function handleSend() {
     sessionId: currentSessionId.value,
     role: 'user',
     content: question,
-    imageDataUrl: image,
+    imageDataUrl: images[0] ?? null,
+    imageDataUrls: images.length ? images : null,
     sources: null,
     createdAt: new Date().toISOString(),
   });
@@ -544,7 +553,7 @@ async function handleSend() {
           error.value = message;
         },
       },
-      image ?? undefined,
+      images.length ? images : undefined,
     );
   } finally {
     streaming.value = false;
@@ -766,8 +775,22 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 v-else
                 class="rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground whitespace-pre-wrap"
               >
+                <div
+                  v-if="msg.imageDataUrls?.length"
+                  class="mb-2 grid max-w-[360px] gap-1.5"
+                  :class="msg.imageDataUrls.length > 1 ? 'grid-cols-2' : ''"
+                >
+                  <img
+                    v-for="(u, i) in msg.imageDataUrls"
+                    :key="i"
+                    :src="u"
+                    class="max-h-48 w-full rounded-md object-cover"
+                    :class="msg.imageDataUrls.length === 1 ? 'max-w-[280px]' : ''"
+                    alt="图片"
+                  />
+                </div>
                 <img
-                  v-if="msg.imageDataUrl"
+                  v-else-if="msg.imageDataUrl"
                   :src="msg.imageDataUrl"
                   class="mb-2 max-h-48 rounded-md object-cover"
                   alt="粘贴图片"
@@ -993,12 +1016,35 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </div>
           </div>
         </div>
+        <!-- 待发送图片预览：在输入框上方横排展示（支持多张，可单独移除） -->
+        <div
+          v-if="pendingImages.length"
+          class="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto pb-1"
+        >
+          <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
+            <img
+              :src="img"
+              class="h-20 w-20 rounded-md border border-primary/40 object-cover"
+              alt="待发送图片"
+            />
+            <button
+              class="absolute -right-2 -top-2 rounded-full bg-destructive p-0.5 text-white shadow"
+              title="移除这张图片"
+              @click="removeImage(i)"
+            >
+              <X class="h-3 w-3" />
+            </button>
+          </div>
+          <p class="flex items-center text-[11px] text-muted-foreground">
+            {{ pendingImages.length }}/6
+          </p>
+        </div>
         <div class="mx-auto flex max-w-3xl items-end gap-2">
-          <!-- 上传本地图片 -->
+          <!-- 上传本地图片（可多选） -->
           <button
             type="button"
             class="shrink-0 rounded-md border p-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="上传图片（支持视觉的模型可识别）"
+            title="上传图片（支持多选，视觉模型可识别）"
             @click="imageInput?.click()"
           >
             <ImagePlus class="h-4 w-4" />
@@ -1007,24 +1053,10 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             ref="imageInput"
             type="file"
             accept="image/*"
+            multiple
             class="hidden"
             @change="onPickImage"
           />
-          <!-- 粘贴图片预览 -->
-          <div v-if="pendingImage" class="relative shrink-0">
-            <img
-              :src="pendingImage"
-              class="h-16 w-16 rounded-md border border-primary/40 object-cover"
-              alt="待发送图片"
-            />
-            <button
-              class="absolute -right-2 -top-2 rounded-full bg-destructive p-0.5 text-white shadow"
-              title="移除图片"
-              @click="removePendingImage"
-            >
-              <X class="h-3 w-3" />
-            </button>
-          </div>
           <textarea
             v-model="input"
             rows="1"

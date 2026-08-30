@@ -140,7 +140,8 @@ export class ChatController {
         dto.useWebSearch ?? false,
         (event, data) => write(event, data),
         abortController.signal,
-        dto.imageDataUrl,
+        // 多图数组优先；兼容旧客户端传的单图字段
+        dto.imageDataUrls ?? (dto.imageDataUrl ? [dto.imageDataUrl] : undefined),
       );
       res.end();
     } catch (err) {
