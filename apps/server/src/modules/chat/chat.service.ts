@@ -198,7 +198,9 @@ export class ChatService {
     if (file.size === 0) {
       throw new BadRequestException('文件内容为空');
     }
-    const fileType = detectFileType(file.originalname);
+    // 修复 multipart 中文文件名乱码（busboy 按 latin1 解码，与知识库上传同一处理）
+    const filename = fixMojibakeFilename(file.originalname);
+    const fileType = detectFileType(filename);
     if (!fileType) {
       throw new BadRequestException('不支持该文件类型：仅支持文本/代码/PDF/Word 等可读取的文件');
     }
@@ -211,7 +213,7 @@ export class ChatService {
     const MAX_FILE_CHARS = 60_000;
     const truncated = content.length > MAX_FILE_CHARS;
     return {
-      filename: file.originalname,
+      filename,
       content: truncated ? `${content.slice(0, MAX_FILE_CHARS)}\n…（文件过长，已截断）` : content,
       truncated,
     };
@@ -661,4 +663,17 @@ export class ChatService {
     }
     return { filename: `${session.title}.md`, content: lines.join('\n') };
   }
+}
+
+/**
+ * 修复 multipart 上传中文文件名乱码（与知识库上传同一逻辑）：
+ * busboy（multer 底层）默认把文件名按 latin1 解码，UTF-8 字节变成乱码字符（如 新→æ°）。
+ * latin1 字符还原成字节再按 UTF-8 解码；已是正确 UTF-8 的文件名会还原出替换符，保持原样。
+ */
+function fixMojibakeFilename(name: string): string {
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  if (decoded.includes('\uFFFD')) {
+    return name;
+  }
+  return decoded;
 }

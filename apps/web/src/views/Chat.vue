@@ -190,7 +190,8 @@ function toggleModelDropdown() {
   if (el) {
     const r = el.getBoundingClientRect();
     const itemH = 38;
-    const h = Math.min(320, modelConfigs.value.length * itemH + 40); // 下拉估算高度
+    // 下拉含「选择模型」+「推理等级」两个分区（3 个等级 + 标题/分隔 ≈ 150px），估算要算进去
+    const h = Math.min(400, modelConfigs.value.length * itemH + 190);
     const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
     const left = Math.min(Math.max(8, r.left), window.innerWidth - 248);
     modelDropdownPos.value = { top, left };
@@ -1028,7 +1029,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             <div
               v-if="modelDropdownOpen"
               ref="modelDropdownRef"
-              class="fixed z-50 w-60 rounded-lg border bg-card py-1 shadow-lg"
+              class="fixed z-50 max-h-[70vh] w-60 overflow-y-auto rounded-lg border bg-card py-1 shadow-lg"
               :style="{ top: modelDropdownPos.top + 'px', left: modelDropdownPos.left + 'px' }"
               @click.stop
             >
@@ -1078,10 +1079,10 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </div>
           </div>
         </div>
-        <!-- 待发送图片预览：在输入框上方横排展示（支持多张，可单独移除） -->
+        <!-- 待发送图片/文件预览：在输入框上方横排展示（有图片或文件时显示） -->
         <div
-          v-if="pendingImages.length"
-          class="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto pb-1"
+          v-if="pendingImages.length || pendingFiles.length"
+          class="mx-auto mb-2 flex max-w-3xl items-center gap-2 overflow-x-auto pb-1"
         >
           <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
             <img
