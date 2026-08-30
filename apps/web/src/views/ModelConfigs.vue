@@ -17,6 +17,10 @@ import {
 import type { ModelConfig } from '@/types/model-config';
 
 const configs = ref<ModelConfig[]>([]);
+/** 正在编辑的配置（编辑框标题显示"改的是谁"） */
+const editingConfig = computed(() =>
+  editingId.value ? (configs.value.find((c) => c.id === editingId.value) ?? null) : null,
+);
 const loadingConfigs = ref(false);
 const formOpen = ref(false);
 const editingId = ref<string | null>(null);
@@ -245,7 +249,13 @@ onMounted(loadConfigs);
       <!-- 新建/编辑表单 -->
       <div v-if="formOpen" class="mt-4 rounded-lg border border-primary/30 bg-muted/30 p-4">
         <div class="flex items-center justify-between">
-          <p class="text-sm font-medium">{{ editingId ? '编辑配置' : '新增配置' }}</p>
+          <p class="text-sm font-medium">
+            {{
+              editingConfig
+                ? `编辑配置：${editingConfig.name}（${editingConfig.model}）`
+                : '新增配置'
+            }}
+          </p>
           <button
             class="rounded p-1 text-muted-foreground hover:bg-accent"
             @click="formOpen = false"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
   MessageSquare,
   Plus,
@@ -110,6 +110,38 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 // 模型配置（BYO 大模型 API）：会话可选用户自带的 key
 const modelConfigs = ref<ModelConfig[]>([]);
 const modelDropdownOpen = ref(false);
+/** 下拉定位（fixed，视口内自适应：底部空间不足向上弹、右侧不足左移） */
+const modelBtnRef = ref<HTMLElement | null>(null);
+const modelDropdownRef = ref<HTMLElement | null>(null);
+const modelDropdownPos = ref({ top: 0, left: 0 });
+
+function toggleModelDropdown() {
+  if (modelDropdownOpen.value) {
+    modelDropdownOpen.value = false;
+    return;
+  }
+  const el = modelBtnRef.value;
+  if (el) {
+    const r = el.getBoundingClientRect();
+    const itemH = 38;
+    const h = Math.min(320, modelConfigs.value.length * itemH + 40); // 下拉估算高度
+    const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - 248);
+    modelDropdownPos.value = { top, left };
+  }
+  modelDropdownOpen.value = true;
+}
+
+function onDocPointerDown(e: MouseEvent) {
+  if (!modelDropdownOpen.value) return;
+  const t = e.target as Node;
+  if (!modelBtnRef.value?.contains(t) && !modelDropdownRef.value?.contains(t)) {
+    modelDropdownOpen.value = false;
+  }
+}
+
+onMounted(() => document.addEventListener('mousedown', onDocPointerDown));
+onBeforeUnmount(() => document.removeEventListener('mousedown', onDocPointerDown));
 const defaultModelConfigId = computed(
   () => modelConfigs.value.find((c) => c.isDefault)?.id ?? null,
 );
@@ -283,6 +315,9 @@ watch(sessionSearch, () => {
 
 async function selectSession(id: string) {
   if (streaming.value) return;
+  // 切换会话：清空输入框与待发图片，避免串到别的会话
+  input.value = '';
+  pendingImage.value = null;
   currentSessionId.value = id;
   error.value = '';
   messages.value = [];
@@ -841,10 +876,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             <span class="shrink-0 text-muted-foreground">修改</span>
           </button>
 
-          <!-- 模型选择（BYO 大模型 API：默认配置 / 会话绑定） -->
+          <!-- 模型选择（BYO 大模型 API：会话绑定 / 默认配置） -->
           <span class="shrink-0 text-muted-foreground">模型</span>
           <div class="relative">
             <button
+              ref="modelBtnRef"
               class="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
               :class="
                 modelConfigs.length === 0
@@ -852,25 +888,19 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                   : 'border bg-muted/40'
               "
               :title="'当前模型：' + currentModelName + '（点击切换，Token 按所选模型计费）'"
-              @click="modelDropdownOpen = !modelDropdownOpen"
+              @click="toggleModelDropdown"
             >
               <Cpu class="h-3 w-3 shrink-0 text-muted-foreground" />
               <span class="max-w-[140px] truncate">{{ currentModelName }}</span>
             </button>
-            <!-- 下拉面板 -->
+            <!-- 下拉面板：fixed 定位，视口内自适应（底部空间不足时向上弹） -->
             <div
               v-if="modelDropdownOpen"
-              class="absolute left-0 top-full z-40 mt-1.5 w-60 rounded-lg border bg-card py-1 shadow-lg"
+              ref="modelDropdownRef"
+              class="fixed z-50 w-60 rounded-lg border bg-card py-1 shadow-lg"
+              :style="{ top: modelDropdownPos.top + 'px', left: modelDropdownPos.left + 'px' }"
+              @click.stop
             >
-              <button
-                class="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-                :class="!currentSession?.modelConfigId ? 'text-primary' : ''"
-                @click="selectModel(null)"
-              >
-                <span>默认配置</span>
-                <span v-if="!currentSession?.modelConfigId" class="text-xs">✓</span>
-              </button>
-              <div class="border-t" />
               <p v-if="modelConfigs.length === 0" class="px-3 py-2 text-xs text-muted-foreground">
                 还没有绑定任何模型 Key，AI 功能无法使用。
               </p>
@@ -883,6 +913,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 去「模型配置」绑定自己的 API Key →
               </RouterLink>
               <template v-else>
+                <p class="px-3 pb-1 pt-1.5 text-[10px] text-muted-foreground">
+                  未选中的会话使用默认配置
+                </p>
                 <button
                   v-for="c in modelConfigs"
                   :key="c.id"
@@ -894,6 +927,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                   <span class="shrink-0 text-xs text-muted-foreground">{{ c.model }}</span>
                   <span v-if="currentSession?.modelConfigId === c.id" class="shrink-0 text-xs"
                     >✓</span
+                  >
+                  <span
+                    v-else-if="c.isDefault && !currentSession?.modelConfigId"
+                    class="shrink-0 text-[10px] text-muted-foreground"
+                    >默认</span
                   >
                 </button>
               </template>
