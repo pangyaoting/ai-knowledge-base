@@ -6,24 +6,72 @@
  * - docx : mammoth（微软 Word 格式）
  * - md   : 直接读（Markdown 本身就是文本）
  * - txt  : 直接读
+ * - code : 代码/配置文件（ts/vue/js/html/css/py/json…），按纯文本读，
+ *          分块用代码专用分块器（按行、空行边界），并跳过图谱抽取
  *
  * 边界说明（面试可讲"我清楚技术边界"）：
  * - .doc 老格式不支持（需要 COM 调用，成本高），前端提示转 .docx
  * - PDF 里纯图片内容（扫描件）提取不到文字 → 会报"未能提取到文本"
  * - OCR 识别图片文字留作扩展
+ * - 不在识别清单内的文件（图片/二进制/未知扩展名）由上传服务作为"附件"原样保管，
+ *   不参与解析与检索（detectFileType 返回 null）
  */
 import pdfParse from 'pdf-parse';
 import * as mammoth from 'mammoth';
 
-export type DocType = 'pdf' | 'docx' | 'md' | 'txt';
+export type DocType = 'pdf' | 'docx' | 'md' | 'txt' | 'code';
 
-/** 根据文件名判断文件类型，不支持返回 null */
+/** 代码/配置文件扩展名（大小写不敏感，比较前已 lower） */
+const CODE_EXTS = new Set([
+  'ts',
+  'tsx',
+  'js',
+  'jsx',
+  'vue',
+  'html',
+  'css',
+  'scss',
+  'less',
+  'json',
+  'py',
+  'java',
+  'go',
+  'rs',
+  'c',
+  'cpp',
+  'h',
+  'hpp',
+  'cs',
+  'sh',
+  'bash',
+  'zsh',
+  'yml',
+  'yaml',
+  'toml',
+  'sql',
+  'xml',
+  'svg',
+  'ini',
+  'conf',
+  'cfg',
+  'proto',
+  'graphql',
+  'prisma',
+  'dockerfile',
+  'makefile',
+  'env',
+  'lock',
+  'gitignore',
+]);
+
+/** 根据文件名判断文件类型：可解析返回对应类型，无法解析（附件）返回 null */
 export function detectFileType(filename: string): DocType | null {
   const ext = (filename.split('.').pop() ?? '').toLowerCase();
   if (ext === 'pdf') return 'pdf';
   if (ext === 'docx') return 'docx';
   if (ext === 'md' || ext === 'markdown') return 'md';
   if (ext === 'txt') return 'txt';
+  if (CODE_EXTS.has(ext)) return 'code';
   return null;
 }
 
@@ -40,6 +88,7 @@ export async function extractText(buffer: Buffer, fileType: DocType): Promise<st
     }
     case 'md':
     case 'txt':
+    case 'code':
       return buffer.toString('utf-8');
     default:
       throw new Error(`不支持的文件类型: ${fileType}`);

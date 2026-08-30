@@ -205,7 +205,7 @@ async function saveEdit() {
         </div>
         <div class="flex-1 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
           <p class="font-medium text-foreground">② 上传文档</p>
-          <p class="mt-1">PDF/Word/Markdown/TXT 自动解析向量化</p>
+          <p class="mt-1">文档/代码/项目目录均可，自动解析向量化</p>
         </div>
         <div class="flex-1 rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
           <p class="font-medium text-foreground">③ 对话提问</p>

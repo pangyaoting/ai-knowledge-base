@@ -5,7 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from './embedding.service';
 import { GraphService } from './graph.service';
 import { cleanText, extractText, type DocType } from './utils/document-parser';
-import { splitText } from './utils/text-splitter';
+import { splitCode, splitText } from './utils/text-splitter';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
@@ -44,9 +44,26 @@ export class DocumentProcessor {
       }
       const buffer = readFileSync(absPath);
 
-      // 解析 → 清洗
+      // 解析 → 清洗（代码文件不折叠空白/缩进，否则代码语义与可读性被破坏）
       const rawText = await extractText(buffer, fileType as DocType);
-      const cleaned = cleanText(rawText);
+      const isCode = fileType === 'code';
+
+      // 二进制被误判成文本/代码（UTF-16 文件、伪装扩展名的二进制等）：
+      // UTF-8 解码后 NUL/替换字符占比高 → 转为"附件"保管，不报解析失败
+      if (isCode || fileType === 'txt' || fileType === 'md') {
+        const nullRatio = (rawText.match(/\u0000/g)?.length ?? 0) / Math.max(rawText.length, 1);
+        const replRatio = (rawText.match(/\uFFFD/g)?.length ?? 0) / Math.max(rawText.length, 1);
+        if (nullRatio > 0.01 || replRatio > 0.05) {
+          await this.prisma.document.update({
+            where: { id: documentId },
+            data: { status: 'done', error: null, fileType: 'bin' },
+          });
+          this.logger.warn(`二进制内容转为附件（不参与检索）: ${originalName}`);
+          return;
+        }
+      }
+
+      const cleaned = isCode ? rawText.replace(/\r\n/g, '\n').trim() : cleanText(rawText);
       if (!cleaned) {
         throw new Error('未能从文档中提取到文本（可能是扫描件或不含文字的 PDF）');
       }
@@ -56,15 +73,21 @@ export class DocumentProcessor {
         data: { status: 'processing', error: null },
       });
 
-      // 分块 + 向量化
-      const chunkCount = await this.indexText(documentId, cleaned);
+      // 分块 + 向量化（代码用代码分块器，并在每块开头标注来源文件）
+      const chunkCount = await this.indexText(
+        documentId,
+        cleaned,
+        isCode ? `文件: ${originalName}` : undefined,
+      );
 
-      // 知识图谱抽取（增强环节：使用用户自己的模型配置，未绑定则自动跳过；失败不影响文档主流程）
-      await this.graphService
-        .extractFromDocument(userId, documentId)
-        .catch((err) =>
-          this.logger.warn(`图谱抽取失败 ${originalName}: ${(err as Error).message}`),
-        );
+      // 知识图谱抽取（仅文本类文档；代码块不适合实体抽取，且省一次 LLM 调用）
+      if (!isCode) {
+        await this.graphService
+          .extractFromDocument(userId, documentId)
+          .catch((err) =>
+            this.logger.warn(`图谱抽取失败 ${originalName}: ${(err as Error).message}`),
+          );
+      }
 
       // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
       const existing = await this.prisma.document.findFirst({
@@ -96,6 +119,13 @@ export class DocumentProcessor {
       await this.prisma.document
         .update({ where: { id: documentId }, data: { status: 'failed', error: message } })
         .catch(() => undefined);
+      // 新文档失败 → 恢复被标记为"替换中"的旧文档（不丢旧数据）
+      await this.prisma.document
+        .updateMany({
+          where: { knowledgeBaseId, filename: originalName, status: 'replacing' },
+          data: { status: 'done', error: null },
+        })
+        .catch(() => undefined);
       this.logger.warn(`文档处理失败: ${originalName} → ${message}`);
     }
   }
@@ -103,9 +133,12 @@ export class DocumentProcessor {
   /**
    * 把清洗后的文本分块并向量化（上传队列与在线编辑共用）：
    * 删旧 chunk → 建新 chunk → 批量调 bge-m3 写回 embedding → 返回 chunk 数
+   * prefix 存在时按代码分块器切（并给每块加来源文件标注）
    */
-  async indexText(documentId: string, cleaned: string): Promise<number> {
-    const chunks = splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
+  async indexText(documentId: string, cleaned: string, prefix?: string): Promise<number> {
+    const chunks = prefix
+      ? splitCode(cleaned, prefix, { chunkSize: 900 })
+      : splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
     await this.prisma.chunk.deleteMany({ where: { documentId } });
     await this.prisma.chunk.createMany({
       data: chunks.map((content, index) => ({

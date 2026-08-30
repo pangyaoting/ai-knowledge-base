@@ -11,7 +11,6 @@ import { UpdateDocumentDto } from './dto/update-document.dto';
 import { cleanText, detectFileType, extractText, type DocType } from './utils/document-parser';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
-const ALLOWED_TYPES = ['pdf', 'docx', 'md', 'txt'];
 
 // 供其他模块（如示例数据导入）复用
 export { UPLOAD_DIR };
@@ -64,21 +63,37 @@ export class DocumentsService {
       throw new BadRequestException('文件内容为空，无法解析');
     }
     const fileType = detectFileType(file.originalname);
-    if (!fileType || !ALLOWED_TYPES.includes(fileType)) {
-      throw new BadRequestException('仅支持 PDF / Word(.docx) / Markdown / TXT 文件');
-    }
     // 目录上传时 name 是独立文本字段（UTF-8 正确解码，直接采用）；
     // 普通上传走 file.originalname（busboy 按 latin1 解码，需要修复中文乱码）
     const originalName = name ? name : fixMojibakeFilename(file.originalname);
+    // 附件（无法解析的类型：图片/二进制/未知扩展名）：保留原扩展名用于展示
+    const rawExt = (file.originalname.split('.').pop() ?? '').toLowerCase() || 'bin';
 
     // 3. 存盘：UUID 改名防重名/防路径注入，扩展名保留
-    const storedName = `${randomUUID()}.${fileType}`;
+    const storedName = `${randomUUID()}.${fileType ?? rawExt}`;
     if (!existsSync(UPLOAD_DIR)) {
       mkdirSync(UPLOAD_DIR, { recursive: true });
     }
     writeFileSync(join(UPLOAD_DIR, storedName), file.buffer);
 
-    // 4. 创建 Document 记录（pending：已接收，待后台处理）
+    // 4a. 附件：不支持解析的类型原样保管（不解析/不分块/不向量化，跳过队列）
+    if (!fileType) {
+      await this.removeSameName(knowledgeBaseId, originalName, null);
+      const doc = await this.prisma.document.create({
+        data: {
+          knowledgeBaseId,
+          filename: originalName,
+          filepath: join('uploads', storedName),
+          fileSize: file.size,
+          fileType: rawExt,
+          status: 'done', // 附件无需后台处理，直接完成
+        },
+      });
+      this.logger.log(`附件已入库（不参与检索）: ${originalName}`);
+      return doc;
+    }
+
+    // 4b. 创建 Document 记录（pending：已接收，待后台处理）
     const document = await this.prisma.document.create({
       data: {
         knowledgeBaseId,
@@ -89,6 +104,15 @@ export class DocumentsService {
         status: 'pending',
       },
     });
+
+    // 同名旧文档立即标记"替换中"（列表显示"替换中"而非新旧并存被误认为"新增"；
+    // 新文档解析失败时旧文档自动恢复为 done，不丢数据）
+    await this.prisma.document
+      .updateMany({
+        where: { knowledgeBaseId, filename: originalName, id: { not: document.id } },
+        data: { status: 'replacing' },
+      })
+      .catch(() => undefined);
 
     // 5. 入队并立即返回（解析/分块/向量化在后台执行，接口响应 <1s）
     await this.queueService.addDocumentJob({
@@ -105,6 +129,25 @@ export class DocumentsService {
       where: { id: document.id },
       include: { _count: { select: { chunks: true } } },
     });
+  }
+
+  /** 删除同名旧文档（含磁盘文件）。exceptId 传 null 表示全删；用于附件同步替换 */
+  private async removeSameName(
+    knowledgeBaseId: string,
+    filename: string,
+    exceptId: string | null,
+  ): Promise<void> {
+    const olds = await this.prisma.document.findMany({
+      where: { knowledgeBaseId, filename, ...(exceptId ? { id: { not: exceptId } } : {}) },
+    });
+    for (const old of olds) {
+      await this.prisma.document.delete({ where: { id: old.id } });
+      try {
+        unlinkSync(join(process.cwd(), old.filepath));
+      } catch {
+        /* 文件可能已不存在，忽略 */
+      }
+    }
   }
 
   /** 文档列表（带 chunk 数量；前端据此轮询处理状态） */
@@ -161,7 +204,8 @@ export class DocumentsService {
       where: { id: documentId, knowledgeBaseId },
     });
     if (!doc) {
-      throw new NotFoundException('文档不存在');
+      // 文档已不存在（可能刚被同名替换删除/并发删除）：幂等处理，视为删除成功
+      return { success: true };
     }
     await this.prisma.document.delete({ where: { id: documentId } });
     try {
@@ -225,16 +269,8 @@ export class DocumentsService {
       if (!cleaned) {
         throw new BadRequestException('内容为空，无法入库');
       }
-      // 重写磁盘文件为编辑后的文本（保持"文件 = 唯一事实来源"：
-      // 否则下载/重新解析拿到的还是旧内容）
-      const absPath = join(process.cwd(), doc.filepath);
-      writeFileSync(absPath, Buffer.from(cleaned, 'utf8'));
-      // 原来若是二进制类型（pdf/docx），编辑后文件已变成纯文本，类型改为 txt
-      if (doc.fileType === 'pdf' || doc.fileType === 'docx') {
-        data.fileType = 'txt';
-      }
-      data.fileSize = Buffer.byteLength(cleaned, 'utf8');
-      // 重新分块 + 向量化（与队列处理共用同一管线）
+      // 只更新知识库内部（重新分块 + 向量化），不改写磁盘文件——
+      // 知识库与本地文件分离：编辑内容/改名都不影响上传的原文件（下载拿到的始终是原始文件）
       const chunkCount = await this.processor.indexText(documentId, cleaned);
       data.status = 'done';
       this.logger.log(`文档内容已编辑并重新向量化: ${doc.filename} → ${chunkCount} 个 chunk`);

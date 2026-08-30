@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { memoryStorage } from 'multer';
@@ -33,6 +34,8 @@ export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
   @Post(':id/documents')
+  // 上传是批量操作（目录可能几百上千个文件），按"请求次数"限流会误伤，豁免全局 60/min 限流
+  @SkipThrottle()
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(), // 先放内存，校验通过后才落盘（避免非法文件写盘）
@@ -49,7 +52,7 @@ export class DocumentsController {
           type: 'string',
           format: 'binary',
           description:
-            'PDF/Word/Markdown/TXT（大小限制由 .env 的 MAX_FILE_SIZE_MB 控制，默认 20MB）',
+            '文档/代码/项目目录均可（md/txt/pdf/docx/代码文件参与检索，其余类型作为附件保管；单文件大小由 .env 的 MAX_FILE_SIZE_MB 控制，默认 20MB）',
         },
       },
     },
@@ -111,6 +114,8 @@ export class DocumentsController {
   }
 
   @Patch(':id/documents/:documentId')
+  // 目录重命名 = 批量改名（一次可能几十上百个 PATCH），豁免全局限流
+  @SkipThrottle()
   @ApiOperation({ summary: '编辑文档（改名 / 改内容后重新分块向量化）' })
   updateContent(
     @CurrentUser('id') userId: string,
@@ -122,6 +127,8 @@ export class DocumentsController {
   }
 
   @Delete(':id/documents/:documentId')
+  // 目录删除 = 批量删除（一次可能几百上千个 DELETE），豁免全局限流
+  @SkipThrottle()
   @ApiOperation({ summary: '删除文档（级联删除其 chunk 和磁盘文件）' })
   remove(
     @CurrentUser('id') userId: string,

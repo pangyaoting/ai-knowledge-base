@@ -85,3 +85,65 @@ function mergeChunk(part: string, chunks: string[], chunkSize: number, overlap: 
     chunks.push(tail + part);
   }
 }
+
+/**
+ * 代码分块器（按行切，优先在空行处断开）
+ *
+ * 代码不适合用"字符窗口"切：会从函数中间劈开，语义碎掉。
+ * 思路：
+ * - 按行累积到目标长度，切点时优先找"空行"（天然的函数/语句边界）；
+ * - 没有空行边界才硬切；单行超长（如压缩的 json）按字符窗口兜底。
+ * - prefix（如 "文件: src/Button.vue"）拼到每块开头，检索时模型知道片段来自哪个文件。
+ */
+export function splitCode(text: string, prefix = '', options: SplitOptions = {}): string[] {
+  const target = options.chunkSize ?? 1000;
+  const max = options.chunkSize ? options.chunkSize * 1.6 : 1800;
+  const lines = text.split('\n');
+  const chunks: string[] = [];
+  let cur: string[] = [];
+  let curLen = 0;
+
+  const push = (arr: string[]) => {
+    const body = arr.join('\n').trim();
+    if (!body) return;
+    chunks.push(prefix ? `${prefix}\n${body}` : body);
+  };
+
+  for (const line of lines) {
+    // 超长单行（压缩/混淆代码，如整份 minified js 在一行）：按字符窗口硬切，
+    // 避免出现"巨无霸 chunk"（几万字符一块，嵌入失败或检索失真）
+    if (line.length >= max) {
+      push(cur);
+      cur = [];
+      curLen = 0;
+      for (let pos = 0; pos < line.length; pos += target - 50) {
+        const piece = line.slice(pos, pos + (target - 50));
+        if (piece.trim()) chunks.push(prefix ? `${prefix}\n${piece}` : piece);
+      }
+      continue;
+    }
+    const add = line.length + 1;
+    if (curLen + add > target && cur.length > 0) {
+      // 优先在空行处断开（函数/类/语句边界）
+      const blankIdx = cur.map((l) => l.trim() === '').lastIndexOf(true);
+      if (blankIdx > Math.floor(cur.length * 0.25)) {
+        push(cur.slice(0, blankIdx + 1));
+        cur = cur.slice(blankIdx + 1);
+        curLen = cur.reduce((s, l) => s + l.length + 1, 0);
+      } else {
+        push(cur);
+        cur = [];
+        curLen = 0;
+      }
+    }
+    cur.push(line);
+    curLen += add;
+    if (curLen >= max) {
+      push(cur);
+      cur = [];
+      curLen = 0;
+    }
+  }
+  push(cur);
+  return chunks;
+}

@@ -40,7 +40,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       status = HttpStatus.BAD_REQUEST;
       message =
         exception.code === 'LIMIT_FILE_SIZE'
-          ? '文件过大，不能超过 10MB'
+          ? '文件过大，请检查上传大小限制（.env 的 MAX_FILE_SIZE_MB）'
           : `上传错误: ${exception.message}`;
     } else if (exception instanceof Error) {
       message = exception.message;
