@@ -66,10 +66,22 @@ onMounted(async () => {
       <!-- 欢迎区 -->
       <div class="max-w-xl animate-fade-up">
         <h1
-          class="text-3xl font-bold tracking-tight"
+          class="flex items-center justify-center gap-3 text-3xl font-bold tracking-tight"
           :class="isDark ? 'text-slate-50' : 'text-slate-900'"
         >
-          你好，{{ auth.user?.nickname || auth.user?.email }} 👋
+          <img
+            v-if="auth.user?.avatar"
+            :src="auth.user.avatar"
+            class="h-9 w-9 shrink-0 rounded-full object-cover"
+            alt="头像"
+          />
+          <span
+            v-else
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-lg font-bold text-primary"
+          >
+            {{ (auth.user?.email || '?')[0].toUpperCase() }}
+          </span>
+          <span>你好，{{ auth.user?.nickname || auth.user?.email }} 👋</span>
         </h1>
         <p class="mt-3" :class="isDark ? 'text-slate-300' : 'text-slate-600'">
           你的第二大脑：知识库沉淀 + RAG 问答 + 研究报告 + 限时限量自主研究
