@@ -11,8 +11,11 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { ChatService } from './chat.service';
@@ -103,6 +106,13 @@ export class ChatController {
   }
 
   // ==================== RAG 问答（SSE 流式） ====================
+
+  @Post('extract-file')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
+  @ApiOperation({ summary: '提取上传文件文本（文本/代码/PDF/Word，供对话上下文）' })
+  extractFile(@UploadedFile() file: Express.Multer.File) {
+    return this.chatService.extractFile(file);
+  }
 
   @Post('sessions/:id/messages')
   @HttpCode(HttpStatus.OK) // SSE 流返回 200（NestJS 默认 POST 是 201，SSE 语义应为 200）

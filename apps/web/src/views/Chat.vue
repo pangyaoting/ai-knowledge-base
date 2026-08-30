@@ -15,6 +15,7 @@ import {
   Cpu,
   X,
   ImagePlus,
+  FileText,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -30,6 +31,7 @@ import {
   updateSessionModel,
   exportSessionFile,
   askQuestion,
+  extractFileText,
 } from '@/api/chat';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import { getKnowledgeBases } from '@/api/knowledge';
@@ -126,6 +128,42 @@ async function onPickImage(e: Event) {
   } finally {
     input.value = '';
   }
+}
+// ==================== 上传文件（文本/代码/PDF/Word，提取内容后随消息发送） ====================
+const MAX_FILES = 3;
+const pendingFiles = ref<Array<{ name: string; content: string }>>([]);
+const fileInput = ref<HTMLInputElement | null>(null);
+
+async function onPickFile(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const files = input.files ? Array.from(input.files) : [];
+  input.value = '';
+  for (const f of files) {
+    if (pendingFiles.value.length >= MAX_FILES) {
+      toast.info(`一次最多 ${MAX_FILES} 个文件`);
+      break;
+    }
+    try {
+      const res = await extractFileText(f);
+      pendingFiles.value.push({ name: res.filename, content: res.content });
+    } catch (err) {
+      toast.error(`${f.name}：${(err as Error).message}`);
+    }
+  }
+}
+
+function removeFile(i: number) {
+  pendingFiles.value.splice(i, 1);
+}
+
+/** 用户消息渲染：文件内容折叠（不整屏铺开） */
+function msgHead(msg: ChatMessage): string {
+  const i = msg.content.indexOf('【上传文件内容】');
+  return i < 0 ? msg.content : msg.content.slice(0, i).trim();
+}
+function msgFileBlock(msg: ChatMessage): string {
+  const i = msg.content.indexOf('【上传文件内容】');
+  return i < 0 ? '' : msg.content.slice(i);
 }
 const streaming = ref(false);
 const error = ref('');
@@ -494,7 +532,13 @@ const canSend = computed(
 async function handleSend() {
   const question = input.value.trim();
   const images = [...pendingImages.value];
-  if ((!question && images.length === 0) || streaming.value || !currentSessionId.value) return;
+  const files = [...pendingFiles.value];
+  if (
+    (!question && images.length === 0 && files.length === 0) ||
+    streaming.value ||
+    !currentSessionId.value
+  )
+    return;
 
   // 发图提示：当前模型不支持视觉但用户配置里有视觉模型 → 后端会自动路由（对话仍用当前模型）
   if (images.length > 0 && activeModelId.value && !VISION_RE.test(activeModelId.value)) {
@@ -502,8 +546,15 @@ async function handleSend() {
     if (v) toast.info(`图片将自动使用视觉模型 ${v.model} 识别，文字对话仍用当前模型`);
   }
 
+  // 上传文件内容拼进消息（模型据此回答）
+  const fileBlock = files.length
+    ? `\n\n【上传文件内容】\n${files.map((f) => `--- ${f.name} ---\n${f.content}`).join('\n\n')}`
+    : '';
+  const content = question + fileBlock;
+
   input.value = '';
   pendingImages.value = [];
+  pendingFiles.value = [];
   error.value = '';
   streaming.value = true;
   streamContent.value = '';
@@ -514,7 +565,7 @@ async function handleSend() {
     id: `local-${Date.now()}`,
     sessionId: currentSessionId.value,
     role: 'user',
-    content: question,
+    content,
     imageDataUrl: images[0] ?? null,
     imageDataUrls: images.length ? images : null,
     sources: null,
@@ -525,7 +576,7 @@ async function handleSend() {
   try {
     await askQuestion(
       currentSessionId.value,
-      question,
+      content,
       useWebSearch.value,
       abortController.value.signal,
       {
@@ -795,7 +846,18 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                   class="mb-2 max-h-48 rounded-md object-cover"
                   alt="粘贴图片"
                 />
-                {{ msg.content }}
+                <span class="whitespace-pre-wrap">{{ msgHead(msg) }}</span>
+                <details
+                  v-if="msgFileBlock(msg)"
+                  class="mt-1.5 rounded-md border border-dashed px-2 py-1.5 text-xs"
+                >
+                  <summary class="cursor-pointer font-medium text-muted-foreground">
+                    📄 上传文件内容（点击展开）
+                  </summary>
+                  <pre
+                    class="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+                    >{{ msgFileBlock(msg) }}</pre>
+                </details>
               </div>
 
               <!-- 知识库模式但没有任何引用：回答来自模型自身知识，明示来源 -->
@@ -1028,7 +1090,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
               alt="待发送图片"
             />
             <button
-              class="absolute -right-2 -top-2 rounded-full bg-destructive p-0.5 text-white shadow"
+              class="absolute right-1 top-1 rounded-full bg-destructive/90 p-0.5 text-white shadow"
               title="移除这张图片"
               @click="removeImage(i)"
             >
@@ -1038,6 +1100,21 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <p class="flex items-center text-[11px] text-muted-foreground">
             {{ pendingImages.length }}/6
           </p>
+          <div
+            v-for="(f, i) in pendingFiles"
+            :key="'file-' + i"
+            class="relative flex shrink-0 items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs"
+          >
+            <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span class="max-w-[140px] truncate">{{ f.name }}</span>
+            <button
+              class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              title="移除这个文件"
+              @click="removeFile(i)"
+            >
+              <X class="h-3 w-3" />
+            </button>
+          </div>
         </div>
         <div class="mx-auto flex max-w-3xl items-end gap-2">
           <!-- 上传本地图片（可多选） -->
@@ -1056,6 +1133,23 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             multiple
             class="hidden"
             @change="onPickImage"
+          />
+          <!-- 上传文件（文本/代码/PDF/Word，提取内容随消息发送） -->
+          <button
+            type="button"
+            class="shrink-0 rounded-md border p-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="上传文件（txt/md/代码/PDF/Word，内容随问题一起发给模型）"
+            @click="fileInput?.click()"
+          >
+            <FileText class="h-4 w-4" />
+          </button>
+          <input
+            ref="fileInput"
+            type="file"
+            accept=".txt,.md,.markdown,.json,.csv,.py,.js,.jsx,.ts,.tsx,.vue,.java,.go,.c,.cpp,.h,.hpp,.rs,.php,.rb,.sh,.yml,.yaml,.xml,.html,.css,.pdf,.doc,.docx"
+            multiple
+            class="hidden"
+            @change="onPickFile"
           />
           <textarea
             v-model="input"

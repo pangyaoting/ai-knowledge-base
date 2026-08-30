@@ -4,6 +4,12 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
 import { WebSearchService, WebSource } from './web-search.service';
 import { ModelConfigService, ChatTarget, isVisionModelName } from '../models/model-config.service';
+import {
+  cleanText,
+  detectFileType,
+  extractText,
+  type DocType,
+} from '../knowledge/utils/document-parser';
 import { CreateSessionDto } from './dto/create-session.dto';
 
 interface StreamWriter {
@@ -183,6 +189,33 @@ export class ChatService {
   }
 
   // ==================== RAG 问答（SSE 流式） ====================
+
+  /** 提取上传文件的文本（对话文件上传用）：文本/代码直接读，PDF/Word 提取文字 */
+  async extractFile(file: Express.Multer.File | undefined) {
+    if (!file) {
+      throw new BadRequestException('未收到文件（multipart 字段名应为 file）');
+    }
+    if (file.size === 0) {
+      throw new BadRequestException('文件内容为空');
+    }
+    const fileType = detectFileType(file.originalname);
+    if (!fileType) {
+      throw new BadRequestException('不支持该文件类型：仅支持文本/代码/PDF/Word 等可读取的文件');
+    }
+    const raw = await extractText(file.buffer, fileType as DocType);
+    const content = cleanText(raw);
+    if (!content) {
+      throw new BadRequestException('未能从文件中提取到文本（可能是扫描件或图片型 PDF）');
+    }
+    // 防止超大文本撑爆模型上下文：截断到 6 万字符
+    const MAX_FILE_CHARS = 60_000;
+    const truncated = content.length > MAX_FILE_CHARS;
+    return {
+      filename: file.originalname,
+      content: truncated ? `${content.slice(0, MAX_FILE_CHARS)}\n…（文件过长，已截断）` : content,
+      truncated,
+    };
+  }
 
   /**
    * 提问并流式回答

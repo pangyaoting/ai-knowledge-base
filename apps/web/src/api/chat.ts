@@ -51,14 +51,26 @@ export function updateSessionModel(
   });
 }
 
-/** 导出会话为 Markdown 文件（原始 axios 下载，绕开 JSON 拦截器） */
-export async function exportSessionFile(sessionId: string): Promise<Blob> {
+/** 导出会话为 Markdown 文件（原始 axios 下载，绕开 JSON 拦截器） */ export async function exportSessionFile(
+  sessionId: string,
+): Promise<Blob> {
   const res = await axios.get(`/api/chat/sessions/${sessionId}/export`, {
     headers: { Authorization: `Bearer ${localStorage.getItem('accessToken')}` },
     responseType: 'blob',
     timeout: 30_000,
   });
   return res.data;
+}
+
+/** 提取上传文件的文本（文本/代码/PDF/Word，供对话上下文） */
+export function extractFileText(file: File) {
+  const form = new FormData();
+  form.append('file', file);
+  return request.post<unknown, { filename: string; content: string; truncated: boolean }>(
+    '/chat/extract-file',
+    form,
+    { timeout: 60_000 },
+  );
 }
 
 // ==================== 提问（SSE 流式） ====================
