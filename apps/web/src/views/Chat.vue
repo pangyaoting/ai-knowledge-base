@@ -442,7 +442,7 @@ function formatTime(iso: string): string {
 }
 
 function similarityPercent(s: number | null): string {
-  return s == null ? '图谱关联' : `${Math.round(s * 100)}%`;
+  return s == null ? '相关' : `${Math.round(s * 100)}%`;
 }
 
 /** 兼容新旧数据：旧消息 sources 是数组（纯知识库），新消息是 { kb, web } */

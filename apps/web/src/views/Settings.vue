@@ -270,7 +270,7 @@ async function handleDeleteAccount() {
       class="mb-6 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
     >
       <span class="text-muted-foreground">
-        使用 AI 功能前请先绑定你自己的模型 Key（对话 / 研究报告 / 图谱都由你的 Key 计费）
+        使用 AI 功能前请先绑定你自己的模型 Key（对话 / 研究报告 / 自主研究都由你的 Key 计费）
       </span>
       <span class="flex items-center gap-1 font-medium text-primary">
         去模型配置 <ArrowUpRight class="h-4 w-4" />

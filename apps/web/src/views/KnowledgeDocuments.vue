@@ -27,7 +27,6 @@ import {
   Folder,
   ChevronRight,
   Search,
-  Network,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -992,16 +991,6 @@ onBeforeUnmount(stopParsePoll);
           @click="load"
         >
           <RefreshCw class="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          class="shrink-0"
-          title="查看本知识库的概念关系网络"
-          @click="router.push(`/knowledge/${knowledgeBaseId}/graph`)"
-        >
-          <Network class="h-4 w-4" />
-          知识网络
         </Button>
       </div>
 

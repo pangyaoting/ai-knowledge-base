@@ -31,7 +31,7 @@ export interface RetrievalSource {
   chunkIndex: number;
   documentId: string;
   filename: string;
-  /** 向量相似度；null = 来自知识图谱扩展的关联片段 */
+  /** 向量相似度（0~1） */
   similarity: number | null;
 }
 

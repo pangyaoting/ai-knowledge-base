@@ -48,35 +48,3 @@ export interface DocumentChunksResult {
   fileType: string;
   chunks: DocumentChunk[];
 }
-
-// ==================== 知识图谱（知识网络） ====================
-
-/** 图谱节点（按名称聚合） */
-export interface GraphNode {
-  name: string;
-  type: string;
-  count: number; // 出现文档数
-}
-
-/** 图谱边 */
-export interface GraphEdge {
-  source: string;
-  relation: string;
-  target: string;
-  count: number;
-}
-
-/** 图谱数据（节点 + 边） */
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
-
-/** 实体原文片段 */
-export interface EntityChunk {
-  chunkId: string;
-  chunkIndex: number;
-  content: string;
-  documentId: string;
-  filename: string;
-}

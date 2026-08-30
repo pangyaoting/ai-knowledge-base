@@ -3,7 +3,6 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from './embedding.service';
-import { GraphService } from './graph.service';
 import { cleanText, extractText, type DocType } from './utils/document-parser';
 import { splitCode, splitText } from './utils/text-splitter';
 
@@ -13,11 +12,11 @@ const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
 
 /** 文档处理任务的数据载荷 */
 export interface DocumentJobData {
-  userId: string; // 归属用户（图谱抽取用用户的模型配置，BYO）
+  userId: string;
   documentId: string;
   knowledgeBaseId: string;
   storedName: string; // 磁盘文件名（uploads/uuid.txt）
-  fileType: string; // pdf / docx / md / txt
+  fileType: string; // pdf / docx / md / txt / code
   originalName: string; // 展示用文件名（可能带相对路径）
 }
 
@@ -32,11 +31,10 @@ export class DocumentProcessor {
   constructor(
     private prisma: PrismaService,
     private embeddingService: EmbeddingService,
-    private graphService: GraphService,
   ) {}
 
   async processDocument(data: DocumentJobData): Promise<void> {
-    const { documentId, storedName, fileType, originalName, knowledgeBaseId, userId } = data;
+    const { documentId, storedName, fileType, originalName, knowledgeBaseId } = data;
     const absPath = join(UPLOAD_DIR, storedName);
     try {
       if (!existsSync(absPath)) {
@@ -79,15 +77,6 @@ export class DocumentProcessor {
         cleaned,
         isCode ? `文件: ${originalName}` : undefined,
       );
-
-      // 知识图谱抽取（仅文本类文档；代码块不适合实体抽取，且省一次 LLM 调用）
-      if (!isCode) {
-        await this.graphService
-          .extractFromDocument(userId, documentId)
-          .catch((err) =>
-            this.logger.warn(`图谱抽取失败 ${originalName}: ${(err as Error).message}`),
-          );
-      }
 
       // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
       const existing = await this.prisma.document.findFirst({

@@ -3,7 +3,6 @@ import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
 import { WebSearchService, WebSource } from './web-search.service';
-import { GraphService } from '../knowledge/graph.service';
 import { ModelConfigService, ChatTarget } from '../models/model-config.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 
@@ -25,7 +24,6 @@ export class ChatService {
     private prisma: PrismaService,
     private ragService: RagService,
     private webSearchService: WebSearchService,
-    private graphService: GraphService,
     private modelConfigService: ModelConfigService,
   ) {}
 
@@ -231,33 +229,13 @@ export class ChatService {
 
     // ③ 检索（并行）：知识库向量+关键词混合检索（纯对话模式跳过）+ 可选联网搜索（用改写后的查询）
     const kbScope = kbIds.length ? kbIds : undefined;
-    const [retrieved, graphChunks, webSources] = await Promise.all([
+    const [retrieved, webSources] = await Promise.all([
       useKnowledgeBase
         ? this.ragService.retrieve(userId, searchQuery, kbScope, 5)
         : Promise.resolve([] as RetrievalSource[]),
-      // 知识图谱多跳扩展：问题命中实体 → 沿关系找相邻实体 → 取回原文片段。
-      // 解决普通 RAG 答不了"A 和 B 是什么关系"这类跨概念问题；失败不影响主流程。
-      useKnowledgeBase
-        ? this.graphService.expandQuestion(userId, searchQuery, kbScope).catch(() => [])
-        : Promise.resolve([] as Awaited<ReturnType<GraphService['expandQuestion']>>),
       useWebSearch ? this.webSearchService.search(searchQuery) : Promise.resolve([]),
     ]);
-    // 图谱关联片段并入来源（similarity=null 标记），按 chunkId 去重避免与检索重复
-    const seen = new Set(retrieved.map((s) => s.chunkId));
-    const kbSources: RetrievalSource[] = [
-      ...retrieved,
-      ...graphChunks
-        .filter((c) => !seen.has(c.chunkId))
-        .slice(0, 5)
-        .map((c) => ({
-          chunkId: c.chunkId,
-          content: c.content,
-          chunkIndex: c.chunkIndex,
-          documentId: c.documentId,
-          filename: c.filename,
-          similarity: null,
-        })),
-    ];
+    const kbSources: RetrievalSource[] = retrieved;
     writer('sources', { kb: kbSources, web: webSources });
 
     // ④ 保存用户消息

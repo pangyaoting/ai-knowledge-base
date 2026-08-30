@@ -42,11 +42,6 @@ const router = createRouter({
           component: () => import('@/views/KnowledgeDocuments.vue'),
         },
         {
-          path: 'knowledge/:id/graph',
-          name: 'knowledge-graph',
-          component: () => import('@/views/KnowledgeGraph.vue'),
-        },
-        {
           path: 'chat',
           name: 'chat',
           component: () => import('@/views/Chat.vue'),

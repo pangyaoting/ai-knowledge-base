@@ -198,7 +198,7 @@ onMounted(loadConfigs);
         模型配置
       </h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        绑定你自己的大模型 API Key，所有 AI 功能（对话 / 研究报告 / 知识图谱）都由你的 Key 计费
+        绑定你自己的大模型 API Key，所有 AI 功能（对话 / 研究报告 / 自主研究）都由你的 Key 计费
       </p>
     </div>
 
@@ -210,7 +210,7 @@ onMounted(loadConfigs);
           <p class="font-medium">开始使用前，请先在这里绑定你自己的大模型 API Key</p>
           <ul class="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
             <li>
-              平台不提供兜底模型：对话、研究报告、知识图谱抽取产生的所有 Token 消耗都由<b
+              平台不提供兜底模型：对话、研究报告、自主研究产生的所有 Token 消耗都由<b
                 >你自己的 Key</b
               >
               承担，费用直接结算到你的模型服务商账户。
@@ -321,7 +321,7 @@ onMounted(loadConfigs);
         </div>
         <label class="mt-3 flex cursor-pointer items-center gap-2 text-sm select-none">
           <input v-model="configForm.isDefault" type="checkbox" class="h-3.5 w-3.5" />
-          设为默认（新建会话 / 研究报告 / 图谱抽取默认使用）
+          设为默认（新建会话 / 研究报告 / 自主研究默认使用）
         </label>
         <p v-if="configError" class="mt-3 text-sm text-destructive">{{ configError }}</p>
         <div class="mt-4 flex justify-end gap-2">
