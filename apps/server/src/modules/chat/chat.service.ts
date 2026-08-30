@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
@@ -291,7 +291,8 @@ export class ChatService {
         this.logger.log(`会话 ${sessionId} 被客户端中止`);
         return;
       }
-      throw err;
+      this.logger.warn(`会话 ${sessionId} LLM 调用失败: ${(err as Error).message}`);
+      throw this.translateLLMError(err, !!imageDataUrl);
     } finally {
       signal.removeEventListener('abort', onAbort);
     }
@@ -455,6 +456,69 @@ export class ChatService {
       this.logger.warn(`查询改写失败，使用原问题: ${(err as Error).message}`);
       return question;
     }
+  }
+
+  /**
+   * 把上游 LLM API 的原始错误（SDK 英文/JSON 错误）翻译成中文可操作提示。
+   * 常见场景：模型不支持图片（not a VLM）、模型名与平台不匹配（Model does not exist）、
+   * key 无效、余额不足、限流。翻译不了就保留原始信息兜底。
+   */
+  private translateLLMError(err: unknown, hasImage: boolean): BadRequestException {
+    const e = err as {
+      status?: number;
+      message?: string;
+      body?: unknown;
+      code?: string | number;
+    };
+    const status = e.status ?? 500;
+    const bodyText =
+      typeof e.body === 'string' ? e.body : JSON.stringify(e.body ?? e.message ?? '');
+    const raw = `${e.message ?? ''} ${bodyText}`.toLowerCase();
+
+    // 带图请求被上游拒绝（400/422/无 body）→ 优先提示模型不支持图片
+    if (
+      hasImage &&
+      (status === 400 || status === 422 || /not a vlm|vision language model|image/i.test(raw))
+    ) {
+      return new BadRequestException(
+        '当前模型不支持图片：请在该会话右上角切换到支持视觉的模型（如 deepseek-v4-flash-vision-exp、Qwen/Qwen3-VL 等），或在「模型配置」检查模型名与平台是否匹配。',
+      );
+    }
+    if (status === 401 || /invalid api key|authentication|unauthorized/i.test(raw)) {
+      return new BadRequestException(
+        '大模型 API Key 无效或已失效：请到「模型配置」检查该配置的 Key，或删掉重新绑定。',
+      );
+    }
+    if (status === 402 || /insufficient|balance|quota|payment/i.test(raw)) {
+      return new BadRequestException(
+        '大模型账户余额不足：请到对应平台（DeepSeek / SiliconFlow 等）充值后重试。',
+      );
+    }
+    if (status === 429 || /rate.?limit|too many requests/i.test(raw)) {
+      return new BadRequestException('请求过于频繁（触发限流），请稍等几秒再试。');
+    }
+    if (/model does not exist|model not found|no such model|invalid model/i.test(raw)) {
+      return new BadRequestException(
+        '模型名不存在：平台和模型名必须配套（DeepSeek 官方 API 用 deepseek-v4-flash 等；SiliconFlow 用 deepseek-ai/DeepSeek-V4-Flash 等）。请到「模型配置」修正模型名。',
+      );
+    }
+    if (/context|too long|maximum length|token.*limit/i.test(raw)) {
+      return new BadRequestException(
+        '对话内容超出模型上下文长度：请精简问题、减少历史或切换更长上下文的模型。',
+      );
+    }
+    // 兜底：把上游 JSON 错误的关键信息带出来，而不是只给 SDK 的 content-type 报错
+    if (/expected content-type/i.test(raw) && status !== 500) {
+      return new BadRequestException(
+        `大模型接口调用失败（HTTP ${status}）：${(e.body ?? e.message ?? '未知错误').toString().slice(0, 200)}`,
+      );
+    }
+    return new BadRequestException(
+      `大模型调用失败（HTTP ${status}）：请检查「模型配置」的 Key / 模型名 / 余额，或切换到支持图片的视觉模型。${e.message ?? ''}`.slice(
+        0,
+        300,
+      ),
+    );
   }
 
   /** 导出会话为 Markdown（含引用来源），供下载/复制 */
