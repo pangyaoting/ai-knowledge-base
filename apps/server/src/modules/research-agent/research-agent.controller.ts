@@ -13,6 +13,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AgentTaskService } from './agent-task.service';
 import { CreateAgentTaskDto } from './dto/create-agent-task.dto';
 import { ExtendAgentTaskDto } from './dto/extend-agent-task.dto';
+import { ConfirmAgentTaskDto } from './dto/confirm-agent-task.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -48,9 +49,13 @@ export class ResearchAgentController {
   }
 
   @Post('tasks/:id/confirm')
-  @ApiOperation({ summary: '确认方向并开始研究（仅限待确认任务）' })
-  confirm(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
-    return this.agentTaskService.confirm(userId, id);
+  @ApiOperation({ summary: '确认方向并开始研究（仅限待确认任务，可选选中方向下标）' })
+  confirm(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmAgentTaskDto,
+  ) {
+    return this.agentTaskService.confirm(userId, id, dto);
   }
 
   @Post('tasks/:id/redecompose')

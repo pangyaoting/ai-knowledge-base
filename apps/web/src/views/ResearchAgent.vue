@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import {
   Bot,
   Plus,
@@ -16,6 +16,7 @@ import {
   Sparkles,
   ChevronRight,
   RefreshCw,
+  Check,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -33,7 +34,7 @@ import {
 } from '@/api/research-agent';
 import { getModelConfigs } from '@/api/model-configs';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
-import type { AgentTask, AgentMode } from '@/types/research-agent';
+import type { AgentTask, AgentMode, AgentDirection } from '@/types/research-agent';
 import type { ModelConfig } from '@/types/model-config';
 
 // ==================== 预算档位 ====================
@@ -452,12 +453,61 @@ function toggleAllSections() {
 
 // ==================== 确认 / 重新拆解 ====================
 
+/** 方向最多拆解数（后端拆 10 个，用户从中选 5 个） */
+const DIR_MAX_SELECT = 5;
+/** 已选中的方向下标（默认前 5 个） */
+const selectedDirs = ref<number[]>([]);
+
+/** 方向列表变化（新拆解 / 重新拆解）时重置选择为默认前 5 个 */
+const dirKey = computed(() =>
+  (current.value?.directions || []).map((d) => `${d.title}|${d.question}`).join('\n'),
+);
+watch(dirKey, () => {
+  const n = (current.value?.directions || []).length;
+  selectedDirs.value = Array.from({ length: Math.min(DIR_MAX_SELECT, n) }, (_, i) => i);
+});
+
+function isSelected(i: number): boolean {
+  return selectedDirs.value.includes(i);
+}
+
+function toggleDir(i: number) {
+  if (isSelected(i)) {
+    selectedDirs.value = selectedDirs.value.filter((x) => x !== i);
+  } else {
+    if (selectedDirs.value.length >= DIR_MAX_SELECT) {
+      toast.error(`最多选 ${DIR_MAX_SELECT} 个方向，先取消一个再选`);
+      return;
+    }
+    selectedDirs.value = [...selectedDirs.value, i].sort((a, b) => a - b);
+  }
+}
+
+/** 去掉 question 里与 title 重复的"标题："前缀（如"技术栈演进趋势：未来两年…" → "未来两年…"） */
+function cleanQuestion(d: AgentDirection): string {
+  if (!d.question) return '';
+  const t = (d.title || '').trim();
+  if (t && d.question.startsWith(t)) {
+    const rest = d.question
+      .slice(t.length)
+      .replace(/^[:：]\s*/, '')
+      .trim();
+    if (rest) return rest;
+    return ''; // question 与 title 完全相同 → 不再重复显示
+  }
+  return d.question;
+}
+
 async function handleConfirm() {
   const t = current.value;
   if (!t || t.status !== 'awaiting_confirm') return;
+  if (selectedDirs.value.length === 0) {
+    toast.error('请至少选择一个研究方向');
+    return;
+  }
   confirming.value = true;
   try {
-    const updated = await confirmAgentTask(t.id);
+    const updated = await confirmAgentTask(t.id, selectedDirs.value);
     current.value = updated;
     const i = tasks.value.findIndex((x) => x.id === t.id);
     if (i >= 0) tasks.value[i] = updated;
@@ -793,24 +843,54 @@ onBeforeUnmount(() => {
             <div class="rounded-lg border bg-card p-5">
               <div class="flex items-center gap-2">
                 <Sparkles class="h-4 w-4 text-primary" />
-                <p class="text-sm font-semibold">方向已拆解完成，确认后开始研究</p>
+                <p class="text-sm font-semibold">方向已拆解完成，请选择要研究的方向</p>
               </div>
               <p class="mt-1 text-xs text-muted-foreground">
-                共拆解出 {{ (current.directions || []).length }} 个研究方向。确认后 Agent
-                将并行联网搜索、精读并成稿；不满意可重新拆解（会再消耗一次拆解 token）。
+                共拆解出 {{ (current.directions || []).length }} 个方向，从中选
+                {{ DIR_MAX_SELECT }} 个（默认已选前 {{ DIR_MAX_SELECT }} 个）；不满意可刷新重新拆解
+                （会再消耗一次拆解 token）。
               </p>
-              <div class="mt-4 space-y-2">
+              <div class="mt-3 flex items-center gap-2 text-xs">
+                <span class="font-medium text-primary"
+                  >已选 {{ selectedDirs.length }} / {{ DIR_MAX_SELECT }}</span
+                >
+                <span class="text-muted-foreground">点击方向卡片切换选中</span>
+              </div>
+              <div class="mt-2 space-y-1.5">
                 <div
                   v-for="(d, i) in current.directions || []"
                   :key="i"
-                  class="rounded-md border px-3 py-2.5"
+                  role="button"
+                  tabindex="0"
+                  class="flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors"
+                  :class="isSelected(i) ? 'border-primary bg-primary/5' : 'hover:bg-accent/60'"
+                  @click="toggleDir(i)"
+                  @keydown.enter="toggleDir(i)"
                 >
-                  <p class="text-sm font-medium">{{ d.title }}</p>
-                  <p class="mt-0.5 text-xs text-muted-foreground">{{ d.question }}</p>
+                  <span
+                    class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border"
+                    :class="
+                      isSelected(i)
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-muted-foreground/40'
+                    "
+                  >
+                    <Check v-if="isSelected(i)" class="h-3 w-3" />
+                  </span>
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium">{{ d.title }}</span>
+                    <span v-if="cleanQuestion(d)" class="block text-xs text-muted-foreground">
+                      {{ cleanQuestion(d) }}
+                    </span>
+                  </span>
                 </div>
               </div>
               <div class="mt-5 flex items-center gap-2">
-                <Button class="flex-1" :disabled="confirming" @click="handleConfirm">
+                <Button
+                  class="flex-1"
+                  :disabled="confirming || selectedDirs.length === 0"
+                  @click="handleConfirm"
+                >
                   <Loader2 v-if="confirming" class="h-4 w-4 animate-spin" />
                   <PlayCircle v-else class="h-4 w-4" />
                   确认开始研究

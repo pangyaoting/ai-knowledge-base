@@ -4,6 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AgentQueueService } from './agent-queue.service';
 import { CreateAgentTaskDto } from './dto/create-agent-task.dto';
 import { ExtendAgentTaskDto } from './dto/extend-agent-task.dto';
+import { ConfirmAgentTaskDto } from './dto/confirm-agent-task.dto';
 
 /** 预算 → 预估研究时长（分钟）：10万≈40 分钟，线性外推，封顶 6 小时 */
 export function estimateMinutes(tokenBudget: number): number {
@@ -180,8 +181,11 @@ export class AgentTaskService {
     return this.findOne(userId, id);
   }
 
-  /** 确认方向并开始研究（awaiting_confirm → pending 重新入队，runner 从断点续跑） */
-  async confirm(userId: string, id: string): Promise<PublicAgentTask> {
+  /**
+   * 确认方向并开始研究（awaiting_confirm → pending 重新入队，runner 从断点续跑）。
+   * 可选 directionIndexes：从拆解出的方向（10 个）中挑 1~5 个研究，未选中的方向不再研究。
+   */
+  async confirm(userId: string, id: string, dto: ConfirmAgentTaskDto): Promise<PublicAgentTask> {
     const task = await this.findOne(userId, id);
     if (task.status !== 'awaiting_confirm') {
       throw new BadRequestException('任务不在「待确认」状态，无法开始');
@@ -189,10 +193,33 @@ export class AgentTaskService {
     if (new Date(task.endAt).getTime() <= Date.now()) {
       throw new BadRequestException('已过结束时间，无法开始；请先续时或删除后重建');
     }
-    await this.prisma.agentTask.update({
-      where: { id },
-      data: { status: 'pending', stopReason: null, error: null },
-    });
+    const data: Prisma.AgentTaskUpdateInput = {
+      status: 'pending',
+      stopReason: null,
+      error: null,
+    };
+    // 用户选中了部分方向：按下标过滤 progress 断点，只研究选中的方向
+    if (dto.directionIndexes?.length) {
+      const raw = await this.prisma.agentTask.findFirst({
+        where: { id, ownerId: userId },
+        select: { progress: true },
+      });
+      const dirs = ((raw?.progress ?? null) as { directions?: unknown[] } | null)?.directions;
+      if (!dirs?.length) {
+        throw new BadRequestException('任务还没有可确认的方向，请重新拆解');
+      }
+      const idxs = [...new Set(dto.directionIndexes)].filter(
+        (i) => Number.isInteger(i) && i >= 0 && i < dirs.length,
+      );
+      if (idxs.length === 0) {
+        throw new BadRequestException('请至少选择一个研究方向');
+      }
+      if (idxs.length > 5) {
+        throw new BadRequestException('最多选择 5 个研究方向');
+      }
+      data.progress = JSON.parse(JSON.stringify({ directions: idxs.map((i) => dirs[i]) }));
+    }
+    await this.prisma.agentTask.update({ where: { id }, data });
     await this.queue.addAgentJob({ userId, taskId: id });
     return this.findOne(userId, id);
   }

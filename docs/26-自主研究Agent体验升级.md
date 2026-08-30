@@ -21,13 +21,16 @@
 新增任务状态 `awaiting_confirm`（待确认）：
 
 ```
-创建(pending) → runner 拆解方向 → awaiting_confirm（任务停住，job 结束，不占 worker）
-   ├─ 确认开始  → pending 重新入队 → runner 读断点（方向已存在，跳过拆解）→ 直接研究
+创建(pending) → runner 拆解 10 个方向 → awaiting_confirm（任务停住，job 结束，不占 worker）
+   ├─ 确认开始  → 按下标过滤到用户选的 1~5 个 → pending 重新入队 → runner 读断点 → 只研究选中方向
    ├─ 重新拆解  → 清空 progress/directions → 重新入队 → 重新拆解（再花一次拆解 token）
    └─ 取消停止  → stopped + stopReason=cancelled（未开始无报告，前端停止轮询）
 ```
 
 - 拆解只花一次 LLM 调用（实测 ~250 token），确认/续跑全部走既有"断点续跑"通道；
+- **10 选 5**：一次拆解 10 个方向，前端默认勾选前 5 个，可自由改选（上限 5 个、至少 1 个），
+  确认时把选中下标传给后端，未选中的方向直接从断点剔除，只研究选中的；
+  展示时去掉问题里与标题重复的"标题："前缀（如"技术栈演进趋势：未来两年…" → "未来两年…"）；
 - 确认时校验结束时间未过；等待确认期间时间窗照常计时（确认越晚可用时间越短，界面提示）；
 - 取消语义：`pending`（排队中）与 `awaiting_confirm`（待确认）停止 = 取消（`cancelled`），
   runner 不在跑不会补报告；`cancelled` 的任务仍可"继续研究"直接开跑。
@@ -57,11 +60,14 @@
 | 确认开始 → 研究 60 秒后手动停止 | ✅ running 10 轮搜索 / 18 页精读 / 41k token |
 | 停止后组装 | ✅ 报告 12.6k 字、**摘要 329 字**、来源 16 条、正文 6 节 |
 | 待确认时取消 | ✅ `cancelled`，无报告，8 秒后确认无组装（前端停止轮询） |
+| **10 选 5**：拆解 10 个方向 → 选 [1,3,5,7,9] 确认 | ✅ 只研究选中的 5 个，报告小节 = 选中 5 个方向 |
+| 校验：选 6 个 | ✅ 400「最多选择 5 个研究方向」 |
+| 校验：选 2 个 | ✅ 正常开始（至少 1 个即可） |
 
 ## 四、涉及文件
 
-- 后端：`agent-runner.service.ts`（待确认/缓存/并行/摘要）、`agent-task.service.ts`
-  （confirm/redecompose/cancelled）、`research-agent.controller.ts`、`schema.prisma` + 迁移
-  `20260831100000_add_agent_summary`
-- 前端：`ResearchAgent.vue`（待确认卡片/摘要/折叠）、`api/research-agent.ts`、
+- 后端：`agent-runner.service.ts`（拆 10 个方向/待确认/缓存/并行/摘要）、`agent-task.service.ts`
+  （confirm 按下标过滤 1~5 个/redecompose/cancelled）、`research-agent.controller.ts`、
+  `dto/confirm-agent-task.dto.ts`、`schema.prisma` + 迁移 `20260831100000_add_agent_summary`
+- 前端：`ResearchAgent.vue`（10 选 5 复选框/去重复展示/摘要/折叠）、`api/research-agent.ts`、
   `types/research-agent.ts`

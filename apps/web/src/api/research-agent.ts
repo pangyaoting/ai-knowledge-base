@@ -33,9 +33,12 @@ export function stopAgentTask(id: string) {
   return request.post<unknown, AgentTask>(`/research-agent/tasks/${id}/stop`);
 }
 
-/** 确认方向并开始研究（仅限待确认任务） */
-export function confirmAgentTask(id: string) {
-  return request.post<unknown, AgentTask>(`/research-agent/tasks/${id}/confirm`);
+/** 确认方向并开始研究（仅限待确认任务；directionIndexes 为选中的方向下标，1~5 个） */
+export function confirmAgentTask(id: string, directionIndexes?: number[]) {
+  return request.post<unknown, AgentTask>(
+    `/research-agent/tasks/${id}/confirm`,
+    directionIndexes ? { directionIndexes } : undefined,
+  );
 }
 
 /** 重新拆解方向（仅限待确认任务） */

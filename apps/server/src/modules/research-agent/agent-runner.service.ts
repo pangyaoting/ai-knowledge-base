@@ -573,7 +573,7 @@ export class AgentRunner {
 
   // ==================== 方向初始化 ====================
 
-  /** 定向研究：把目标拆成 3~5 个方向 */
+  /** 定向研究：把目标拆成 8~10 个方向（前端让用户从中选 5 个再研究） */
   private async splitDirections(
     target: ChatTarget,
     taskId: string,
@@ -584,11 +584,11 @@ export class AgentRunner {
     const res = await this.complete(
       target,
       taskId,
-      '你是研究规划助手。把研究目标拆解为 3~5 个研究方向，覆盖该目标的主要方面。' +
+      '你是研究规划助手。把研究目标拆解为 8~10 个研究方向，全面覆盖该目标的主要方面。' +
         '只输出 JSON 数组，每项含 title（方向名，8~20 字）和 question（该方向要研究回答的具体问题，20~50 字）。' +
         '示例：[{"title":"技术原理","question":"RAG 检索增强生成的核心原理是什么"}]。不要任何其它内容。',
       `研究目标：${goal}`,
-      900, // 5 个方向的 JSON 输出较长，留足空间避免截断导致解析失败
+      1500, // 10 个方向的 JSON 输出较长，留足空间避免截断导致解析失败
       budget,
       stop,
     );
@@ -629,10 +629,10 @@ export class AgentRunner {
     const res = await this.complete(
       target,
       taskId,
-      '你是自主研究规划助手。用户没有给出明确研究目标，请你从用户知识库的主题中挖掘 3~5 个值得深入研究的方向，用于自主联网研究。' +
+      '你是自主研究规划助手。用户没有给出明确研究目标，请你从用户知识库的主题中挖掘 8~10 个值得深入研究的方向，用于自主联网研究。' +
         '只输出 JSON 数组，每项含 title（方向名）和 question（该方向要研究的具体问题）。不要任何其它内容。',
       `${kbText}\n\n知识库内容样本：\n${seed || '（无）'}\n\n若知识库为空，则基于 AI、效率方法、行业趋势等通用高价值主题提出方向。`,
-      900,
+      1500,
       budget,
       stop,
     );
@@ -662,7 +662,7 @@ export class AgentRunner {
             question: String((x as { question?: unknown })?.question ?? '').trim(),
           }))
           .filter((d) => d.title && d.question);
-        if (dirs.length) return dirs.slice(0, 5);
+        if (dirs.length) return dirs.slice(0, 10);
       }
     } catch {
       /* fallthrough */
@@ -671,7 +671,7 @@ export class AgentRunner {
       .split('\n')
       .map((l) => l.replace(/^[-*\d.\s]+/, '').trim())
       .filter((l) => l.length > 5)
-      .slice(0, 5)
+      .slice(0, 10)
       .map((l) => ({ title: l.slice(0, 20), question: l }));
   }
 
