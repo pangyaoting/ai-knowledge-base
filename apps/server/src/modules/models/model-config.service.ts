@@ -112,7 +112,10 @@ export class ModelConfigService {
   }
 
   async create(userId: string, dto: CreateModelConfigDto) {
-    if (dto.isDefault) await this.clearDefault(userId);
+    // 用户还没有任何配置时，第一条自动成为默认（省去手动勾选，保证"打开就能用"）
+    const hasAny = await this.prisma.modelConfig.count({ where: { ownerId: userId } });
+    const isDefault = dto.isDefault ?? hasAny === 0;
+    if (isDefault) await this.clearDefault(userId);
     const created = await this.prisma.modelConfig.create({
       data: {
         ownerId: userId,
@@ -120,7 +123,7 @@ export class ModelConfigService {
         baseURL: (dto.baseURL ?? 'https://api.deepseek.com').trim(),
         apiKey: this.encrypt(dto.apiKey),
         model: dto.model.trim(),
-        isDefault: dto.isDefault ?? false,
+        isDefault,
       },
     });
     return this.toSafe(created);

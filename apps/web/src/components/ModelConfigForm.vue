@@ -28,7 +28,6 @@ const configForm = reactive({
   baseURL: props.editing?.baseURL ?? 'https://api.deepseek.com',
   apiKey: '', // 编辑时留空 = 保留原 Key
   model: props.editing?.model ?? '',
-  isDefault: props.editing?.isDefault ?? false,
 });
 
 /** 获取模型列表按钮是否可用：新建需 baseURL+key；编辑直接用已存 key */
@@ -80,7 +79,6 @@ async function saveConfig() {
         name: configForm.name.trim(),
         baseURL: configForm.baseURL.trim(),
         model: configForm.model.trim(),
-        isDefault: configForm.isDefault,
         ...(configForm.apiKey.trim() ? { apiKey: configForm.apiKey.trim() } : {}),
       });
       toast.success('配置已更新');
@@ -90,7 +88,6 @@ async function saveConfig() {
         baseURL: configForm.baseURL.trim(),
         apiKey: configForm.apiKey.trim(),
         model: configForm.model.trim(),
-        isDefault: configForm.isDefault,
       });
       toast.success('配置已保存');
     }
@@ -177,10 +174,6 @@ async function saveConfig() {
         <Input v-model="configForm.apiKey" type="password" placeholder="sk-..." />
       </div>
     </div>
-    <label class="mt-3 flex cursor-pointer items-center gap-2 text-sm select-none">
-      <input v-model="configForm.isDefault" type="checkbox" class="h-3.5 w-3.5" />
-      设为默认（新建会话 / 研究报告 / 自主研究默认使用）
-    </label>
     <p v-if="configError" class="mt-3 text-sm text-destructive">{{ configError }}</p>
     <div class="mt-4 flex justify-end gap-2">
       <Button variant="ghost" size="sm" @click="emit('cancel')">取消</Button>
