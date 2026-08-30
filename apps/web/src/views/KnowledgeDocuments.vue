@@ -276,6 +276,8 @@ const uploadPercent = ref<number | null>(null); // 当前文件 HTTP 传输进�
 const uploadDone = ref(0);
 const uploadTotal = ref(0);
 const uploadErrors = ref<string[]>([]);
+/** 增量向量化：同名同内容的文件被后端跳过（不重复解析/嵌入）的数量 */
+const uploadSkipped = ref(0);
 
 const uploading = computed(() => uploadPhase.value !== 'idle');
 
@@ -368,6 +370,7 @@ async function startUpload(files: File[]) {
   uploadPhase.value = 'uploading';
   uploadErrors.value = [];
   uploadDone.value = 0;
+  uploadSkipped.value = 0;
   uploadTotal.value = nonEmpty.length;
   try {
     let nextIndex = 0;
@@ -378,12 +381,16 @@ async function startUpload(files: File[]) {
         const f = nonEmpty[idx];
         const name = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
         try {
-          await uploadDocument(
+          const res = await uploadDocument(
             knowledgeBaseId,
             f,
             (percent) => (uploadPercent.value = percent),
             name,
           );
+          // 增量向量化：同名同内容 → 后端跳过，不算"待解析"
+          if ('skipped' in res && res.skipped) {
+            uploadSkipped.value++;
+          }
         } catch (e) {
           uploadErrors.value.push(`${name}: ${(e as Error).message}`);
         }
@@ -399,17 +406,19 @@ async function startUpload(files: File[]) {
     // 会话持久化：刷新页面后环形进度继续显示，不丢失
     sessionStorage.setItem(
       'kb-parse-total',
-      String(Math.max(nonEmpty.length - uploadErrors.value.length, 0)),
+      String(Math.max(nonEmpty.length - uploadErrors.value.length - uploadSkipped.value, 0)),
     );
     uploadPhase.value = 'parsing';
     startParsePoll();
+    const submitted = nonEmpty.length - uploadErrors.value.length - uploadSkipped.value;
+    const skippedText = uploadSkipped.value ? `，${uploadSkipped.value} 个内容未变化已跳过` : '';
     if (uploadErrors.value.length) {
       toast.error(
-        `${uploadErrors.value.length} 个文件上传失败，其余 ${nonEmpty.length - uploadErrors.value.length} 个已提交`,
+        `${uploadErrors.value.length} 个文件上传失败，其余 ${submitted} 个已提交${skippedText}`,
       );
     } else {
       toast.success(
-        `已提交 ${nonEmpty.length} 个文件，后台解析中${skippedEmpty ? `（跳过 ${skippedEmpty} 个空文件）` : ''}`,
+        `已提交 ${submitted} 个文件，后台解析中${skippedEmpty ? `（跳过 ${skippedEmpty} 个空文件）` : ''}${skippedText}`,
       );
     }
   } finally {
@@ -703,6 +712,12 @@ async function handleReplace(docId: string, file: File) {
     const oldDoc = list.value.find((d) => d.id === docId);
     // 先提交新版本（后台队列处理），等新文档处理完成后再删旧版——避免中间真空期、失败不丢旧数据
     const created = await uploadDocument(knowledgeBaseId, file);
+    // 增量向量化：内容没变 → 后端跳过，无需等待/删除
+    if ('skipped' in created) {
+      await load();
+      toast.success('文件内容未变化，无需重新向量化');
+      return;
+    }
     await waitForDoc(created.id);
     // 若新旧文件名相同，后端队列已自动替换（旧文档已被删），无需再手动删（否则会 404 报"文档不存在"）
     if (created.filename !== oldDoc?.filename) {

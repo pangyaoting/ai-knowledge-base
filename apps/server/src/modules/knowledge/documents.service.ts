@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -14,6 +14,11 @@ const UPLOAD_DIR = join(process.cwd(), 'uploads');
 
 // 供其他模块（如示例数据导入）复用
 export { UPLOAD_DIR };
+
+/** 文件内容哈希：SHA-256（增量向量化去重依据，与文件名无关） */
+function hashFileContent(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
 
 /**
  * 文档服务：上传 → 入队（异步处理）→ 状态轮询；列表/下载/编辑/删除
@@ -69,6 +74,18 @@ export class DocumentsService {
     // 附件（无法解析的类型：图片/二进制/未知扩展名）：保留原扩展名用于展示
     const rawExt = (file.originalname.split('.').pop() ?? '').toLowerCase() || 'bin';
 
+    // 2.5 增量向量化：内容哈希去重——同知识库内「同名 + 同内容」的文档直接跳过，
+    // 不存盘、不解析、不重复嵌入（重传未变更的目录/文件时几乎零成本）
+    const contentHash = hashFileContent(file.buffer);
+    const unchanged = await this.prisma.document.findFirst({
+      where: { knowledgeBaseId, filename: originalName, contentHash },
+      select: { id: true },
+    });
+    if (unchanged) {
+      this.logger.log(`内容未变化，跳过: ${originalName}`);
+      return { skipped: true, filename: originalName };
+    }
+
     // 3. 存盘：UUID 改名防重名/防路径注入，扩展名保留
     const storedName = `${randomUUID()}.${fileType ?? rawExt}`;
     if (!existsSync(UPLOAD_DIR)) {
@@ -87,6 +104,7 @@ export class DocumentsService {
           fileSize: file.size,
           fileType: rawExt,
           status: 'done', // 附件无需后台处理，直接完成
+          contentHash,
         },
       });
       this.logger.log(`附件已入库（不参与检索）: ${originalName}`);
@@ -102,6 +120,7 @@ export class DocumentsService {
         fileSize: file.size,
         fileType,
         status: 'pending',
+        contentHash,
       },
     });
 

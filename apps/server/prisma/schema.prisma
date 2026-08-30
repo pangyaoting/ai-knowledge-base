@@ -62,6 +62,7 @@ model Document {
   fileType        String   @map("file_type") // pdf / docx / md / txt
   status          String   @default("pending") // pending / processing / done / failed
   error           String? // 失败原因
+  contentHash     String?  @map("content_hash") // 文件内容 SHA-256（增量向量化：同名同哈希跳过）
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

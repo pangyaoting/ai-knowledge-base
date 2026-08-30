@@ -51,14 +51,18 @@ export function uploadDocument(
   if (filename && filename !== file.name) {
     form.append('name', filename);
   }
-  return request.post<unknown, Document>(`/knowledge/${knowledgeBaseId}/documents`, form, {
-    timeout: 120_000,
-    onUploadProgress: onProgress
-      ? (e) => {
-          if (e.total) onProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      : undefined,
-  });
+  return request.post<unknown, Document | { skipped: boolean; filename: string }>(
+    `/knowledge/${knowledgeBaseId}/documents`,
+    form,
+    {
+      timeout: 120_000,
+      onUploadProgress: onProgress
+        ? (e) => {
+            if (e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        : undefined,
+    },
+  );
 }
 
 export function deleteDocument(knowledgeBaseId: string, documentId: string) {
