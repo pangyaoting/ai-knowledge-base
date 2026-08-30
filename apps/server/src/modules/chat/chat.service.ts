@@ -191,6 +191,10 @@ export class ChatService {
     imageDataUrl?: string,
   ) {
     const session = await this.getSession(userId, sessionId);
+    // 只发图片（不带文字）也允许：content 为空但有图片
+    if (!(question ?? '').trim() && !imageDataUrl) {
+      throw new BadRequestException('请填写问题或粘贴图片');
+    }
     // 是否使用知识库（false = 纯对话模式，不检索知识库）
     const useKnowledgeBase = session.useKnowledgeBase !== false; // 兼容旧数据（列默认 true）
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
@@ -239,17 +243,19 @@ export class ChatService {
     //    纯对话模式（不用知识库也不联网）不需要检索 → 跳过改写，省一次 LLM 调用。
     const needRetrieval = useKnowledgeBase || useWebSearch;
     const searchQuery =
-      history.length && needRetrieval
+      history.length && needRetrieval && question.trim()
         ? await this.rewriteQuery(question, history, target)
         : question;
 
     // ③ 检索（并行）：知识库向量+关键词混合检索（纯对话模式跳过）+ 可选联网搜索（用改写后的查询）
     const kbScope = kbIds.length ? kbIds : undefined;
+    // 只发图片（无文字）时不做知识库/联网检索（空查询没有意义，还会触发空嵌入报错）
+    const canRetrieve = question.trim().length > 0;
     const [retrieved, webSources] = await Promise.all([
-      useKnowledgeBase
+      useKnowledgeBase && canRetrieve
         ? this.ragService.retrieve(userId, searchQuery, kbScope, 5)
         : Promise.resolve([] as RetrievalSource[]),
-      useWebSearch ? this.webSearchService.search(searchQuery) : Promise.resolve([]),
+      useWebSearch && canRetrieve ? this.webSearchService.search(searchQuery) : Promise.resolve([]),
     ]);
     const kbSources: RetrievalSource[] = retrieved;
     writer('sources', { kb: kbSources, web: webSources });
@@ -416,7 +422,8 @@ export class ChatService {
       sourceText ? `【参考资料】\n${sourceText}` : '',
       history.length ? `【历史对话】\n${historyText}` : '',
       '【用户问题】',
-      question,
+      // 只发图片时没有文字问题 → 给模型一个明确指令（否则模型只看到"【用户问题】"空标题）
+      (question ?? '').trim() || '请描述这张图片的内容',
     ]
       .filter((s) => s !== '')
       .join('\n');

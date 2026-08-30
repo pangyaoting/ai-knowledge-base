@@ -107,7 +107,14 @@ export function askQuestion(
     onerror(err) {
       // 用户主动中止不算错误
       if (!signal.aborted) {
-        callbacks.onError?.(err instanceof Error ? err.message : '连接中断');
+        const raw = err instanceof Error ? err.message : '连接中断';
+        // fetch-event-source 在响应不是 SSE（如 400 JSON 校验错误）时抛 content-type 错，
+        // 翻译成可操作的中文提示（真正的错误信息后端会通过 SSE error 事件送达）
+        callbacks.onError?.(
+          /Expected content-type/i.test(raw)
+            ? '请求未正常建立（响应格式异常）：请确认问题内容或模型配置（只发图片时需配置视觉模型）'
+            : raw,
+        );
       }
       throw err; // 抛出以终止重连（SSE 默认会自动重连，这里不需要）
     },

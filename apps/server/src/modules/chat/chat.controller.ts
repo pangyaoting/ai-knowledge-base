@@ -131,7 +131,7 @@ export class ChatController {
       await this.chatService.askAndStream(
         userId,
         sessionId,
-        dto.content,
+        dto.content ?? '',
         dto.useWebSearch ?? false,
         (event, data) => write(event, data),
         abortController.signal,
