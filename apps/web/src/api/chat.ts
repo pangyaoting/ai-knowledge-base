@@ -76,6 +76,7 @@ export function askQuestion(
   useWebSearch: boolean,
   signal: AbortSignal,
   callbacks: AskCallbacks,
+  imageDataUrl?: string,
 ): Promise<void> {
   return fetchEventSource(`/api/chat/sessions/${sessionId}/messages`, {
     method: 'POST',
@@ -83,7 +84,7 @@ export function askQuestion(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
     },
-    body: JSON.stringify({ content, useWebSearch }),
+    body: JSON.stringify({ content, useWebSearch, imageDataUrl }),
     signal,
     onmessage(ev) {
       // 事件类型在后端写进了 data 的 JSON 里：{ event, data }

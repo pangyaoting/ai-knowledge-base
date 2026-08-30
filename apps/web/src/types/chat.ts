@@ -21,6 +21,7 @@ export interface ChatMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
+  imageDataUrl?: string | null; // 粘贴图片（data URL）
   sources: ChatSources | null;
   createdAt: string;
 }

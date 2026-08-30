@@ -188,6 +188,7 @@ export class ChatService {
     useWebSearch: boolean,
     writer: StreamWriter,
     signal: AbortSignal,
+    imageDataUrl?: string,
   ) {
     const session = await this.getSession(userId, sessionId);
     // 是否使用知识库（false = 纯对话模式，不检索知识库）
@@ -238,9 +239,9 @@ export class ChatService {
     const kbSources: RetrievalSource[] = retrieved;
     writer('sources', { kb: kbSources, web: webSources });
 
-    // ④ 保存用户消息
+    // ④ 保存用户消息（含粘贴图片 data URL）
     await this.prisma.chatMessage.create({
-      data: { sessionId, role: 'user', content: question },
+      data: { sessionId, role: 'user', content: question, imageDataUrl: imageDataUrl ?? null },
     });
 
     // ⑤ 组装 Prompt（知识库资料 + 网络资料一起注入；LLM 看到的是用户原问题）
@@ -250,6 +251,7 @@ export class ChatService {
       webSources,
       history,
       useKnowledgeBase,
+      imageDataUrl,
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
@@ -328,6 +330,7 @@ export class ChatService {
     webSources: WebSource[],
     history: Array<{ role: string; content: string }>,
     useKnowledgeBase: boolean,
+    imageDataUrl?: string,
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
     // - 使用知识库：强调以知识库资料为准，标注 [来源N]
@@ -400,7 +403,17 @@ export class ChatService {
       .join('\n');
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'user', content: userPrompt },
+      // 有粘贴图片 → 用 OpenAI 视觉消息格式（content 数组：文字 + image_url）
+      // 注意：需要支持视觉的模型（如 Qwen-VL）才能识别；DeepSeek 等纯文本模型会报错
+      imageDataUrl
+        ? {
+            role: 'user',
+            content: [
+              { type: 'text', text: userPrompt },
+              { type: 'image_url', image_url: { url: imageDataUrl } },
+            ],
+          }
+        : { role: 'user', content: userPrompt },
     ];
     return { system, messages };
   }

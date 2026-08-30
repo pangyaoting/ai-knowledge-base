@@ -135,6 +135,7 @@ export class ChatController {
         dto.useWebSearch ?? false,
         (event, data) => write(event, data),
         abortController.signal,
+        dto.imageDataUrl,
       );
       res.end();
     } catch (err) {

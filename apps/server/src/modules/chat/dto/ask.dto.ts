@@ -12,4 +12,14 @@ export class AskDto {
   @IsOptional()
   @IsBoolean({ message: 'useWebSearch 必须是布尔值' })
   useWebSearch?: boolean;
+
+  @ApiProperty({
+    example: 'data:image/jpeg;base64,...',
+    description: '粘贴图片（data URL，需支持视觉的模型如 Qwen-VL 才能识别）',
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: '图片必须是字符串' })
+  @MaxLength(6_000_000, { message: '图片过大' })
+  imageDataUrl?: string;
 }

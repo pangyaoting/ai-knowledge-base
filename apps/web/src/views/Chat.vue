@@ -13,6 +13,7 @@ import {
   Menu,
   Search,
   Cpu,
+  X,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -48,6 +49,56 @@ const currentSessionId = ref<string | null>(null);
 const messages = ref<ChatMessage[]>([]);
 
 const input = ref('');
+
+// ==================== 粘贴图片（需支持视觉的模型如 Qwen-VL 才能识别） ====================
+const pendingImage = ref<string | null>(null);
+
+/** 粘贴图片：压缩到最长边 1024、JPEG 0.8，转 data URL（控制体积再入库/进模型） */
+async function onPasteImage(e: ClipboardEvent) {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      pendingImage.value = await compressImage(file);
+      return;
+    }
+  }
+}
+
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1024;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error('图片处理失败'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('图片读取失败'));
+    };
+    img.src = url;
+  });
+}
+
+function removePendingImage() {
+  pendingImage.value = null;
+}
 const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
@@ -335,14 +386,19 @@ async function handleExportSession(id: string) {
 // ==================== 提问与流式 ====================
 
 const canSend = computed(
-  () => input.value.trim().length > 0 && !streaming.value && !!currentSessionId.value,
+  () =>
+    (input.value.trim().length > 0 || pendingImage.value !== null) &&
+    !streaming.value &&
+    !!currentSessionId.value,
 );
 
 async function handleSend() {
   const question = input.value.trim();
-  if (!question || streaming.value || !currentSessionId.value) return;
+  const image = pendingImage.value;
+  if ((!question && !image) || streaming.value || !currentSessionId.value) return;
 
   input.value = '';
+  pendingImage.value = null;
   error.value = '';
   streaming.value = true;
   streamContent.value = '';
@@ -354,6 +410,7 @@ async function handleSend() {
     sessionId: currentSessionId.value,
     role: 'user',
     content: question,
+    imageDataUrl: image,
     sources: null,
     createdAt: new Date().toISOString(),
   });
@@ -390,6 +447,7 @@ async function handleSend() {
           error.value = message;
         },
       },
+      image ?? undefined,
     );
   } finally {
     streaming.value = false;
@@ -611,6 +669,12 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 v-else
                 class="rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground whitespace-pre-wrap"
               >
+                <img
+                  v-if="msg.imageDataUrl"
+                  :src="msg.imageDataUrl"
+                  class="mb-2 max-h-48 rounded-md object-cover"
+                  alt="粘贴图片"
+                />
                 {{ msg.content }}
               </div>
 
@@ -821,13 +885,29 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </div>
         </div>
         <div class="mx-auto flex max-w-3xl items-end gap-2">
+          <!-- 粘贴图片预览 -->
+          <div v-if="pendingImage" class="relative shrink-0">
+            <img
+              :src="pendingImage"
+              class="h-16 w-16 rounded-md border border-primary/40 object-cover"
+              alt="待发送图片"
+            />
+            <button
+              class="absolute -right-2 -top-2 rounded-full bg-destructive p-0.5 text-white shadow"
+              title="移除图片"
+              @click="removePendingImage"
+            >
+              <X class="h-3 w-3" />
+            </button>
+          </div>
           <textarea
             v-model="input"
             rows="1"
             class="max-h-40 min-h-[44px] flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+            placeholder="输入问题，Enter 发送，Shift+Enter 换行；可粘贴图片（需视觉模型识别）"
             :disabled="!currentSessionId"
             @keydown.enter.exact.prevent="handleSend"
+            @paste="onPasteImage"
           />
           <Button v-if="!streaming" :disabled="!canSend" @click="handleSend">
             <Send class="h-4 w-4" />
