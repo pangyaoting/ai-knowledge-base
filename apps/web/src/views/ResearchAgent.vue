@@ -413,14 +413,16 @@ function dirIcon(status: string) {
   return Circle;
 }
 
-// ==================== 报告：先摘要后展开 ====================
+// ==================== 报告：摘要卡片 + 一个方向一个卡片 ====================
 
 interface ReportSection {
   title: string;
   body: string;
+  /** 在 sections 中的下标（展开状态用） */
+  idx: number;
 }
 
-/** 按 `## ` 二级标题把报告拆成小节（引言/各方向/结论），供折叠展示 */
+/** 按 `## ` 二级标题把报告拆成小节（引言/各方向/结论） */
 const sections = computed<ReportSection[]>(() => {
   const report = current.value?.report;
   if (!report) return [];
@@ -430,13 +432,20 @@ const sections = computed<ReportSection[]>(() => {
     const lines = parts[i].split('\n');
     const title = lines[0].replace(/^#+\s*/, '').trim();
     const body = lines.slice(1).join('\n').trim();
-    if (title) out.push({ title, body });
+    if (title) out.push({ title, body, idx: out.length });
   }
   return out;
 });
 
-/** 已展开的小节下标（0 = 引言，默认展开） */
-const expanded = ref<Set<number>>(new Set([0]));
+const isMetaTitle = (t: string) => t === '引言' || t === '结论';
+/** 方向小节（一个方向一张卡片） */
+const dirSections = computed(() => sections.value.filter((s) => !isMetaTitle(s.title)));
+/** 引言 / 结论：不单独成卡片，作为正文段落自然呈现 */
+const introSection = computed(() => sections.value.find((s) => s.title === '引言'));
+const conclusionSection = computed(() => sections.value.find((s) => s.title === '结论'));
+
+/** 已展开的方向卡片下标（默认全部折叠，点标题展开） */
+const expanded = ref<Set<number>>(new Set());
 const allExpanded = ref(false);
 
 function toggleSection(i: number) {
@@ -448,7 +457,7 @@ function toggleSection(i: number) {
 
 function toggleAllSections() {
   allExpanded.value = !allExpanded.value;
-  expanded.value = allExpanded.value ? new Set(sections.value.map((_, i) => i)) : new Set([0]);
+  expanded.value = allExpanded.value ? new Set(dirSections.value.map((s) => s.idx)) : new Set();
 }
 
 // ==================== 确认 / 重新拆解 ====================
@@ -996,53 +1005,75 @@ onBeforeUnmount(() => {
             </div>
 
             <template v-if="current.report">
+              <!-- 摘要卡片（含全部展开/收起） -->
               <div
                 v-if="current.summary"
                 class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
               >
-                <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
-                <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
-                  {{ current.summary }}
-                </p>
-              </div>
-              <div class="rounded-lg border bg-card px-4 py-3">
-                <div class="flex items-center justify-between">
-                  <p class="text-xs font-medium text-muted-foreground">
-                    正文（共 {{ sections.length }} 节）
-                  </p>
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
                   <button
                     type="button"
-                    class="text-xs font-medium text-primary hover:underline"
+                    class="shrink-0 text-xs font-medium text-primary hover:underline"
                     @click="toggleAllSections"
                   >
                     {{ allExpanded ? '全部收起' : '全部展开' }}
                   </button>
                 </div>
-                <div class="mt-2 space-y-2">
-                  <div
-                    v-for="(sec, i) in sections"
-                    :key="i"
-                    class="overflow-hidden rounded-md border"
+                <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
+                  {{ current.summary }}
+                </p>
+              </div>
+
+              <!-- 引言：正文段落，不单独成卡片 -->
+              <div v-if="introSection" class="mb-4">
+                <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">
+                  📖 引言
+                </p>
+                <div
+                  class="markdown-body"
+                  @click="handleReportClick"
+                  v-html="renderMarkdown(introSection.body)"
+                />
+              </div>
+
+              <!-- 方向卡片：一个方向一个卡片（默认折叠，点标题展开） -->
+              <div class="space-y-2">
+                <div
+                  v-for="sec in dirSections"
+                  :key="sec.idx"
+                  class="overflow-hidden rounded-lg border bg-card"
+                >
+                  <button
+                    type="button"
+                    class="flex w-full select-none items-center gap-1.5 px-3 py-2.5 text-left text-sm font-semibold hover:bg-accent/60"
+                    @click="toggleSection(sec.idx)"
                   >
-                    <button
-                      type="button"
-                      class="flex w-full select-none items-center gap-1.5 px-3 py-2 text-left text-sm font-medium hover:bg-accent/60"
-                      @click="toggleSection(i)"
-                    >
-                      <ChevronRight
-                        class="h-3.5 w-3.5 shrink-0 transition-transform"
-                        :class="expanded.has(i) ? 'rotate-90' : ''"
-                      />
-                      {{ sec.title }}
-                    </button>
-                    <div
-                      v-show="expanded.has(i)"
-                      class="markdown-body border-t px-4 py-3"
-                      @click="handleReportClick"
-                      v-html="renderMarkdown(sec.body)"
+                    <ChevronRight
+                      class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
+                      :class="expanded.has(sec.idx) ? 'rotate-90' : ''"
                     />
-                  </div>
+                    {{ sec.title }}
+                  </button>
+                  <div
+                    v-show="expanded.has(sec.idx)"
+                    class="markdown-body border-t px-4 py-3"
+                    @click="handleReportClick"
+                    v-html="renderMarkdown(sec.body)"
+                  />
                 </div>
+              </div>
+
+              <!-- 结论：正文段落，不单独成卡片 -->
+              <div v-if="conclusionSection" class="mt-4">
+                <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">
+                  🏁 结论
+                </p>
+                <div
+                  class="markdown-body"
+                  @click="handleReportClick"
+                  v-html="renderMarkdown(conclusionSection.body)"
+                />
               </div>
             </template>
             <p v-else class="py-8 text-center text-sm text-muted-foreground">
@@ -1050,55 +1081,72 @@ onBeforeUnmount(() => {
             </p>
           </div>
 
-          <!-- 完成：报告（先摘要后展开）+ 来源 -->
+          <!-- 完成：摘要卡片 + 一个方向一个卡片 + 来源 -->
           <div v-else-if="current.report" class="mx-auto max-w-3xl px-4 py-6">
             <div
               v-if="current.summary"
               class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
             >
-              <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
-              <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
-                {{ current.summary }}
-              </p>
-            </div>
-            <div class="rounded-lg border bg-card px-4 py-3">
-              <div class="flex items-center justify-between">
-                <p class="text-xs font-medium text-muted-foreground">
-                  正文（共 {{ sections.length }} 节）
-                </p>
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
                 <button
                   type="button"
-                  class="text-xs font-medium text-primary hover:underline"
+                  class="shrink-0 text-xs font-medium text-primary hover:underline"
                   @click="toggleAllSections"
                 >
                   {{ allExpanded ? '全部收起' : '全部展开' }}
                 </button>
               </div>
-              <div class="mt-2 space-y-2">
-                <div
-                  v-for="(sec, i) in sections"
-                  :key="i"
-                  class="overflow-hidden rounded-md border"
+              <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
+                {{ current.summary }}
+              </p>
+            </div>
+
+            <!-- 引言：正文段落，不单独成卡片 -->
+            <div v-if="introSection" class="mb-4">
+              <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">📖 引言</p>
+              <div
+                class="markdown-body"
+                @click="handleReportClick"
+                v-html="renderMarkdown(introSection.body)"
+              />
+            </div>
+
+            <!-- 方向卡片：一个方向一个卡片（默认折叠，点标题展开） -->
+            <div class="space-y-2">
+              <div
+                v-for="sec in dirSections"
+                :key="sec.idx"
+                class="overflow-hidden rounded-lg border bg-card"
+              >
+                <button
+                  type="button"
+                  class="flex w-full select-none items-center gap-1.5 px-3 py-2.5 text-left text-sm font-semibold hover:bg-accent/60"
+                  @click="toggleSection(sec.idx)"
                 >
-                  <button
-                    type="button"
-                    class="flex w-full select-none items-center gap-1.5 px-3 py-2 text-left text-sm font-medium hover:bg-accent/60"
-                    @click="toggleSection(i)"
-                  >
-                    <ChevronRight
-                      class="h-3.5 w-3.5 shrink-0 transition-transform"
-                      :class="expanded.has(i) ? 'rotate-90' : ''"
-                    />
-                    {{ sec.title }}
-                  </button>
-                  <div
-                    v-show="expanded.has(i)"
-                    class="markdown-body border-t px-4 py-3"
-                    @click="handleReportClick"
-                    v-html="renderMarkdown(sec.body)"
+                  <ChevronRight
+                    class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
+                    :class="expanded.has(sec.idx) ? 'rotate-90' : ''"
                   />
-                </div>
+                  {{ sec.title }}
+                </button>
+                <div
+                  v-show="expanded.has(sec.idx)"
+                  class="markdown-body border-t px-4 py-3"
+                  @click="handleReportClick"
+                  v-html="renderMarkdown(sec.body)"
+                />
               </div>
+            </div>
+
+            <!-- 结论：正文段落，不单独成卡片 -->
+            <div v-if="conclusionSection" class="mt-4">
+              <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">🏁 结论</p>
+              <div
+                class="markdown-body"
+                @click="handleReportClick"
+                v-html="renderMarkdown(conclusionSection.body)"
+              />
             </div>
             <div v-if="current.sources?.length" class="mt-4">
               <details class="rounded-lg border bg-muted/40 px-3 py-2 text-xs">

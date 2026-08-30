@@ -74,11 +74,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** 单个方向最多研究轮数（防止 LLM 判断失灵无限循环） */
 const MAX_ROUNDS_PER_DIRECTION = 8;
 /**
+ * 单个方向最少精读页数：模型喊"资料足够"结束方向前，必须至少精读这么多页，
+ * 防止方向草草了事（只搜一轮、笔记为空就"完成"）。
+ */
+const MIN_READS_PER_DIRECTION = 3;
+/**
  * 独立"报告组装预算"（token）：与用户设定的研究预算分开，专门用于把研究笔记
  * 润色成正式报告（引言/结论/小节撰写）。任何停止（预算/时间/手动）都会先花这笔钱
  * 把正式报告交付——用户不需要追加 token 才能拿到报告；研究预算的停止规则不变。
  */
-const ASSEMBLY_BUDGET = 8000;
+const ASSEMBLY_BUDGET = 12000;
 
 /**
  * 限时·限量·自主研究 Agent 执行器（BullMQ worker 后台执行）：
@@ -325,8 +330,17 @@ export class AgentRunner {
       const query = await this.nextQuery(target, taskId, dir, budget, stop);
       if (stop.flag) break;
       if (!query) {
-        dir.status = 'done';
-        break;
+        // 模型喊"够了"：但精读页数不足时不允许草草收场（防止方向内容为空/浅尝辄止），
+        // 强制再来一轮（最多到 MAX_ROUNDS-1 兜底，防止模型持续喊停导致死循环）
+        if (
+          dir.readUrls.length >= MIN_READS_PER_DIRECTION ||
+          dir.rounds >= MAX_ROUNDS_PER_DIRECTION - 1
+        ) {
+          dir.status = 'done';
+          break;
+        }
+        dir.rounds += 1;
+        continue;
       }
 
       // 2) 联网搜索 + 过滤已精读的 URL
@@ -496,8 +510,9 @@ export class AgentRunner {
       target,
       taskId,
       '你是自主研究规划助手。基于该研究方向已有的发现，提出下一个最值得搜索的中文搜索词（8~25 字，具体可检索）。' +
-        '若你认为当前资料已足够回答该方向问题，直接输出 null。只输出一个搜索词或 null，不要任何其它内容。',
-      `研究方向：${dir.title}\n要回答的问题：${dir.question}\n${used}\n当前研究笔记：\n${(dir.notes || '（暂无）').slice(0, 800)}`,
+        `只有当已精读至少 ${MIN_READS_PER_DIRECTION} 个网页且资料足以完整回答该方向问题时，才输出 null；` +
+        '否则必须给出下一个搜索词，不要过早结束。只输出一个搜索词或 null，不要任何其它内容。',
+      `研究方向：${dir.title}\n要回答的问题：${dir.question}\n已精读网页：${dir.readUrls.length} 页\n${used}\n当前研究笔记：\n${(dir.notes || '（暂无）').slice(0, 800)}`,
       80,
       budget,
       stop,
@@ -724,31 +739,7 @@ export class AgentRunner {
     );
     const summary = summaryRes?.text ?? '';
 
-    // ② 引言（组装预算，不受研究停止影响）
-    const intro = await this.assembleCall(
-      target,
-      task.id,
-      '你是研究报告主编。根据研究主题与各小节标题，写一段 120~200 字的引言：说明研究主题、资料来源与研究结构。只输出引言段落本身，不要标题。',
-      `研究主题：${topic}\n各小节标题：${titles}`,
-      300,
-      assembly,
-    );
-
-    // ③ 逐方向润色小节：笔记多的方向优先（信息量大、最值得精读成文）
-    const pending = progress.directions
-      .filter((d) => !d.sectionContent && d.notes)
-      .sort((a, b) => b.notes.length - a.notes.length);
-    for (const dir of pending) {
-      if (assembly.exhausted) break;
-      const content = await this.writeSection(target, task.id, dir, assembly);
-      // 只有真正写出正文才标记完成：组装预算耗尽返回空时保持待研究，续跑会补写润色
-      if (content) {
-        dir.sectionContent = content;
-        dir.status = 'done';
-      }
-    }
-
-    // ④ 结论（组装预算还有余量才写）
+    // ② 结论（用户明确要求必须有结论：优先级高于引言和小节，预算不足时先保结论）
     let conclusion = '';
     if (!assembly.exhausted) {
       const res = await this.assembleCall(
@@ -762,11 +753,37 @@ export class AgentRunner {
       conclusion = res?.text ?? '';
     }
 
-    // 组装正文：有正式小节的用正式小节，否则用原始笔记
+    // ③ 引言
+    const intro = await this.assembleCall(
+      target,
+      task.id,
+      '你是研究报告主编。根据研究主题与各小节标题，写一段 120~200 字的引言：说明研究主题、资料来源与研究结构。只输出引言段落本身，不要标题。',
+      `研究主题：${topic}\n各小节标题：${titles}`,
+      300,
+      assembly,
+    );
+
+    // ④ 逐方向润色小节：笔记多的方向优先（信息量大、最值得精读成文）
+    const pending = progress.directions
+      .filter((d) => !d.sectionContent && d.notes)
+      .sort((a, b) => b.notes.length - a.notes.length);
+    for (const dir of pending) {
+      if (assembly.exhausted) break;
+      const content = await this.writeSection(target, task.id, dir, assembly);
+      // 只有真正写出正文才标记完成：组装预算耗尽返回空时保持待研究，续跑会补写润色
+      if (content) {
+        dir.sectionContent = content;
+        dir.status = 'done';
+      }
+    }
+
+    // 组装正文：有正式小节的用正式小节，否则用原始笔记；确实没研究到的方向给一句说明，不悄悄消失
     const bodyParts: string[] = [];
     for (const d of progress.directions) {
       if (d.sectionContent) bodyParts.push(`## ${d.title}\n\n${d.sectionContent}`);
       else if (d.notes) bodyParts.push(`## ${d.title}\n\n${d.notes}`);
+      else if (d.status === 'done' || d.readUrls.length)
+        bodyParts.push(`## ${d.title}\n\n> 该方向未能检索到有效资料，已跳过。`);
     }
 
     const reportParts: string[] = [`# ${topic}`];
