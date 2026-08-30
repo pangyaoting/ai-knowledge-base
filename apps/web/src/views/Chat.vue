@@ -49,6 +49,9 @@ const currentSessionId = ref<string | null>(null);
 const messages = ref<ChatMessage[]>([]);
 
 const input = ref('');
+/** 每个会话独立的输入草稿：切换会话时保存/恢复，不串台也不丢失 */
+const inputDrafts = ref<Record<string, string>>({});
+const imageDrafts = ref<Record<string, string | null>>({});
 
 // ==================== 粘贴图片（需支持视觉的模型如 Qwen-VL 才能识别） ====================
 const pendingImage = ref<string | null>(null);
@@ -156,12 +159,11 @@ const activeModelId = computed(() => {
   return modelConfigs.value.find((c) => c.isDefault)?.model ?? null;
 });
 
-/** 当前会话使用的模型名（未绑定 = 跟随默认配置；没有默认配置时提示未绑定） */
+/** 当前会话使用的模型名（未绑定 = 跟随默认配置，直接显示默认配置名） */
 const currentModelName = computed(() => {
   const bound = currentSession.value?.modelConfig;
   if (bound) return bound.name;
-  if (modelConfigs.value.length === 0) return '未绑定模型';
-  return '默认配置';
+  return modelConfigs.value.find((c) => c.isDefault)?.name ?? '未绑定模型';
 });
 
 async function loadModelConfigs() {
@@ -315,9 +317,13 @@ watch(sessionSearch, () => {
 
 async function selectSession(id: string) {
   if (streaming.value) return;
-  // 切换会话：清空输入框与待发图片，避免串到别的会话
-  input.value = '';
-  pendingImage.value = null;
+  // 按会话保存/恢复输入草稿：切走时存当前输入，切回时恢复（不串台也不丢失）
+  if (currentSessionId.value) {
+    inputDrafts.value[currentSessionId.value] = input.value;
+    imageDrafts.value[currentSessionId.value] = pendingImage.value;
+  }
+  input.value = inputDrafts.value[id] ?? '';
+  pendingImage.value = imageDrafts.value[id] ?? null;
   currentSessionId.value = id;
   error.value = '';
   messages.value = [];
@@ -402,6 +408,8 @@ async function handleDeleteSession(id: string) {
   if (!window.confirm('删除该会话及其全部消息？')) return;
   try {
     await deleteChatSession(id);
+    delete inputDrafts.value[id];
+    delete imageDrafts.value[id];
     if (currentSessionId.value === id) {
       currentSessionId.value = null;
       messages.value = [];
@@ -913,9 +921,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 去「模型配置」绑定自己的 API Key →
               </RouterLink>
               <template v-else>
-                <p class="px-3 pb-1 pt-1.5 text-[10px] text-muted-foreground">
-                  未选中的会话使用默认配置
-                </p>
                 <button
                   v-for="c in modelConfigs"
                   :key="c.id"
@@ -927,11 +932,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                   <span class="shrink-0 text-xs text-muted-foreground">{{ c.model }}</span>
                   <span v-if="currentSession?.modelConfigId === c.id" class="shrink-0 text-xs"
                     >✓</span
-                  >
-                  <span
-                    v-else-if="c.isDefault && !currentSession?.modelConfigId"
-                    class="shrink-0 text-[10px] text-muted-foreground"
-                    >默认</span
                   >
                 </button>
               </template>
