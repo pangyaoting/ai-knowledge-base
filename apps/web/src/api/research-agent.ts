@@ -33,6 +33,16 @@ export function stopAgentTask(id: string) {
   return request.post<unknown, AgentTask>(`/research-agent/tasks/${id}/stop`);
 }
 
+/** 确认方向并开始研究（仅限待确认任务） */
+export function confirmAgentTask(id: string) {
+  return request.post<unknown, AgentTask>(`/research-agent/tasks/${id}/confirm`);
+}
+
+/** 重新拆解方向（仅限待确认任务） */
+export function redecomposeAgentTask(id: string) {
+  return request.post<unknown, AgentTask>(`/research-agent/tasks/${id}/redecompose`);
+}
+
 /** 续时/加预算（仅限已停止任务，从断点续跑） */
 export function extendAgentTask(id: string, data: { extraTokens?: number; extraMinutes?: number }) {
   return request.patch<unknown, AgentTask>(`/research-agent/tasks/${id}/extend`, data);

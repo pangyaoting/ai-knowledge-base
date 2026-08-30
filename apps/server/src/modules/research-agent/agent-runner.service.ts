@@ -137,6 +137,8 @@ export class AgentRunner {
     this.tokenCounter = { total: task.tokensUsed };
     const stop: StopFlag = { flag: false, reason: '' };
     const counters = { searchRounds: task.searchRounds, pagesRead: task.pagesRead };
+    // 本次运行内的精读正文缓存：同一 URL 只提取一次（Tavily Extract 免费额度有限，命中缓存不再重复调用）
+    const readCache = new Map<string, string>();
     this.mutex = new BudgetMutex();
 
     // 标记为运行中（可能覆盖上次 stopped → pending 的续跑状态）
@@ -156,7 +158,7 @@ export class AgentRunner {
       const endAtMs = new Date(task.endAt).getTime();
       if (Date.now() >= endAtMs) {
         // 排队太久导致时间窗已过：直接按"时间到"收尾（无成果）
-        await this.finish(taskId, 'time_exhausted', 'stopped', null, null, null, null);
+        await this.finish(taskId, 'time_exhausted', 'stopped', null, null, null, null, null);
         return;
       }
 
@@ -183,6 +185,7 @@ export class AgentRunner {
             [],
             null,
             null,
+            null,
           );
           return;
         }
@@ -197,15 +200,32 @@ export class AgentRunner {
           })),
         };
         await this.saveProgress(taskId, progress, counters);
+        // 方向拆解完成 → 先展示给用户确认，不直接开跑；
+        // 用户确认后由 confirm 接口重新入队（断点续跑），重新拆解/取消另有接口
+        await this.prisma.agentTask.update({
+          where: { id: taskId },
+          data: { status: 'awaiting_confirm' },
+        });
         this.logger.log(
-          `自主研究启动: ${taskId}（${task.mode}），${progress.directions.length} 个方向`,
+          `自主研究启动: ${taskId}（${task.mode}），拆解出 ${progress.directions.length} 个方向，等待用户确认`,
         );
+        return;
       }
 
       // ③ 各方向并行推进（共享预算盒 + 停止标记，JS 单线程保证计数安全）
       await Promise.all(
         progress.directions.map((dir) =>
-          this.researchDirection(target, taskId, dir, progress, counters, budget, stop, endAtMs),
+          this.researchDirection(
+            target,
+            taskId,
+            dir,
+            progress,
+            counters,
+            budget,
+            stop,
+            endAtMs,
+            readCache,
+          ),
         ),
       );
 
@@ -216,12 +236,30 @@ export class AgentRunner {
       }
 
       // ④ 收尾：按停止原因落终态 + 组装（用独立组装预算，任何停止都交付正式报告）
-      const { report, sources } = await this.assemble(target, task, progress, assembly);
+      const { report, sources, summary } = await this.assemble(target, task, progress, assembly);
       await this.saveProgress(taskId, progress, counters);
       if (stop.reason === 'budget_exhausted' || budget.exhausted) {
-        await this.finish(taskId, 'budget_exhausted', 'stopped', report, sources, progress, null);
+        await this.finish(
+          taskId,
+          'budget_exhausted',
+          'stopped',
+          report,
+          sources,
+          progress,
+          summary,
+          null,
+        );
       } else if (stop.reason === 'time_exhausted') {
-        await this.finish(taskId, 'time_exhausted', 'stopped', report, sources, progress, null);
+        await this.finish(
+          taskId,
+          'time_exhausted',
+          'stopped',
+          report,
+          sources,
+          progress,
+          summary,
+          null,
+        );
       } else if (stop.reason === 'user_stopped') {
         // 用户已把 status 置为 stopped（stop 接口），这里只补写报告/来源/进度，不动状态
         // （updateMany：任务若已被删除则 0 行匹配，不报错）
@@ -229,13 +267,14 @@ export class AgentRunner {
           where: { id: taskId },
           data: {
             report,
+            summary,
             sources: sources ? JSON.parse(JSON.stringify(sources)) : null,
             progress: JSON.parse(JSON.stringify(progress)),
           },
         });
       } else {
         // 没有停止标记 = 所有方向都研究完了
-        await this.finish(taskId, 'completed', 'done', report, sources, progress, null);
+        await this.finish(taskId, 'completed', 'done', report, sources, progress, summary, null);
       }
       this.logger.log(
         `自主研究结束: ${taskId} → ${stop.reason || 'completed'}（研究 ${budget.used}/${task.tokenBudget}，含整理 ${this.tokenCounter.total} token）`,
@@ -265,6 +304,7 @@ export class AgentRunner {
     budget: BudgetBox,
     stop: StopFlag,
     endAtMs: number,
+    readCache: Map<string, string>,
   ) {
     if (dir.status === 'done' || dir.sectionContent) return; // 断点续跑：已完成方向跳过
     dir.status = 'active';
@@ -309,11 +349,26 @@ export class AgentRunner {
       const chosen = await this.triage(target, taskId, dir, fresh, budget, stop);
       if (stop.flag) break;
 
-      // 4) 精读正文 + 提炼笔记（逐条，随时可被预算/时间/手动打断）
-      for (const src of chosen) {
-        if (stop.flag || budget.exhausted || Date.now() >= endAtMs) {
-          stop.flag = true;
-          if (!stop.reason && Date.now() >= endAtMs) stop.reason = 'time_exhausted';
+      // 4) 精读正文 + 提炼笔记。
+      //    正文提取不耗 token，并行执行并复用本次运行缓存（同一 URL 只提取一次）；
+      //    笔记提炼走预算互斥锁串行扣费，随时可被预算/时间/手动打断。
+      const withContent = await Promise.all(
+        chosen.map(async (src): Promise<{ src: WebSource; content: string } | null> => {
+          if (stop.flag || budget.exhausted || Date.now() >= endAtMs) return null;
+          let content = readCache.get(src.url);
+          if (content === undefined) {
+            content = (await this.webSearch.extract(src.url)) ?? src.content ?? '';
+            if (content) readCache.set(src.url, content);
+          }
+          return content ? { src, content } : null;
+        }),
+      );
+      for (const item of withContent) {
+        if (!item || stop.flag || budget.exhausted || Date.now() >= endAtMs) {
+          if (!stop.flag && Date.now() >= endAtMs) {
+            stop.flag = true;
+            stop.reason = 'time_exhausted';
+          }
           break;
         }
         if (!(await this.isRunning(taskId))) {
@@ -321,11 +376,12 @@ export class AgentRunner {
           stop.reason = 'user_stopped';
           break;
         }
-        const content = (await this.webSearch.extract(src.url)) ?? src.content ?? '';
-        if (!content) continue;
-        dir.readUrls.push({ url: src.url, title: src.title });
+        const { src, content } = item;
         counters.pagesRead += 1;
-        await this.extractNotes(target, taskId, dir, src, content, budget, stop);
+        // 先提炼笔记、成功后才记为"已精读"：中途被打断的页面（预算/时间/手动）续跑时会
+        // 重新精读补齐笔记，而不是丢内容
+        const wrote = await this.extractNotes(target, taskId, dir, src, content, budget, stop);
+        if (wrote) dir.readUrls.push({ url: src.url, title: src.title });
         if (stop.flag) break;
         // 每轮精读后保存断点（续跑从这恢复）
         await this.saveProgress(taskId, progress, counters);
@@ -488,7 +544,7 @@ export class AgentRunner {
     return uniq.length ? uniq.map((i) => candidates[i]) : candidates.slice(0, 2);
   }
 
-  /** 精读后提炼要点，并入该方向的研究笔记 */
+  /** 精读后提炼要点，并入该方向的研究笔记。返回是否真正写入（预算/停止打断时返回 false） */
   private async extractNotes(
     target: ChatTarget,
     taskId: string,
@@ -497,7 +553,7 @@ export class AgentRunner {
     content: string,
     budget: BudgetBox,
     stop: StopFlag,
-  ) {
+  ): Promise<boolean> {
     const res = await this.complete(
       target,
       taskId,
@@ -509,9 +565,10 @@ export class AgentRunner {
       budget,
       stop,
     );
-    if (!res) return;
+    if (!res) return false;
     const block = `【资料：${src.title}｜${src.url}】\n${res.text}`;
     dir.notes = dir.notes ? `${dir.notes}\n\n${block}` : block;
+    return true;
   }
 
   // ==================== 方向初始化 ====================
@@ -622,10 +679,11 @@ export class AgentRunner {
 
   /**
    * 把各方向研究笔记写成 Markdown 报告（用独立的组装预算，任何停止都交付正式报告）：
-   * ① 引言（短调用）→ ② 按笔记量从多到少逐方向润色小节（组装预算耗尽即停，
-   * 已缓存的小节正文直接复用，续跑不重复花 token）→ ③ 结论（短调用）。
+   * ① 执行摘要（最高优先级，先摘要后展开）→ ② 引言（短调用）→ ③ 按笔记量从多到少
+   * 逐方向润色小节（组装预算耗尽即停，已缓存的小节正文直接复用，续跑不重复花 token）
+   * → ④ 结论（短调用）。
    * 组装预算不够润色的方向，正文直接拼原始研究笔记——报告结构始终完整
-   * （有主题/引言/结论），用户不需要追加 token 就能拿到正式报告。
+   * （有主题/摘要/引言/结论），用户不需要追加 token 就能拿到正式报告。
    */
   private async assemble(
     target: ChatTarget,
@@ -635,10 +693,11 @@ export class AgentRunner {
   ): Promise<{
     report: string | null;
     sources: Array<{ number: number; title: string; url: string }>;
+    summary: string | null;
   }> {
     // 没有任何研究内容 → 不组装
     const hasContent = progress.directions.some((d) => d.sectionContent || d.notes);
-    if (!hasContent) return { report: null, sources: [] };
+    if (!hasContent) return { report: null, sources: [], summary: null };
 
     const topic = task.goal?.trim() || '自主探索研究报告';
     const titles = progress.directions
@@ -646,7 +705,26 @@ export class AgentRunner {
       .map((d) => d.title)
       .join('；');
 
-    // ① 引言（组装预算，不受研究停止影响）
+    // ① 执行摘要（先摘要后展开：无论停止与否都先生成，预算耗尽时摘要优先于小节润色）
+    const previews = progress.directions
+      .filter((d) => d.sectionContent || d.notes)
+      .map((d) => {
+        const raw = d.sectionContent ?? d.notes ?? '';
+        return `- ${d.title}：${raw.replace(/\s+/g, ' ').slice(0, 160)}`;
+      })
+      .join('\n');
+    const summaryRes = await this.assembleCall(
+      target,
+      task.id,
+      '你是研究报告主编。为研究报告写一段 150~220 字的执行摘要（中文）：用最简洁的语言概括研究主题、各方向的关键发现与总体结论，' +
+        '让读者不读全文也能掌握要点。只输出摘要段落本身，不要标题。',
+      `研究主题：${topic}\n各方向要点：\n${previews || '（暂无）'}`,
+      320,
+      assembly,
+    );
+    const summary = summaryRes?.text ?? '';
+
+    // ② 引言（组装预算，不受研究停止影响）
     const intro = await this.assembleCall(
       target,
       task.id,
@@ -656,7 +734,7 @@ export class AgentRunner {
       assembly,
     );
 
-    // ② 逐方向润色小节：笔记多的方向优先（信息量大、最值得精读成文）
+    // ③ 逐方向润色小节：笔记多的方向优先（信息量大、最值得精读成文）
     const pending = progress.directions
       .filter((d) => !d.sectionContent && d.notes)
       .sort((a, b) => b.notes.length - a.notes.length);
@@ -670,7 +748,7 @@ export class AgentRunner {
       }
     }
 
-    // ③ 结论（组装预算还有余量才写）
+    // ④ 结论（组装预算还有余量才写）
     let conclusion = '';
     if (!assembly.exhausted) {
       const res = await this.assembleCall(
@@ -708,7 +786,7 @@ export class AgentRunner {
         sources.push({ number: sources.length + 1, title: r.title, url: r.url });
       }
     }
-    return { report: reportParts.join('\n\n'), sources };
+    return { report: reportParts.join('\n\n'), sources, summary: summary || null };
   }
 
   /** 单个方向小节：研究笔记 → Markdown 小节（走组装预算） */
@@ -758,6 +836,7 @@ export class AgentRunner {
     report: string | null,
     sources: Array<{ number: number; title: string; url: string }> | null,
     progress: AgentProgress | null,
+    summary: string | null,
     error: string | null,
   ) {
     await this.prisma.agentTask.updateMany({
@@ -767,6 +846,7 @@ export class AgentRunner {
         stopReason,
         finishedAt: new Date(),
         report,
+        summary,
         sources: sources ? JSON.parse(JSON.stringify(sources)) : null,
         progress: progress ? JSON.parse(JSON.stringify(progress)) : null,
         error,

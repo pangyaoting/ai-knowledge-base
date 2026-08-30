@@ -47,6 +47,18 @@ export class ResearchAgentController {
     return this.agentTaskService.stop(userId, id);
   }
 
+  @Post('tasks/:id/confirm')
+  @ApiOperation({ summary: '确认方向并开始研究（仅限待确认任务）' })
+  confirm(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.agentTaskService.confirm(userId, id);
+  }
+
+  @Post('tasks/:id/redecompose')
+  @ApiOperation({ summary: '重新拆解方向（仅限待确认任务，重新消耗一次拆解 token）' })
+  redecompose(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.agentTaskService.redecompose(userId, id);
+  }
+
   @Patch('tasks/:id/extend')
   @ApiOperation({ summary: '续时/加预算（仅限已停止任务，从断点续跑）' })
   extend(

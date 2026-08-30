@@ -181,6 +181,7 @@ model ChatMessage {
   sessionId        String   @map("session_id")
   role             String // user / assistant
   content          String // 完整消息内容
+  imageDataUrl     String?  @map("image_data_url") // 粘贴图片（data URL，用户消息）
   sources          Json? // 引用来源：[{ documentId, filename, chunkIndex, content, similarity }]
   promptTokens     Int?     @map("prompt_tokens") // 流式请求输入 token（数据看板用）
   completionTokens Int?     @map("completion_tokens") // 流式请求输出 token
@@ -214,6 +215,7 @@ model AgentTask {
   directions   Json? // [{ title, question, status(pending|active|done), rounds }]
   progress     Json? // 续跑断点：{ directions: [{ notes, readUrls, searchTerms, sectionContent }] }
   report       String? // 最终（或阶段性）Markdown 报告
+  summary      String? // 执行摘要（先摘要后展开：报告顶部展示，正文小节可折叠展开）
   sources      Json? // [{ number, title, url }] 引用来源（网页）
   error        String? // 失败原因
   finishedAt   DateTime? @map("finished_at")

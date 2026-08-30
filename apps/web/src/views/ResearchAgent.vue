@@ -14,6 +14,8 @@ import {
   Timer,
   Zap,
   Sparkles,
+  ChevronRight,
+  RefreshCw,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -24,6 +26,8 @@ import {
   getAgentTask,
   createAgentTask,
   stopAgentTask,
+  confirmAgentTask,
+  redecomposeAgentTask,
   extendAgentTask,
   deleteAgentTask,
 } from '@/api/research-agent';
@@ -80,6 +84,8 @@ const extendOpen = ref(false);
 const extTokens = ref(0);
 const extMinutes = ref(30);
 const extending = ref(false);
+const confirming = ref(false);
+const redecomposing = ref(false);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -116,23 +122,30 @@ const remainingText = computed(() => {
   return m > 0 ? `剩余 ${m} 分钟` : `剩余 ${s} 秒`;
 });
 
-/** 是否在轮询（未结束，或已停止但阶段报告还没写完） */
+/** 是否在轮询（未结束，或已停止但阶段报告还没写完；取消的任务不会再有报告，不轮询） */
 const polling = computed(() => {
   const t = current.value;
   if (!t) return false;
-  return t.status === 'pending' || t.status === 'running' || (t.status === 'stopped' && !t.report);
+  return (
+    t.status === 'pending' ||
+    t.status === 'awaiting_confirm' ||
+    t.status === 'running' ||
+    (t.status === 'stopped' && !t.report && t.stopReason !== 'cancelled')
+  );
 });
 
 const stopReasonText: Record<string, string> = {
   budget_exhausted: '预算用尽',
   time_exhausted: '到达设定时间',
   user_stopped: '手动停止',
+  cancelled: '未开始已取消',
   completed: '研究完成',
   error: '出错',
 };
 
 const statusText: Record<AgentTask['status'], string> = {
   pending: '排队中',
+  awaiting_confirm: '待确认',
   running: '研究中',
   stopped: '已停止',
   done: '已完成',
@@ -147,6 +160,8 @@ function statusClass(s: AgentTask['status']): string {
       return 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400';
     case 'stopped':
       return 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
+    case 'awaiting_confirm':
+      return 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400';
     default:
       return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400';
   }
@@ -292,7 +307,7 @@ async function handleCreate() {
     });
     tasks.value.unshift(task);
     await selectTask(task.id);
-    toast.success('研究任务已创建，Agent 已开始自主研究');
+    toast.success('研究任务已创建，正在拆解研究方向...');
   } catch (err) {
     toast.error((err as Error).message);
   } finally {
@@ -395,6 +410,82 @@ function dirIcon(status: string) {
   if (status === 'done') return CheckCircle2;
   if (status === 'active') return Loader2;
   return Circle;
+}
+
+// ==================== 报告：先摘要后展开 ====================
+
+interface ReportSection {
+  title: string;
+  body: string;
+}
+
+/** 按 `## ` 二级标题把报告拆成小节（引言/各方向/结论），供折叠展示 */
+const sections = computed<ReportSection[]>(() => {
+  const report = current.value?.report;
+  if (!report) return [];
+  const parts = report.split(/\n## /);
+  const out: ReportSection[] = [];
+  for (let i = 1; i < parts.length; i++) {
+    const lines = parts[i].split('\n');
+    const title = lines[0].replace(/^#+\s*/, '').trim();
+    const body = lines.slice(1).join('\n').trim();
+    if (title) out.push({ title, body });
+  }
+  return out;
+});
+
+/** 已展开的小节下标（0 = 引言，默认展开） */
+const expanded = ref<Set<number>>(new Set([0]));
+const allExpanded = ref(false);
+
+function toggleSection(i: number) {
+  const next = new Set(expanded.value);
+  if (next.has(i)) next.delete(i);
+  else next.add(i);
+  expanded.value = next;
+}
+
+function toggleAllSections() {
+  allExpanded.value = !allExpanded.value;
+  expanded.value = allExpanded.value ? new Set(sections.value.map((_, i) => i)) : new Set([0]);
+}
+
+// ==================== 确认 / 重新拆解 ====================
+
+async function handleConfirm() {
+  const t = current.value;
+  if (!t || t.status !== 'awaiting_confirm') return;
+  confirming.value = true;
+  try {
+    const updated = await confirmAgentTask(t.id);
+    current.value = updated;
+    const i = tasks.value.findIndex((x) => x.id === t.id);
+    if (i >= 0) tasks.value[i] = updated;
+    toast.success('已确认，Agent 开始研究');
+    startPolling();
+  } catch (e) {
+    toast.error((e as Error).message);
+  } finally {
+    confirming.value = false;
+  }
+}
+
+async function handleRedecompose() {
+  const t = current.value;
+  if (!t || t.status !== 'awaiting_confirm') return;
+  redecomposing.value = true;
+  try {
+    const updated = await redecomposeAgentTask(t.id);
+    current.value = updated;
+    const i = tasks.value.findIndex((x) => x.id === t.id);
+    if (i >= 0) tasks.value[i] = updated;
+    toast.success('已重新拆解，稍候展示新方向');
+    startPolling();
+  } catch (e) {
+    toast.error((e as Error).message);
+  } finally {
+    redecomposing.value = false;
+  }
 }
 
 onMounted(async () => {
@@ -635,7 +726,7 @@ onBeforeUnmount(() => {
             {{ stopReasonText[current.stopReason] || current.stopReason }}
           </span>
           <Button
-            v-if="['pending', 'running'].includes(current.status)"
+            v-if="['pending', 'running', 'awaiting_confirm'].includes(current.status)"
             variant="destructive"
             size="sm"
             @click="handleStop"
@@ -697,8 +788,47 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex-1 overflow-y-auto">
+          <!-- 待确认：方向拆解完成，确认后才开始研究 -->
+          <div v-if="current.status === 'awaiting_confirm'" class="mx-auto max-w-2xl px-4 py-6">
+            <div class="rounded-lg border bg-card p-5">
+              <div class="flex items-center gap-2">
+                <Sparkles class="h-4 w-4 text-primary" />
+                <p class="text-sm font-semibold">方向已拆解完成，确认后开始研究</p>
+              </div>
+              <p class="mt-1 text-xs text-muted-foreground">
+                共拆解出 {{ (current.directions || []).length }} 个研究方向。确认后 Agent
+                将并行联网搜索、精读并成稿；不满意可重新拆解（会再消耗一次拆解 token）。
+              </p>
+              <div class="mt-4 space-y-2">
+                <div
+                  v-for="(d, i) in current.directions || []"
+                  :key="i"
+                  class="rounded-md border px-3 py-2.5"
+                >
+                  <p class="text-sm font-medium">{{ d.title }}</p>
+                  <p class="mt-0.5 text-xs text-muted-foreground">{{ d.question }}</p>
+                </div>
+              </div>
+              <div class="mt-5 flex items-center gap-2">
+                <Button class="flex-1" :disabled="confirming" @click="handleConfirm">
+                  <Loader2 v-if="confirming" class="h-4 w-4 animate-spin" />
+                  <PlayCircle v-else class="h-4 w-4" />
+                  确认开始研究
+                </Button>
+                <Button variant="outline" :disabled="redecomposing" @click="handleRedecompose">
+                  <Loader2 v-if="redecomposing" class="h-4 w-4 animate-spin" />
+                  <RefreshCw v-else class="h-4 w-4" />
+                  重新拆解
+                </Button>
+              </div>
+              <p class="mt-2 text-center text-[11px] text-muted-foreground">
+                剩余 {{ remainingText }} · 时间窗从创建时开始计时，确认越晚可用研究时间越短
+              </p>
+            </div>
+          </div>
+
           <!-- 运行中：方向进度 -->
-          <div v-if="polling" class="mx-auto max-w-2xl px-4 py-6">
+          <div v-else-if="polling" class="mx-auto max-w-2xl px-4 py-6">
             <div class="rounded-lg border bg-card p-4">
               <div class="flex items-center gap-2">
                 <Loader2 class="h-4 w-4 animate-spin text-primary" />
@@ -761,15 +891,22 @@ onBeforeUnmount(() => {
             <Button variant="outline" size="sm" class="mt-4" @click="handleNew">重新创建</Button>
           </div>
 
-          <!-- 已停止但有报告：阶段成果 + 继续研究提示 -->
+          <!-- 已停止：阶段成果（先摘要后展开）+ 继续研究提示 -->
           <div v-else-if="current.status === 'stopped'" class="mx-auto max-w-3xl px-4 py-6">
             <div
               class="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10"
             >
-              <p class="text-amber-800 dark:text-amber-300">
+              <p
+                v-if="current.stopReason === 'cancelled'"
+                class="text-amber-800 dark:text-amber-300"
+              >
+                🗑
+                任务已取消，尚未开始研究。可点击「继续研究」按已拆解方向直接开始，或删除后重新创建。
+              </p>
+              <p v-else class="text-amber-800 dark:text-amber-300">
                 ⏸ 研究已停止（{{
                   stopReasonText[current.stopReason || ''] || '已停止'
-                }}），已整理出正式报告（含来源）。 可继续研究：追加 token 预算和/或研究时长， Agent
+                }}），已整理出正式报告（含来源）。可继续研究：追加 token 预算和/或研究时长， Agent
                 会从断点继续，不会从头再来。
               </p>
               <Button size="sm" class="shrink-0" @click="openExtend">
@@ -777,24 +914,112 @@ onBeforeUnmount(() => {
                 继续研究
               </Button>
             </div>
-            <div
-              v-if="current.report"
-              class="markdown-body rounded-lg border bg-card px-5 py-4"
-              @click="handleReportClick"
-              v-html="renderMarkdown(current.report)"
-            />
+
+            <template v-if="current.report">
+              <div
+                v-if="current.summary"
+                class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
+              >
+                <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
+                <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
+                  {{ current.summary }}
+                </p>
+              </div>
+              <div class="rounded-lg border bg-card px-4 py-3">
+                <div class="flex items-center justify-between">
+                  <p class="text-xs font-medium text-muted-foreground">
+                    正文（共 {{ sections.length }} 节）
+                  </p>
+                  <button
+                    type="button"
+                    class="text-xs font-medium text-primary hover:underline"
+                    @click="toggleAllSections"
+                  >
+                    {{ allExpanded ? '全部收起' : '全部展开' }}
+                  </button>
+                </div>
+                <div class="mt-2 space-y-2">
+                  <div
+                    v-for="(sec, i) in sections"
+                    :key="i"
+                    class="overflow-hidden rounded-md border"
+                  >
+                    <button
+                      type="button"
+                      class="flex w-full select-none items-center gap-1.5 px-3 py-2 text-left text-sm font-medium hover:bg-accent/60"
+                      @click="toggleSection(i)"
+                    >
+                      <ChevronRight
+                        class="h-3.5 w-3.5 shrink-0 transition-transform"
+                        :class="expanded.has(i) ? 'rotate-90' : ''"
+                      />
+                      {{ sec.title }}
+                    </button>
+                    <div
+                      v-show="expanded.has(i)"
+                      class="markdown-body border-t px-4 py-3"
+                      @click="handleReportClick"
+                      v-html="renderMarkdown(sec.body)"
+                    />
+                  </div>
+                </div>
+              </div>
+            </template>
             <p v-else class="py-8 text-center text-sm text-muted-foreground">
               已停止，暂无可整理的研究内容（可继续研究，让 Agent 先读一些资料）
             </p>
           </div>
 
-          <!-- 完成：报告 + 来源 -->
+          <!-- 完成：报告（先摘要后展开）+ 来源 -->
           <div v-else-if="current.report" class="mx-auto max-w-3xl px-4 py-6">
             <div
-              class="markdown-body rounded-lg border bg-card px-5 py-4"
-              @click="handleReportClick"
-              v-html="renderMarkdown(current.report)"
-            />
+              v-if="current.summary"
+              class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
+            >
+              <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
+              <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
+                {{ current.summary }}
+              </p>
+            </div>
+            <div class="rounded-lg border bg-card px-4 py-3">
+              <div class="flex items-center justify-between">
+                <p class="text-xs font-medium text-muted-foreground">
+                  正文（共 {{ sections.length }} 节）
+                </p>
+                <button
+                  type="button"
+                  class="text-xs font-medium text-primary hover:underline"
+                  @click="toggleAllSections"
+                >
+                  {{ allExpanded ? '全部收起' : '全部展开' }}
+                </button>
+              </div>
+              <div class="mt-2 space-y-2">
+                <div
+                  v-for="(sec, i) in sections"
+                  :key="i"
+                  class="overflow-hidden rounded-md border"
+                >
+                  <button
+                    type="button"
+                    class="flex w-full select-none items-center gap-1.5 px-3 py-2 text-left text-sm font-medium hover:bg-accent/60"
+                    @click="toggleSection(i)"
+                  >
+                    <ChevronRight
+                      class="h-3.5 w-3.5 shrink-0 transition-transform"
+                      :class="expanded.has(i) ? 'rotate-90' : ''"
+                    />
+                    {{ sec.title }}
+                  </button>
+                  <div
+                    v-show="expanded.has(i)"
+                    class="markdown-body border-t px-4 py-3"
+                    @click="handleReportClick"
+                    v-html="renderMarkdown(sec.body)"
+                  />
+                </div>
+              </div>
+            </div>
             <div v-if="current.sources?.length" class="mt-4">
               <details class="rounded-lg border bg-muted/40 px-3 py-2 text-xs">
                 <summary class="cursor-pointer font-medium text-muted-foreground">

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AgentQueueService } from './agent-queue.service';
 import { CreateAgentTaskDto } from './dto/create-agent-task.dto';
@@ -27,6 +28,7 @@ export interface PublicAgentTask {
   stopReason: string | null;
   directions: Array<{ title: string; question: string; status: string; rounds: number }>;
   report: string | null;
+  summary: string | null;
   sources: Array<{ number: number; title: string; url: string }>;
   error: string | null;
   finishedAt: Date | null;
@@ -60,6 +62,7 @@ export class AgentTaskService {
     stopReason: string | null;
     progress: unknown;
     report: string | null;
+    summary: string | null;
     sources: unknown;
     error: string | null;
     finishedAt: Date | null;
@@ -96,6 +99,7 @@ export class AgentTaskService {
       stopReason: task.stopReason,
       directions,
       report: task.report,
+      summary: task.summary,
       sources: (task.sources as PublicAgentTask['sources']) ?? [],
       error: task.error,
       finishedAt: task.finishedAt,
@@ -154,16 +158,64 @@ export class AgentTaskService {
     return this.toPublic(task);
   }
 
-  /** 手动停止：置为 stopped（runner 会在下一个检查点收尾并补写阶段成果） */
+  /**
+   * 手动停止：置为 stopped（runner 会在下一个检查点收尾并补写阶段成果）。
+   * 任务尚未开始（pending 排队中 / awaiting_confirm 待确认）时停止 = 取消：
+   * runner 不在跑，不会产出报告，用 stopReason=cancelled 标记（前端据此停止轮询）。
+   */
   async stop(userId: string, id: string): Promise<PublicAgentTask> {
     const task = await this.findOne(userId, id);
-    if (!['pending', 'running'].includes(task.status)) {
+    if (!['pending', 'running', 'awaiting_confirm'].includes(task.status)) {
       throw new BadRequestException('任务已结束，无法停止');
+    }
+    const notStarted = task.status === 'pending' || task.status === 'awaiting_confirm';
+    await this.prisma.agentTask.update({
+      where: { id },
+      data: {
+        status: 'stopped',
+        stopReason: notStarted ? 'cancelled' : 'user_stopped',
+        finishedAt: new Date(),
+      },
+    });
+    return this.findOne(userId, id);
+  }
+
+  /** 确认方向并开始研究（awaiting_confirm → pending 重新入队，runner 从断点续跑） */
+  async confirm(userId: string, id: string): Promise<PublicAgentTask> {
+    const task = await this.findOne(userId, id);
+    if (task.status !== 'awaiting_confirm') {
+      throw new BadRequestException('任务不在「待确认」状态，无法开始');
+    }
+    if (new Date(task.endAt).getTime() <= Date.now()) {
+      throw new BadRequestException('已过结束时间，无法开始；请先续时或删除后重建');
     }
     await this.prisma.agentTask.update({
       where: { id },
-      data: { status: 'stopped', stopReason: 'user_stopped', finishedAt: new Date() },
+      data: { status: 'pending', stopReason: null, error: null },
     });
+    await this.queue.addAgentJob({ userId, taskId: id });
+    return this.findOne(userId, id);
+  }
+
+  /** 重新拆解方向（仅限待确认任务）：清空断点重新入队，runner 重新拆解 */
+  async redecompose(userId: string, id: string): Promise<PublicAgentTask> {
+    const task = await this.findOne(userId, id);
+    if (task.status !== 'awaiting_confirm') {
+      throw new BadRequestException('只有待确认的任务可以重新拆解');
+    }
+    await this.prisma.agentTask.update({
+      where: { id },
+      data: {
+        status: 'pending',
+        progress: Prisma.DbNull,
+        directions: Prisma.DbNull,
+        searchRounds: 0,
+        pagesRead: 0,
+        stopReason: null,
+        error: null,
+      },
+    });
+    await this.queue.addAgentJob({ userId, taskId: id });
     return this.findOne(userId, id);
   }
 
