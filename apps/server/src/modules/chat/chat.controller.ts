@@ -140,7 +140,16 @@ export class ChatController {
       res.end();
     } catch (err) {
       // 流中出错：发 error 事件优雅结束，不把连接挂死
-      const message = (err as Error).message || '服务器错误';
+      let message = (err as Error).message || '服务器错误';
+      // 兜底：任何漏网的 SDK 英文错误也翻译成中文（防未知路径把英文甩给用户）
+      if (
+        /Expected content-type|not a VLM|Model does not exist|invalid api key|insufficient.*balance/i.test(
+          message,
+        )
+      ) {
+        message =
+          '大模型接口返回异常：可能是模型不支持图片、模型名与平台不匹配、Key 无效或余额不足。请检查「模型配置」后重试。';
+      }
       write('error', { message });
       res.end();
     }
