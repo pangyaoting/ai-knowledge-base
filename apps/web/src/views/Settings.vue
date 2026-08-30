@@ -2,9 +2,9 @@
 import { ref, reactive, computed, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
-import { updateProfile, changePassword } from '@/api/user';
+import { updateProfile, changePassword, uploadAvatar } from '@/api/user';
 import { sendCode, bindEmail, forgotPassword, deleteAccount } from '@/api/auth';
-import { Loader2, UserRound, KeyRound, Mail, ArrowUpRight, Trash2 } from 'lucide-vue-next';
+import { Loader2, UserRound, KeyRound, Mail, Trash2 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
@@ -16,6 +16,67 @@ const router = useRouter();
 // ===== 资料 =====
 const profileForm = reactive({ nickname: auth.user?.nickname ?? '' });
 const savingProfile = ref(false);
+
+// ===== 头像 =====
+const avatarInput = ref<HTMLInputElement | null>(null);
+const avatarUploading = ref(false);
+
+/** 压缩并居中裁剪成 200x200 方形 JPEG */
+function compressAvatar(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const size = 200;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        URL.revokeObjectURL(url);
+        reject(new Error('图片处理失败'));
+        return;
+      }
+      const side = Math.min(img.width, img.height);
+      ctx.drawImage(
+        img,
+        (img.width - side) / 2,
+        (img.height - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        size,
+        size,
+      );
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('图片读取失败'));
+    };
+    img.src = url;
+  });
+}
+
+async function onAvatarChange(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  avatarUploading.value = true;
+  try {
+    const dataUrl = await compressAvatar(file);
+    await uploadAvatar(dataUrl);
+    toast.success('头像已更新');
+    await auth.fetchProfile();
+  } catch (err) {
+    toast.error((err as Error).message);
+  } finally {
+    avatarUploading.value = false;
+    input.value = '';
+  }
+}
 
 async function saveProfile() {
   savingProfile.value = true;
@@ -264,19 +325,6 @@ async function handleDeleteAccount() {
       <p class="mt-1 text-sm text-muted-foreground">管理你的资料与账号安全</p>
     </div>
 
-    <!-- 提示：模型配置已移到导航栏 -->
-    <RouterLink
-      to="/model-configs"
-      class="mb-6 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
-    >
-      <span class="text-muted-foreground">
-        使用 AI 功能前请先绑定你自己的模型 Key（对话 / 研究报告 / 自主研究都由你的 Key 计费）
-      </span>
-      <span class="flex items-center gap-1 font-medium text-primary">
-        去模型配置 <ArrowUpRight class="h-4 w-4" />
-      </span>
-    </RouterLink>
-
     <div class="grid gap-6 lg:grid-cols-2">
       <!-- 资料 -->
       <div class="rounded-lg border bg-card p-6">
@@ -285,6 +333,41 @@ async function handleDeleteAccount() {
           <h2 class="font-semibold">基本资料</h2>
         </div>
         <div class="mt-5 space-y-4">
+          <!-- 头像：默认显示邮箱首字母，可上传自定义头像 -->
+          <div class="flex items-center gap-4">
+            <div
+              class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-2xl font-bold text-primary"
+            >
+              <img
+                v-if="auth.user?.avatar"
+                :src="auth.user.avatar"
+                class="h-full w-full object-cover"
+                alt="头像"
+              />
+              <span v-else>{{ (auth.user?.email || '?')[0].toUpperCase() }}</span>
+            </div>
+            <div class="space-y-1">
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="avatarUploading"
+                @click="avatarInput?.click()"
+              >
+                <Loader2 v-if="avatarUploading" class="h-4 w-4 animate-spin" />
+                {{ auth.user?.avatar ? '更换头像' : '上传头像' }}
+              </Button>
+              <p class="text-[11px] text-muted-foreground">
+                支持 png / jpeg，建议方形图片；不设置则显示邮箱首字母
+              </p>
+              <input
+                ref="avatarInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                class="hidden"
+                @change="onAvatarChange"
+              />
+            </div>
+          </div>
           <div class="space-y-1.5">
             <Label>邮箱</Label>
             <Input :model-value="auth.user?.email ?? ''" disabled />

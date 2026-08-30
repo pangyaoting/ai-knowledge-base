@@ -3,6 +3,7 @@ import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UploadAvatarDto } from './dto/upload-avatar.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -23,6 +24,12 @@ export class UserController {
   @ApiOperation({ summary: '修改个人信息' })
   updateProfile(@CurrentUser('id') userId: string, @Body() dto: UpdateUserDto) {
     return this.userService.update(userId, dto);
+  }
+
+  @Post('avatar')
+  @ApiOperation({ summary: '上传头像（base64 data URL，png/jpeg/webp）' })
+  uploadAvatar(@CurrentUser('id') userId: string, @Body() dto: UploadAvatarDto) {
+    return this.userService.uploadAvatar(userId, dto.avatar);
   }
 
   @Post('change-password')

@@ -17,6 +17,11 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      // 用户头像静态资源（后端 uploads/avatars 静态目录）
+      '/avatars': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
     },
   },
   build: {

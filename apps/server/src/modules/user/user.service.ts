@@ -1,8 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+
+const AVATAR_DIR = join(process.cwd(), 'uploads', 'avatars');
 
 @Injectable()
 export class UserService {
@@ -36,6 +40,34 @@ export class UserService {
     return this.prisma.user.update({
       where: { id },
       data: dto,
+      select: {
+        id: true,
+        email: true,
+        nickname: true,
+        avatar: true,
+        lastLoginAt: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  /** 上传头像：base64 data URL → 存 uploads/avatars/{userId}.{ext}（固定名，自动覆盖旧头像） */
+  async uploadAvatar(id: string, avatar: string) {
+    const m = /^data:image\/(png|jpeg|webp);base64,([\s\S]+)$/.exec(avatar);
+    if (!m) {
+      throw new BadRequestException('头像格式不正确（仅支持 png / jpeg / webp）');
+    }
+    const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+    const buf = Buffer.from(m[2], 'base64');
+    if (buf.length > 2 * 1024 * 1024) {
+      throw new BadRequestException('头像不能超过 2MB');
+    }
+    await mkdir(AVATAR_DIR, { recursive: true });
+    await writeFile(join(AVATAR_DIR, `${id}.${ext}`), buf);
+    const avatarUrl = `/avatars/${id}.${ext}`;
+    return this.prisma.user.update({
+      where: { id },
+      data: { avatar: avatarUrl },
       select: {
         id: true,
         email: true,

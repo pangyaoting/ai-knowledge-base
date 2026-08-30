@@ -175,7 +175,13 @@ async function handleLogout() {
               class="flex max-w-[180px] items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               @click.stop="toggleMenu"
             >
-              <UserIcon class="h-4 w-4 shrink-0" />
+              <img
+                v-if="auth.user?.avatar"
+                :src="auth.user.avatar"
+                class="h-4 w-4 shrink-0 rounded-full object-cover"
+                alt=""
+              />
+              <UserIcon v-else class="h-4 w-4 shrink-0" />
               <span class="min-w-0 flex-1 truncate">
                 {{ auth.user?.nickname || auth.user?.email }}
               </span>
@@ -192,11 +198,25 @@ async function handleLogout() {
               v-if="menuOpen"
               class="absolute right-0 top-full z-50 mt-1.5 w-44 overflow-hidden rounded-lg border bg-card py-1 shadow-lg"
             >
-              <div class="border-b px-3 py-2">
-                <p class="truncate text-sm font-medium text-foreground">
-                  {{ auth.user?.nickname || '未设置昵称' }}
-                </p>
-                <p class="truncate text-xs text-muted-foreground">{{ auth.user?.email }}</p>
+              <div class="flex items-center gap-2 border-b px-3 py-2">
+                <img
+                  v-if="auth.user?.avatar"
+                  :src="auth.user.avatar"
+                  class="h-8 w-8 shrink-0 rounded-full object-cover"
+                  alt=""
+                />
+                <span
+                  v-else
+                  class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary"
+                >
+                  {{ (auth.user?.email || '?')[0].toUpperCase() }}
+                </span>
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium text-foreground">
+                    {{ auth.user?.nickname || '未设置昵称' }}
+                  </p>
+                  <p class="truncate text-xs text-muted-foreground">{{ auth.user?.email }}</p>
+                </div>
               </div>
               <button
                 class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
