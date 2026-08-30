@@ -777,19 +777,23 @@ export class AgentRunner {
       }
     }
 
-    // 组装正文：有正式小节的用正式小节，否则用原始笔记；确实没研究到的方向给一句说明，不悄悄消失
+    // 组装正文：有正式小节的用正式小节，否则用原始笔记；确实没研究到的方向给一句说明，不悄悄消失。
+    // 方向内容里 LLM 写的小标题统一降级为 ###（`## ` 只留给方向级，前端按它拆卡片），
+    // 内容首行若与方向名相同（LLM 习惯重复写标题）则剥掉，避免空卡片/重复卡片。
     const bodyParts: string[] = [];
     for (const d of progress.directions) {
-      if (d.sectionContent) bodyParts.push(`## ${d.title}\n\n${d.sectionContent}`);
-      else if (d.notes) bodyParts.push(`## ${d.title}\n\n${d.notes}`);
+      if (d.sectionContent)
+        bodyParts.push(`## ${d.title}\n\n${this.normalizeSection(d.title, d.sectionContent)}`);
+      else if (d.notes)
+        bodyParts.push(`## ${d.title}\n\n${this.normalizeSection(d.title, d.notes)}`);
       else if (d.status === 'done' || d.readUrls.length)
         bodyParts.push(`## ${d.title}\n\n> 该方向未能检索到有效资料，已跳过。`);
     }
 
     const reportParts: string[] = [`# ${topic}`];
-    if (intro?.text) reportParts.push(`## 引言\n\n${intro.text}`);
+    if (intro?.text) reportParts.push(`## 引言\n\n${this.flattenHeadings(intro.text)}`);
     reportParts.push(bodyParts.join('\n\n'));
-    if (conclusion) reportParts.push(`## 结论\n\n${conclusion}`);
+    if (conclusion) reportParts.push(`## 结论\n\n${this.flattenHeadings(conclusion)}`);
     // 组装预算连引言都不够（极小预算 + 组装预算也耗尽）时，保证至少有正文
     if (reportParts.length === 1) reportParts.push(bodyParts.join('\n\n'));
 
@@ -806,6 +810,31 @@ export class AgentRunner {
     return { report: reportParts.join('\n\n'), sources, summary: summary || null };
   }
 
+  /**
+   * 把文本中行首的 Markdown 标题统一降级为 ###（三级）：
+   * 报告里 `## ` 只用于方向级/引言/结论（前端按它拆卡片），
+   * 方向内容里的内部小标题必须是 ###，否则会被前端误拆成多个方向卡片。
+   */
+  private flattenHeadings(text: string): string {
+    return text.replace(/^#{1,6}\s+/gm, '### ');
+  }
+
+  /**
+   * 规范化方向小节正文：剥掉与方向名重复的首行标题（LLM 习惯先写一遍标题），
+   * 并把正文里的 Markdown 标题统一降级为 ###。
+   */
+  private normalizeSection(title: string, raw: string): string {
+    let text = raw.trim();
+    const firstLine = text
+      .split('\n')[0]
+      .replace(/^#{1,6}\s*/, '')
+      .trim();
+    if (firstLine && firstLine === title.trim()) {
+      text = text.split('\n').slice(1).join('\n').trim();
+    }
+    return this.flattenHeadings(text);
+  }
+
   /** 单个方向小节：研究笔记 → Markdown 小节（走组装预算） */
   private async writeSection(
     target: ChatTarget,
@@ -817,7 +846,8 @@ export class AgentRunner {
       target,
       taskId,
       '你是严谨的研究撰写助手。根据【研究笔记】撰写该方向的小节，输出 Markdown。要求：' +
-        '结构清晰（可含小标题、列表）；引用网页时用 Markdown 链接 [来源](URL)（URL 从笔记的【资料：标题｜URL】中取）；' +
+        '先直接写内容，不要重复方向标题；结构清晰（可含小标题，但小标题一律用 ### 三级标题，不要用 # 或 ##）；' +
+        '引用网页时用 Markdown 链接 [来源](URL)（URL 从笔记的【资料：标题｜URL】中取）；' +
         '资料没有的信息不要编造，可基于自身知识补充并注明"（补充）"。',
       `【方向】${dir.title}\n【问题】${dir.question}\n【研究笔记】\n${(dir.notes || '').slice(0, 6000)}`,
       2000,

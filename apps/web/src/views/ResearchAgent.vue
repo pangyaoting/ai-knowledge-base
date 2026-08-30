@@ -438,11 +438,17 @@ const sections = computed<ReportSection[]>(() => {
 });
 
 const isMetaTitle = (t: string) => t === '引言' || t === '结论';
-/** 方向小节（一个方向一张卡片） */
-const dirSections = computed(() => sections.value.filter((s) => !isMetaTitle(s.title)));
+/** 方向小节（一个方向一张卡片）；过滤空内容节（旧报告可能残留重复空卡片） */
+const dirSections = computed(() =>
+  sections.value.filter((s) => !isMetaTitle(s.title) && s.body.trim()),
+);
 /** 引言 / 结论：不单独成卡片，作为正文段落自然呈现 */
-const introSection = computed(() => sections.value.find((s) => s.title === '引言'));
-const conclusionSection = computed(() => sections.value.find((s) => s.title === '结论'));
+const introSection = computed(() =>
+  sections.value.find((s) => s.title === '引言' && s.body.trim()),
+);
+const conclusionSection = computed(() =>
+  sections.value.find((s) => s.title === '结论' && s.body.trim()),
+);
 
 /** 已展开的方向卡片下标（默认全部折叠，点标题展开） */
 const expanded = ref<Set<number>>(new Set());
