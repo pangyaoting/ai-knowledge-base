@@ -306,8 +306,11 @@ export class ChatService {
         this.logger.log(`会话 ${sessionId} 被客户端中止`);
         return;
       }
-      this.logger.warn(`会话 ${sessionId} LLM 调用失败: ${(err as Error).message}`);
-      throw this.translateLLMError(err, !!imageDataUrl);
+      const translated = this.translateLLMError(err, !!imageDataUrl);
+      this.logger.warn(
+        `会话 ${sessionId} LLM 调用失败: ${(err as Error).message} → ${translated.message}`,
+      );
+      throw translated;
     } finally {
       signal.removeEventListener('abort', onAbort);
     }
