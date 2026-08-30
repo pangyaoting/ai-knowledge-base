@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue';
-import { Loader2, X } from 'lucide-vue-next';
+import { ref, reactive, computed, onMounted } from 'vue';
+import { Loader2, X, ChevronDown, Check } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
@@ -12,6 +12,7 @@ import type { ModelConfig } from '@/types/model-config';
  * 模型配置表单（新建 / 编辑共用）：
  * - 新建：父组件在列表上方展开；编辑：在所在行下方展开。
  * - 保存成功后 emit('saved')，父组件刷新列表并收起表单。
+ * - 模型名下拉点开即自动加载该接口的模型列表（编辑打开表单就预加载），无需手动点按钮。
  */
 const props = defineProps<{ editing?: ModelConfig | null }>();
 const emit = defineEmits<{ saved: []; cancel: [] }>();
@@ -22,6 +23,7 @@ const loadingModels = ref(false);
 const modelOptions = ref<string[]>([]);
 const modelFetchError = ref('');
 const manualModel = ref(false);
+const modelPickerOpen = ref(false);
 
 const configForm = reactive({
   name: props.editing?.name ?? '',
@@ -30,16 +32,34 @@ const configForm = reactive({
   model: props.editing?.model ?? '',
 });
 
-// 编辑时：当前模型名直接显示在下拉里（不依赖"获取模型列表"），一眼看到在改谁
+// 编辑时：当前模型名直接显示（不依赖探测），一眼看到在改谁
 if (props.editing) {
   modelOptions.value = [props.editing.model];
 }
 
-/** 获取模型列表按钮是否可用：新建需 baseURL+key；编辑直接用已存 key */
+/** 是否可探测模型列表：新建需 baseURL+key；编辑直接用已存 key */
 const canFetchModels = computed(() => {
   if (props.editing) return true;
   return !!configForm.baseURL.trim() && !!configForm.apiKey.trim();
 });
+
+// 编辑时自动预加载该接口的模型列表：点开下拉立即可选，不用手动点按钮
+onMounted(() => {
+  if (props.editing) fetchModels();
+});
+
+/** 打开/收起模型下拉；点开且还没加载 → 自动探测 */
+function toggleModelPicker() {
+  modelPickerOpen.value = !modelPickerOpen.value;
+  if (modelPickerOpen.value && modelOptions.value.length === 0 && canFetchModels.value) {
+    fetchModels();
+  }
+}
+
+function pickModel(m: string) {
+  configForm.model = m;
+  modelPickerOpen.value = false;
+}
 
 async function fetchModels() {
   modelFetchError.value = '';
@@ -127,37 +147,73 @@ async function saveConfig() {
         <Input v-model="configForm.name" placeholder="如：我的 DeepSeek" />
       </div>
       <div class="space-y-1.5">
-        <Label>模型名（从菜单里选，不用手写）</Label>
-        <!-- 列表选择模式（默认） -->
-        <div v-if="!manualModel" class="flex gap-2">
-          <select
-            v-model="configForm.model"
-            class="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="" disabled>
-              {{ modelOptions.length ? '选择模型…' : '先点「获取模型列表」' }}
-            </option>
-            <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
-          </select>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            class="shrink-0"
-            :disabled="!canFetchModels || loadingModels"
-            :title="editing ? '用已存 Key 探测该接口的模型列表' : '需先填好接口地址和 API Key'"
-            @click="fetchModels"
-          >
-            <Loader2 v-if="loadingModels" class="h-4 w-4 animate-spin" />
-            {{ loadingModels ? '获取中…' : '获取模型列表' }}
-          </Button>
+        <Label>模型名</Label>
+        <!-- 下拉选择：点开自动加载该接口的模型列表 -->
+        <div v-if="!manualModel" class="relative">
           <button
             type="button"
-            class="shrink-0 text-xs text-muted-foreground hover:text-primary hover:underline"
-            @click="manualModel = true"
+            class="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            @click="toggleModelPicker"
           >
-            手动输入
+            <span class="min-w-0 truncate text-left">
+              {{ configForm.model || (loadingModels ? '加载模型列表…' : '点击选择模型') }}
+            </span>
+            <ChevronDown
+              class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
+              :class="modelPickerOpen ? 'rotate-180' : ''"
+            />
           </button>
+          <div
+            v-if="modelPickerOpen"
+            class="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border bg-card py-1 shadow-lg"
+          >
+            <p v-if="loadingModels" class="px-3 py-2 text-xs text-muted-foreground">
+              正在加载模型列表…
+            </p>
+            <template v-else>
+              <p
+                v-if="!canFetchModels && !modelOptions.length"
+                class="px-3 py-2 text-xs text-muted-foreground"
+              >
+                请先填写接口地址和 API Key
+              </p>
+              <button
+                v-for="m in modelOptions"
+                :key="m"
+                type="button"
+                class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+                :class="m === configForm.model ? 'text-primary' : ''"
+                @click="pickModel(m)"
+              >
+                <span class="min-w-0 truncate">{{ m }}</span>
+                <Check v-if="m === configForm.model" class="h-3 w-3 shrink-0" />
+              </button>
+              <p
+                v-if="modelFetchError && !modelOptions.length"
+                class="px-3 py-2 text-xs text-destructive"
+              >
+                {{ modelFetchError }}
+              </p>
+              <button
+                type="button"
+                class="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent"
+                @click="
+                  manualModel = true;
+                  modelPickerOpen = false;
+                "
+              >
+                手动输入模型名…
+              </button>
+              <button
+                type="button"
+                class="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-primary transition-colors hover:bg-accent"
+                :disabled="loadingModels"
+                @click="fetchModels"
+              >
+                ↻ 刷新模型列表
+              </button>
+            </template>
+          </div>
         </div>
         <!-- 手动输入兜底（个别网关不开放 /models） -->
         <div v-else class="flex gap-2">
