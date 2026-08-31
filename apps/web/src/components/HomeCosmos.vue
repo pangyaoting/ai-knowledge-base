@@ -92,20 +92,8 @@ interface WhDiskParticle {
   tilt: number;
   sx: number;
   sy: number;
-  /** 喷射目标色（RGB）：粒子从白色渐变到该色，多色喷流 */
-  color: [number, number, number];
 }
 
-/** 白洞喷流的饱和色板（大胆多彩：金黄/橙红/玫红/紫罗兰/天蓝/亮青/翠绿） */
-const WH_JET_PALETTE: Array<[number, number, number]> = [
-  [255, 186, 48], // 金黄
-  [255, 110, 62], // 橙红
-  [255, 82, 132], // 玫红
-  [196, 96, 255], // 紫罗兰
-  [86, 152, 255], // 天蓝
-  [52, 208, 240], // 亮青
-  [72, 224, 132], // 翠绿
-];
 interface Dust {
   x: number;
   y: number;
@@ -114,7 +102,7 @@ interface Dust {
   size: number;
   tw: number;
   depth: number;
-  /** 光尘颜色（从色板取，淡色漂浮） */
+  /** 光尘颜色（淡蓝白，低透明漂浮） */
   color: [number, number, number];
 }
 
@@ -181,10 +169,10 @@ function buildWhiteHole() {
   wh.coreR = bh.R * 0.72;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
-  // 喷射要"激烈"：径向速度明显大于黑洞默认吸入（学黑洞吸入粒子的观感，方向相反）
-  const n = Math.min(1800, Math.round((w * h) / 750));
+  // 喷射要"壮观"：高速放射（学黑洞吸入粒子的激烈观感，方向相反）+ 高密度
+  const n = Math.min(2400, Math.round((w * h) / 600));
   for (let i = 0; i < n; i++) {
-    wh.particles.push(makeWhParticle(rand(0.0028, 0.0052)));
+    wh.particles.push(makeWhParticle(rand(0.006, 0.011)));
   }
   wh.dust = [];
   const d = Math.min(200, Math.round((w * h) / 8000));
@@ -197,7 +185,7 @@ function buildWhiteHole() {
       size: rand(0.8, 2.6),
       tw: rand(0.5, 2),
       depth: rand(0.5, 1),
-      color: WH_JET_PALETTE[Math.floor(Math.random() * WH_JET_PALETTE.length)],
+      color: [210, 228, 255],
     });
   }
 }
@@ -212,7 +200,6 @@ function makeWhParticle(vr: number): WhDiskParticle {
     tilt: 0,
     sx: 0,
     sy: 0,
-    color: WH_JET_PALETTE[Math.floor(Math.random() * WH_JET_PALETTE.length)],
   };
   // 白洞向四周喷射：tilt 取大范围（近圆），粒子铺满所有方向而非压成两端
   p.tilt = rand(0.5, 1);
@@ -297,13 +284,13 @@ function updateWhiteHole() {
     p.theta += wh.K / Math.pow(p.r, 1.5);
     const prevR = p.r;
     p.r += p.vr;
-    p.vr *= 0.9996; // 喷射轻微减速（保持锐利喷射，不软塌）
+    p.vr *= 0.9998; // 喷射几乎不减速（保持高速锐利的喷流）
     // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
     if (p.r > 1.9) {
-      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt，保持激烈速度）
+      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt，保持高速）
       p.r = rand(0.08, 0.16);
       p.theta = rand(0, Math.PI * 2);
-      p.vr = rand(0.0028, 0.0052);
+      p.vr = rand(0.006, 0.011);
       p.tilt = rand(0.5, 1);
       p.size = rand(1.3, 3.2);
     } else if (p.r > 1.05 && prevR <= 1.05) {
@@ -549,7 +536,7 @@ function drawWhiteHole(now: number, alpha: number) {
   ctx.fillStyle = halo;
   ctx.fillRect(0, 0, w, h);
 
-  // 漂浮光尘（视差，多彩淡色）
+  // 漂浮光尘（视差，淡蓝白漂浮）
   ctx.globalCompositeOperation = 'source-over';
   for (const d of wh.dust) {
     const px = d.x - mx * d.depth * 10;
@@ -562,7 +549,7 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 喷射粒子（普通覆盖混合：饱和色直接可见 → 全程多彩）
+  // 喷射粒子（普通覆盖混合；配色与黑洞同款：核心炽白 → 外圈蓝紫，真实冷却渐变）
   // 精致渲染：白色高光芯 + 目标色主体 + 淡色光晕，三层发光球；拖尾细线
   ctx.globalCompositeOperation = 'source-over';
   for (const p of wh.particles) {
@@ -572,23 +559,21 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    // 近核（rn 小）alpha 高 → 从产生就呈现饱和色
+    // 近核（rn 小）alpha 高 → 喷流从核心处最亮
     const a = alpha * (0.55 + 0.45 * (1 - rn)) * (0.6 + 0.4 * flick);
-    const cr = p.color[0];
-    const cg = p.color[1];
-    const cb = p.color[2];
-    const tail = 9;
-    // 拖尾：细线，略淡，尾部渐隐感（速度快 → 拉出明显的喷流尾迹）
+    const col = diskColor(rn);
+    const tail = 12;
+    // 拖尾：细线，略淡，尾部渐隐感（高速 → 拉出壮观的放射状喷流尾迹）
     ctx!.globalAlpha = Math.min(1, a * 0.5);
-    ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
-    ctx!.lineWidth = Math.max(0.7, p.size * 0.6);
+    ctx!.strokeStyle = col;
+    ctx!.lineWidth = Math.max(0.7, p.size * 0.65);
     ctx!.beginPath();
     ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
     ctx!.lineTo(p.sx, p.sy);
     ctx!.stroke();
     // 光晕层：大圆淡色（发光氛围）
     ctx!.globalAlpha = Math.min(1, a * 0.2);
-    ctx!.fillStyle = `rgb(${cr},${cg},${cb})`;
+    ctx!.fillStyle = col;
     ctx!.beginPath();
     ctx!.arc(p.sx, p.sy, p.size * 2.2, 0, Math.PI * 2);
     ctx!.fill();
