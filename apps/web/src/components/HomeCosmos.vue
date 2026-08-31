@@ -7,7 +7,8 @@
  *    光子环、事件视界遮挡（先画盘背侧 → 视界 → 盘前侧）、背景星引力透镜畸变。
  *  - 浅色模式 → 白洞：黑洞的时间反演 —— 同样的倾斜盘面几何、同尺寸核心，样式相反：
  *    白核（= 视界半径 R）+ 反光子环（= 1.42R，白环而非橙环），物质从核心向外喷射、
- *    旋转减速并淡出，配旋转光晕射线、周期性激波环、漂浮光尘。
+ *    减速并淡出；背景为上浅下深的深空渐变（顶部浅蓝保证文字可读，下方深空衬白色喷流），
+ *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、外圈渐隐，全程连续不跳变。
  *  - 核心位于页面下方（0.74h），避开欢迎区/卡片/引导文字；鼠标互动：核心跟随鼠标缓动，
  *    白洞核心附近粒子被鼠标"能量斥力"偏转，鼠标悬停白洞上时全部粒子加速爆发（默认缓速喷射）；
  *    黑洞相反——鼠标附近的粒子加速旋转并被吸入，鼠标悬停在黑洞上时整盘粒子加速旋转、
@@ -93,6 +94,8 @@ interface WhDiskParticle {
   tilt: number;
   sx: number;
   sy: number;
+  /** 出生年龄 0..1：从核心喷出时 0，逐渐增长；用于淡入（连续涌现，无跳变） */
+  age: number;
 }
 
 interface Dust {
@@ -112,6 +115,8 @@ const wh = {
   K: 0.0007,
   particles: [] as WhDiskParticle[],
   dust: [] as Dust[],
+  /** 深空背景点缀星（白洞场景） */
+  stars: [] as BgStar[],
 };
 
 // ================= 构建 =================
@@ -170,10 +175,10 @@ function buildWhiteHole() {
   wh.coreR = bh.R * 0.72;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
-  // 默认缓速喷射；鼠标悬停白洞核心时全部粒子加速爆发（见 updateWhiteHole）
+  // 默认缓速喷射（约 4.5 秒一轮）；鼠标悬停白洞核心时全部粒子加速爆发（见 updateWhiteHole）
   const n = Math.min(2400, Math.round((w * h) / 600));
   for (let i = 0; i < n; i++) {
-    wh.particles.push(makeWhParticle(rand(0.0028, 0.0052)));
+    wh.particles.push(makeWhParticle(rand(0.0035, 0.0065)));
   }
   wh.dust = [];
   const d = Math.min(200, Math.round((w * h) / 8000));
@@ -189,6 +194,19 @@ function buildWhiteHole() {
       color: [210, 228, 255],
     });
   }
+  // 深空点缀星（浅色顶部区域因浅底自动不可见）
+  wh.stars = [];
+  const starCount = Math.min(60, Math.round((w * h) / 14000));
+  for (let i = 0; i < starCount; i++) {
+    wh.stars.push({
+      x: rand(0, w),
+      y: rand(0, h),
+      size: rand(0.5, 1.4),
+      tw: rand(0.4, 2),
+      bright: Math.random() < 0.15,
+      depth: rand(0.4, 1),
+    });
+  }
 }
 
 function makeWhParticle(vr: number): WhDiskParticle {
@@ -201,10 +219,11 @@ function makeWhParticle(vr: number): WhDiskParticle {
     tilt: 0,
     sx: 0,
     sy: 0,
+    age: 1,
   };
   // 白洞向四周喷射：tilt 取大范围（近圆），粒子铺满所有方向而非压成两端
   p.tilt = rand(0.5, 1);
-  p.size = p.r > 1.05 ? rand(0.7, 1.8) : rand(1.3, 3.2);
+  p.size = p.r > 1.05 ? rand(1.0, 2.2) : rand(1.6, 3.6);
   p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
   p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
   return p;
@@ -287,22 +306,25 @@ function updateWhiteHole() {
     }
     p.theta += wh.K / Math.pow(p.r, 1.5);
     const prevR = p.r;
+    // 出生年龄增长（淡入用，约 0.25 秒内完全显现）
+    p.age = Math.min(1, p.age + 0.012);
     // 鼠标在白洞上：每帧给 vr 叠加加速（封顶 0.014，约 2 秒一轮爆发喷射）
     p.vr = Math.min(p.vr + globalBoost * 0.001, 0.014);
     p.r += p.vr;
     p.vr *= 0.9998; // 喷射几乎不减速（保持高速锐利的喷流）
     // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
     if (p.r > 1.9) {
-      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt；鼠标不在核心时保持默认缓速）
-      p.r = rand(0.08, 0.16);
+      // 逃逸远去 → 从核心重新喷出（age 归零，在淡入区不可见处重生，视觉连续）
+      p.r = rand(0.075, 0.1);
       p.theta = rand(0, Math.PI * 2);
-      p.vr = rand(0.0028, 0.0052);
+      p.vr = rand(0.0035, 0.0065);
       p.tilt = rand(0.5, 1);
-      p.size = rand(1.3, 3.2);
+      p.size = rand(1.6, 3.6);
+      p.age = 0;
     } else if (p.r > 1.05 && prevR <= 1.05) {
       // 内区喷流散开到外围 → 保持大 tilt 铺满四周
       p.tilt = rand(0.5, 1);
-      p.size = rand(0.7, 1.8);
+      p.size = rand(1.0, 2.2);
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
@@ -547,20 +569,32 @@ function drawWhiteHole(now: number, alpha: number) {
   if (!ctx) return;
   ctx.save();
   ctx.globalAlpha = alpha;
-  // 明亮蓝空底色（偏深的天蓝，让白色喷射/核心有对比；slate-900 深色文字仍可读）
+  // 深空底色（上浅下深）：顶部保留浅蓝保证浅色模式文字可读，下方渐入深空蓝让白色喷流醒目
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, '#e8f1ff');
-  g.addColorStop(0.5, '#c8e0ff');
-  g.addColorStop(1, '#96bdf5');
+  g.addColorStop(0.5, '#b9cdea');
+  g.addColorStop(0.72, '#3a4f8f');
+  g.addColorStop(1, '#182450');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // 核心暖光晕（白核的底色，浅蓝天空上更亮）
-  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.72);
-  halo.addColorStop(0, 'rgba(255, 250, 244, 1)');
-  halo.addColorStop(0.4, 'rgba(240, 246, 255, 0.55)');
-  halo.addColorStop(1, 'rgba(220, 235, 255, 0)');
+  // 核心暖光晕（白核的底色，深空上更亮）
+  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.6);
+  halo.addColorStop(0, 'rgba(255, 250, 244, 0.95)');
+  halo.addColorStop(0.4, 'rgba(200, 220, 255, 0.4)');
+  halo.addColorStop(1, 'rgba(160, 190, 255, 0)');
   ctx.fillStyle = halo;
   ctx.fillRect(0, 0, w, h);
+
+  // 深空点缀星（浅色顶部区域因浅底自动不可见）
+  ctx.globalCompositeOperation = 'source-over';
+  for (const s of wh.stars) {
+    const tw = 0.5 + 0.5 * Math.sin((now / 1000) * s.tw + s.x);
+    ctx.globalAlpha = alpha * (0.3 + 0.5 * tw) * s.depth;
+    ctx.fillStyle = s.bright ? '#ffffff' : '#cfe0ff';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // 漂浮光尘（视差，淡蓝白漂浮）
   ctx.globalCompositeOperation = 'source-over';
@@ -585,8 +619,10 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    // 近核（rn 小）alpha 高 → 喷流从核心处最亮
-    const a = alpha * (0.55 + 0.45 * (1 - rn)) * (0.6 + 0.4 * flick);
+    // 生命周期：核心涌现（age 淡入）→ 中段最亮 → 外圈渐隐（fadeOut），全程连续无跳变
+    const fadeIn = Math.min(1, p.age * 6);
+    const fadeOut = rn > 0.78 ? (1 - rn) / 0.22 : 1;
+    const a = alpha * (0.62 + 0.38 * (1 - rn)) * (0.7 + 0.3 * flick) * fadeIn * fadeOut;
     const col = whJetColor(rn);
     const tail = 12;
     // 拖尾：细线，略淡，尾部渐隐感（高速 → 拉出壮观的放射状喷流尾迹）
@@ -616,23 +652,22 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.fill();
   }
 
-  // 星环：环绕白核的连续暗色环带（渐变填充的圆环，非离散粒子）
+  // 星环：环绕白核的发光环带（渐变填充的圆环，非离散粒子；深空底上为淡蓝白反光）
   ctx.globalCompositeOperation = 'source-over';
   const beltPulse = 0.85 + 0.15 * Math.sin(now / 2200);
-  // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），深蓝黑、两端渐隐 → 连续平滑的星环
-  // 渐变从环带内侧起笔：内侧最深、向外逐渐变淡，避免出现边缘硬线
+  // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），内侧最亮、向外渐隐 → 连续平滑
   const drawBelt = (r0: number, r1: number, peak: number) => {
     const g = ctx!.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
-    g.addColorStop(0, `rgba(15, 24, 46, ${peak * beltPulse * alpha})`);
-    g.addColorStop(0.4, `rgba(15, 24, 46, ${peak * 0.9 * beltPulse * alpha})`);
-    g.addColorStop(1, 'rgba(15, 24, 46, 0)');
+    g.addColorStop(0, `rgba(216, 230, 255, ${peak * beltPulse * alpha})`);
+    g.addColorStop(0.4, `rgba(216, 230, 255, ${peak * 0.9 * beltPulse * alpha})`);
+    g.addColorStop(1, 'rgba(216, 230, 255, 0)');
     ctx!.fillStyle = g;
     ctx!.beginPath();
     ctx!.arc(holeX, holeY, r1 * wh.coreR, 0, Math.PI * 2);
     ctx!.arc(holeX, holeY, r0 * wh.coreR, 0, Math.PI * 2, true);
     ctx!.fill();
   };
-  // 主环带（更宽更深）+ 内环留卡西尼缝 + 最外一道渐隐的散带；不描边，避免明显线条
+  // 主环带（更亮更宽）+ 内环留卡西尼缝 + 最外一道渐隐的散带；不描边，避免明显线条
   drawBelt(1.5, 3.2, 0.95);
   drawBelt(1.72, 1.94, 0.5);
   drawBelt(3.2, 4.0, 0.25);
@@ -665,15 +700,12 @@ function drawWhiteHole(now: number, alpha: number) {
   ctx.beginPath();
   ctx.arc(holeX, holeY, r1, 0, Math.PI * 2);
   ctx.fill();
-  // 白核：与黑洞视界同半径的纯白圆 + 深蓝描边（浅色天空上轮廓清晰）
+  // 白核：与黑洞视界同半径的纯白圆（深空底上轮廓天然清晰，无需描边）
   ctx.globalAlpha = alpha;
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.arc(holeX, holeY, wh.coreR * pulse, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(80, 130, 220, 0.55)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
 
   ctx.restore();
 }
