@@ -109,7 +109,6 @@ const wh = {
   particles: [] as WhDiskParticle[],
   dust: [] as Dust[],
   rings: [] as Ring[],
-  rayAngle: 0,
 };
 
 // ================= 构建 =================
@@ -180,7 +179,6 @@ function buildWhiteHole() {
     });
   }
   wh.rings = [];
-  wh.rayAngle = 0;
 }
 
 function makeWhParticle(vr: number): WhDiskParticle {
@@ -270,7 +268,6 @@ function updateWhiteHole() {
     rg.a *= 0.955;
     if (rg.a < 0.02) wh.rings.splice(i, 1);
   }
-  wh.rayAngle += 0.0006;
   for (const d of wh.dust) {
     d.x += d.vx;
     d.y += d.vy;
@@ -495,22 +492,6 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.stroke();
   }
 
-  // 旋转光晕射线（白色，蓝空底上清晰可见）
-  ctx.globalAlpha = alpha * 0.16;
-  ctx.fillStyle = '#ffffff';
-  const arms = 12;
-  for (let i = 0; i < arms; i++) {
-    const a0 = wh.rayAngle + (i / arms) * Math.PI * 2;
-    const len = Math.min(w, h) * 0.34;
-    const a1 = a0 + 0.18 + 0.06 * Math.sin(now / 3000 + i * 1.7);
-    ctx.beginPath();
-    ctx.moveTo(holeX, holeY);
-    ctx.lineTo(holeX + Math.cos(a0) * len, holeY + Math.sin(a0) * len);
-    ctx.lineTo(holeX + Math.cos(a1) * len, holeY + Math.sin(a1) * len);
-    ctx.closePath();
-    ctx.fill();
-  }
-
   // 喷射粒子（叠加发光，白→淡蓝；个别金色）
   ctx.globalCompositeOperation = 'lighter';
   for (const p of wh.particles) {
@@ -549,10 +530,11 @@ function drawWhiteHole(now: number, alpha: number) {
   ctx.globalCompositeOperation = 'source-over';
   const beltPulse = 0.8 + 0.2 * Math.sin(now / 2200);
   // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），深蓝黑、两端渐隐 → 连续平滑的星环
+  // 渐变从环带内侧起笔：内侧最深、向外逐渐变淡，避免出现边缘硬线
   const drawBelt = (r0: number, r1: number, peak: number) => {
     const g = ctx.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
-    g.addColorStop(0, 'rgba(23, 34, 58, 0)');
-    g.addColorStop(0.45, `rgba(23, 34, 58, ${peak * beltPulse * alpha})`);
+    g.addColorStop(0, `rgba(23, 34, 58, ${peak * beltPulse * alpha})`);
+    g.addColorStop(0.35, `rgba(23, 34, 58, ${peak * 0.85 * beltPulse * alpha})`);
     g.addColorStop(1, 'rgba(23, 34, 58, 0)');
     ctx!.fillStyle = g;
     ctx!.beginPath();
@@ -560,17 +542,9 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.arc(holeX, holeY, r0 * wh.coreR, 0, Math.PI * 2, true);
     ctx!.fill();
   };
-  // 外环 + 内环，中间留一条细缝（类似土星环的卡西尼缝）
-  drawBelt(1.5, 2.5, 0.55);
-  drawBelt(1.62, 1.78, 0.3);
-  // 环边缘细线勾勒，强化"环"的轮廓
-  ctx!.globalAlpha = alpha * 0.35 * beltPulse;
-  ctx!.strokeStyle = 'rgba(23, 34, 58, 0.8)';
-  ctx!.lineWidth = 1;
-  ctx!.beginPath();
-  ctx!.arc(holeX, holeY, 1.5 * wh.coreR, 0, Math.PI * 2);
-  ctx!.arc(holeX, holeY, 2.5 * wh.coreR, 0, Math.PI * 2);
-  ctx!.stroke();
+  // 加大加深的外环 + 内环，中间留缝（类似土星环的卡西尼缝）；不描边，避免明显线条
+  drawBelt(1.5, 3.0, 0.8);
+  drawBelt(1.68, 1.88, 0.4);
 
   // 高能核心（脉动 + 鼠标靠近增亮）——白核比黑洞视界小：白核 = 0.72R，反光子环 = 1.42×白核
   const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
