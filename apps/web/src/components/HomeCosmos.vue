@@ -38,7 +38,6 @@ const targetMouse = { x: 0.5, y: 0.5 };
 // 场景混合：0 = 黑洞，1 = 白洞
 let blend = 0;
 let targetBlend = 0;
-let lastRingAt = 0;
 
 // ---------- 黑洞场景 ----------
 interface DiskParticle {
@@ -98,17 +97,12 @@ interface Dust {
   tw: number;
   depth: number;
 }
-interface Ring {
-  r: number;
-  a: number;
-}
 
 const wh = {
   coreR: 42,
   K: 0.0007,
   particles: [] as WhDiskParticle[],
   dust: [] as Dust[],
-  rings: [] as Ring[],
 };
 
 // ================= 构建 =================
@@ -178,7 +172,6 @@ function buildWhiteHole() {
       depth: rand(0.5, 1),
     });
   }
-  wh.rings = [];
 }
 
 function makeWhParticle(vr: number): WhDiskParticle {
@@ -256,17 +249,6 @@ function updateWhiteHole() {
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
-  }
-  // 激波环
-  if (performance.now() - lastRingAt > 2400) {
-    wh.rings.push({ r: wh.coreR * 1.4, a: 0.5 });
-    lastRingAt = performance.now();
-  }
-  for (let i = wh.rings.length - 1; i >= 0; i--) {
-    const rg = wh.rings[i];
-    rg.r += 1.8;
-    rg.a *= 0.955;
-    if (rg.a < 0.02) wh.rings.splice(i, 1);
   }
   for (const d of wh.dust) {
     d.x += d.vx;
@@ -482,16 +464,6 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 激波环（浅蓝天空上用偏深蓝，保证轮廓可见）
-  for (const rg of wh.rings) {
-    ctx.globalAlpha = alpha * rg.a;
-    ctx.strokeStyle = 'rgba(70, 120, 210, 0.9)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(holeX, holeY, rg.r, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
   // 喷射粒子（叠加发光，白→淡蓝；个别金色）
   ctx.globalCompositeOperation = 'lighter';
   for (const p of wh.particles) {
@@ -528,23 +500,24 @@ function drawWhiteHole(now: number, alpha: number) {
 
   // 星环：环绕白核的连续暗色环带（渐变填充的圆环，非离散粒子）
   ctx.globalCompositeOperation = 'source-over';
-  const beltPulse = 0.8 + 0.2 * Math.sin(now / 2200);
+  const beltPulse = 0.85 + 0.15 * Math.sin(now / 2200);
   // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），深蓝黑、两端渐隐 → 连续平滑的星环
   // 渐变从环带内侧起笔：内侧最深、向外逐渐变淡，避免出现边缘硬线
   const drawBelt = (r0: number, r1: number, peak: number) => {
     const g = ctx.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
-    g.addColorStop(0, `rgba(23, 34, 58, ${peak * beltPulse * alpha})`);
-    g.addColorStop(0.35, `rgba(23, 34, 58, ${peak * 0.85 * beltPulse * alpha})`);
-    g.addColorStop(1, 'rgba(23, 34, 58, 0)');
+    g.addColorStop(0, `rgba(15, 24, 46, ${peak * beltPulse * alpha})`);
+    g.addColorStop(0.4, `rgba(15, 24, 46, ${peak * 0.9 * beltPulse * alpha})`);
+    g.addColorStop(1, 'rgba(15, 24, 46, 0)');
     ctx!.fillStyle = g;
     ctx!.beginPath();
     ctx!.arc(holeX, holeY, r1 * wh.coreR, 0, Math.PI * 2);
     ctx!.arc(holeX, holeY, r0 * wh.coreR, 0, Math.PI * 2, true);
     ctx!.fill();
   };
-  // 加大加深的外环 + 内环，中间留缝（类似土星环的卡西尼缝）；不描边，避免明显线条
-  drawBelt(1.5, 3.0, 0.8);
-  drawBelt(1.68, 1.88, 0.4);
+  // 主环带（更宽更深）+ 内环留卡西尼缝 + 最外一道渐隐的散带；不描边，避免明显线条
+  drawBelt(1.5, 3.2, 0.95);
+  drawBelt(1.72, 1.94, 0.5);
+  drawBelt(3.2, 4.0, 0.25);
 
   // 高能核心（脉动 + 鼠标靠近增亮）——白核比黑洞视界小：白核 = 0.72R，反光子环 = 1.42×白核
   const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
