@@ -244,8 +244,13 @@ const layoutCls = computed(() =>
   chatLayout.value === 'wide' ? 'mx-auto w-full px-6' : 'mx-auto max-w-5xl px-4',
 );
 function toggleChatLayout() {
+  // 切换布局时保持滚动位置，避免"瞬间往下走一段"
+  const top = messageContainer.value?.scrollTop ?? 0;
   chatLayout.value = chatLayout.value === 'wide' ? 'standard' : 'wide';
   localStorage.setItem('chat-layout', chatLayout.value);
+  nextTick(() => {
+    if (messageContainer.value) messageContainer.value.scrollTop = top;
+  });
 }
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -892,7 +897,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </Button>
       </div>
       <!-- 消息区 -->
-      <div ref="messageContainer" class="flex-1 overflow-y-auto">
+      <div ref="messageContainer" class="hide-scrollbar flex-1 overflow-y-auto">
         <div
           v-if="!currentSessionId"
           class="relative flex h-full flex-col items-center justify-center text-center"
@@ -953,7 +958,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 </div>
                 <div
                   v-if="msgHead(msg)"
-                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[17px] font-medium text-foreground"
+                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[19px] font-semibold text-foreground"
                 >
                   {{ msgHead(msg) }}
                 </div>
@@ -961,7 +966,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
               <!-- 助手消息：Markdown -->
               <div
                 v-else
-                class="markdown-body rounded-lg border bg-card px-4 py-3"
+                class="markdown-body px-1"
+                :class="chatLayout === 'wide' ? 'md-wide' : ''"
                 @click="handleMessageClick"
                 v-html="renderMarkdown(msg.content)"
               />
@@ -1092,7 +1098,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <div v-if="streaming" class="flex justify-start">
             <div class="w-full">
               <div
-                class="markdown-body rounded-lg border bg-card px-4 py-3"
+                class="markdown-body px-1"
+                :class="chatLayout === 'wide' ? 'md-wide' : ''"
                 @click="handleMessageClick"
                 v-html="renderMarkdown(streamContent || '…')"
               />
@@ -1439,18 +1446,31 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </button>
       </div>
       <pre
-        class="flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed text-foreground"
+        class="hide-scrollbar flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed text-foreground"
         >{{ filePreview.content }}</pre>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* AI 回答的 Markdown 排版（暗黑模式可读性：显式文字色，避免继承导致看不清） */
+/* 隐藏碍眼的滚动条（保留滚动功能） */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* AI 回答的 Markdown 排版（无白色卡片背景，直接铺在页面背景上；暗黑可读） */
 .markdown-body {
-  font-size: 1.125rem;
-  font-weight: 500;
+  font-size: 1.25rem;
+  font-weight: 600;
   color: var(--foreground);
+}
+/* 宽屏布局：字号再大一档 */
+.md-wide.markdown-body {
+  font-size: 1.375rem;
 }
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
@@ -1472,8 +1492,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 .markdown-body :deep(p) {
   margin: 0.5em 0;
   line-height: 1.8;
-  font-size: 1.125rem;
-  font-weight: 500;
+  font-size: 1.25rem;
+  font-weight: 600;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -1523,6 +1543,10 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   line-height: 1.6;
   background: hsl(var(--muted));
   color: var(--foreground);
+  scrollbar-width: none;
+}
+.markdown-body :deep(.code-block pre::-webkit-scrollbar) {
+  display: none;
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;
