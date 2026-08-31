@@ -481,7 +481,8 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 喷射粒子（普通覆盖混合：饱和色直接可见，不会被白色核心加色冲白 → 全程多彩）
+  // 喷射粒子（普通覆盖混合：饱和色直接可见 → 全程多彩）
+  // 精致渲染：白色高光芯 + 目标色主体 + 淡色光晕，三层发光球；拖尾细线
   ctx.globalCompositeOperation = 'source-over';
   for (const p of wh.particles) {
     const rn = clamp(p.r / 1.9, 0, 1);
@@ -495,24 +496,32 @@ function drawWhiteHole(now: number, alpha: number) {
     const cr = p.color[0];
     const cg = p.color[1];
     const cb = p.color[2];
-    const tail = 7;
-    ctx!.globalAlpha = Math.min(1, a);
+    const tail = 6;
+    // 拖尾：细线，略淡，尾部渐隐感
+    ctx!.globalAlpha = Math.min(1, a * 0.5);
     ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
-    ctx!.lineWidth = p.size * 0.9;
+    ctx!.lineWidth = Math.max(0.6, p.size * 0.45);
     ctx!.beginPath();
     ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
     ctx!.lineTo(p.sx, p.sy);
     ctx!.stroke();
+    // 光晕层：大圆淡色（发光氛围）
+    ctx!.globalAlpha = Math.min(1, a * 0.2);
     ctx!.fillStyle = `rgb(${cr},${cg},${cb})`;
     ctx!.beginPath();
-    ctx!.arc(p.sx, p.sy, p.size * 0.7, 0, Math.PI * 2);
+    ctx!.arc(p.sx, p.sy, p.size * 2.2, 0, Math.PI * 2);
     ctx!.fill();
-    if (rn < 0.35) {
-      ctx!.globalAlpha = Math.min(1, a * 0.35);
-      ctx!.beginPath();
-      ctx!.arc(p.sx, p.sy, p.size * 3, 0, Math.PI * 2);
-      ctx!.fill();
-    }
+    // 主体层：目标色圆（可见色块）
+    ctx!.globalAlpha = Math.min(1, a * 0.95);
+    ctx!.beginPath();
+    ctx!.arc(p.sx, p.sy, p.size * 1.05, 0, Math.PI * 2);
+    ctx!.fill();
+    // 高光芯：白色小圆（点睛，发光球质感）
+    ctx!.globalAlpha = Math.min(1, a);
+    ctx!.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx!.beginPath();
+    ctx!.arc(p.sx, p.sy, p.size * 0.42, 0, Math.PI * 2);
+    ctx!.fill();
   }
 
   // 星环：环绕白核的连续暗色环带（渐变填充的圆环，非离散粒子）
