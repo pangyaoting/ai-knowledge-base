@@ -365,13 +365,13 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：近核纯白 → 炽白 → 淡蓝 → 外圈深蓝紫（饱满渐变，不淡出） */
+/** 白洞喷流粒子颜色：纯白 → 冷白 → 淡蓝 → 蓝紫 → 深蓝紫（全程冷色调，无暖红橙） */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
-    [0, [255, 253, 250]],
-    [0.25, [255, 244, 224]],
-    [0.55, [190, 200, 245]],
-    [0.8, [110, 100, 220]],
+    [0, [255, 255, 255]],
+    [0.3, [226, 234, 255]],
+    [0.6, [172, 188, 246]],
+    [0.85, [110, 100, 220]],
     [1, [70, 58, 200]],
   ];
   const t = clamp(rn, 0, 1);
@@ -573,19 +573,20 @@ function drawWhiteHole(now: number, alpha: number) {
   if (!ctx) return;
   ctx.save();
   ctx.globalAlpha = alpha;
-  // 背景：以白洞为圆心的径向渐变 —— 核心周围深蓝，向外渐变到白色
-  // （白色粒子在核心深蓝底上醒目，深蓝紫粒子在边缘白底上醒目）
+  // 背景：以白洞为圆心的径向渐变 —— 深蓝只围绕核心一小圈（衬白色粒子），
+  // 快速过渡到浅色，保证页面文字可读
   const g = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.max(w, h));
-  g.addColorStop(0, '#16244f');
-  g.addColorStop(0.4, '#33508f');
-  g.addColorStop(0.72, '#8fb0dd');
-  g.addColorStop(1, '#f2f7ff');
+  g.addColorStop(0, '#2c4a80');
+  g.addColorStop(0.18, '#6d8cc2');
+  g.addColorStop(0.45, '#c0d4ef');
+  g.addColorStop(0.8, '#eef4ff');
+  g.addColorStop(1, '#ffffff');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // 核心暖光晕（白核的底色，深空上更亮）
-  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.6);
-  halo.addColorStop(0, 'rgba(255, 250, 244, 0.95)');
-  halo.addColorStop(0.4, 'rgba(200, 220, 255, 0.4)');
+  // 核心冷白光晕（白核的底色，深蓝核心上更亮）
+  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.5);
+  halo.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+  halo.addColorStop(0.4, 'rgba(215, 230, 255, 0.4)');
   halo.addColorStop(1, 'rgba(160, 190, 255, 0)');
   ctx.fillStyle = halo;
   ctx.fillRect(0, 0, w, h);
@@ -684,7 +685,7 @@ function drawWhiteHole(now: number, alpha: number) {
   const pr2 = wh.coreR * 1.42;
   const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
   prGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-  prGrad.addColorStop(0.5, 'rgba(255, 252, 244, 0.95)');
+  prGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
   prGrad.addColorStop(0.8, 'rgba(255, 255, 255, 1)');
   prGrad.addColorStop(1, 'rgba(120, 160, 235, 0)');
   ctx.globalAlpha = alpha;
