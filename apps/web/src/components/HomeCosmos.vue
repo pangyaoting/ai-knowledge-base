@@ -170,12 +170,12 @@ function buildWhiteHole() {
   wh.coreR = bh.R * 0.72;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
-  const n = Math.min(700, Math.round((w * h) / 2000));
+  const n = Math.min(1600, Math.round((w * h) / 850));
   for (let i = 0; i < n; i++) {
     wh.particles.push(makeWhParticle(rand(0.0005, 0.0014)));
   }
   wh.dust = [];
-  const d = Math.min(110, Math.round((w * h) / 15000));
+  const d = Math.min(200, Math.round((w * h) / 8000));
   for (let i = 0; i < d; i++) {
     wh.dust.push({
       x: rand(0, w),
