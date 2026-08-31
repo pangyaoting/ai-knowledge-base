@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 defineOptions({ name: 'ChatView' });
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
@@ -647,6 +647,12 @@ async function handleSend() {
     createdAt: new Date().toISOString(),
   });
 
+  // 发送新问题时强制滚到新问题所在位置（即使用户刚才在翻历史，也要回到最新）
+  autoScroll = true;
+  await nextTick();
+  const el = messageContainer.value;
+  if (el) el.scrollTop = el.scrollHeight;
+
   abortController.value = new AbortController();
   try {
     await askQuestion(
@@ -1091,10 +1097,20 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <!-- 流式回答中 -->
           <div v-if="streaming" class="flex justify-start">
             <div class="w-full">
+              <!-- 等待首个 token：动画思考指示器（跳动圆点，不是静态三个点） -->
+              <div v-if="!streamContent" class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 rounded-2xl border bg-muted/40 px-4 py-3">
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                  <span class="thinking-dot" />
+                </div>
+                <span class="text-xs text-muted-foreground">思考中</span>
+              </div>
               <div
+                v-else
                 class="markdown-body px-1"
                 @click="handleMessageClick"
-                v-html="renderMarkdown(streamContent || '…')"
+                v-html="renderMarkdown(streamContent)"
               />
               <div
                 v-if="streamSources.kb.length || streamSources.web.length"
@@ -1103,7 +1119,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 已检索到知识库 {{ streamSources.kb.length }} 条
                 <template v-if="streamSources.web.length">
                   + 网络 {{ streamSources.web.length }} 条</template
-                >，正在生成回答...
+                >，正在生成回答
               </div>
             </div>
           </div>
@@ -1450,6 +1466,33 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 }
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* 思考中：三个跳动的圆点（ChatGPT 风格动画，替代静态省略号） */
+.thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: hsl(var(--muted-foreground));
+  animation: thinking-bounce 1.2s infinite ease-in-out;
+}
+.thinking-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.thinking-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes thinking-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
 }
 
 /* AI 回答的 Markdown 排版（无白色卡片背景，直接铺在页面背景上；暗黑可读）
