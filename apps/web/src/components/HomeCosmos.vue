@@ -9,7 +9,8 @@
  *    白核（= 视界半径 R）+ 反光子环（= 1.42R，白环而非橙环），物质从核心向外喷射、
  *    旋转减速并淡出，配旋转光晕射线、周期性激波环、漂浮光尘。
  *  - 核心位于页面下方（0.74h），避开欢迎区/卡片/引导文字；鼠标互动：核心跟随鼠标缓动，
- *    白洞核心附近粒子被鼠标"能量斥力"偏转；主题切换时两套场景交叉淡入淡出。
+ *    白洞核心附近粒子被鼠标"能量斥力"偏转；黑洞相反——鼠标附近的粒子加速旋转并被吸入，
+ *    鼠标悬停在黑洞上时整盘粒子加速旋转、加速坠入视界（"吞噬"）；主题切换时两套场景交叉淡入淡出。
  */
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useTheme } from '@/composables/useTheme';
@@ -221,9 +222,22 @@ function makeWhParticle(vr: number): WhDiskParticle {
 // ================= 更新 =================
 
 function updateBlackHole() {
+  // 鼠标互动（与白洞"能量斥力"对称，黑洞是"引力吞噬"）：
+  //  - 局部：鼠标附近的粒子加速旋转 + 加速吸入（vr 更负 = 更快坠向视界）
+  //  - 全局：鼠标悬停在黑洞核心上 → 全部粒子加速旋转并加速被吸
+  const cxp = mouse.x * window.innerWidth;
+  const cyp = mouse.y * window.innerHeight;
+  const dCore = Math.hypot(cxp - holeX, cyp - holeY);
+  const globalPull = clamp(1 - dCore / (bh.R * 2.5), 0, 1);
+  const localR = Math.max(90, Math.min(w, h) * 0.16);
+
   for (const p of bh.disk) {
     const prevR = p.r;
-    p.theta += bh.K / Math.pow(p.r, 1.5);
+    // 局部：鼠标附近的粒子加速旋转 + 加速内落（"被吸"）
+    const dMouse = Math.hypot(p.sx - cxp, p.sy - cyp);
+    const localPull = dMouse < localR ? 1 - dMouse / localR : 0;
+    p.theta += bh.K / Math.pow(p.r, 1.5) + localPull * 0.02 + globalPull * 0.008;
+    p.vr = Math.max(p.vr - localPull * 0.0012 - globalPull * 0.003, -0.025);
     p.r += p.vr;
     if (p.r <= 0.075) {
       // 坠入视界 → 重新捕获：部分从外围云补充（保持整页粒子密度）
@@ -240,9 +254,13 @@ function updateBlackHole() {
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
   }
-  // 被吸入粒子：几乎纯径向坠入（旋转很弱），从四周快速被吸进视界
+  // 被吸入粒子：同样受鼠标引力（加速坠入），几乎纯径向
   for (const p of bh.infall) {
-    p.theta += (bh.K * 0.06) / Math.pow(Math.max(p.r, 0.2), 1.5);
+    const dMouse = Math.hypot(p.sx - cxp, p.sy - cyp);
+    const localPull = dMouse < localR ? 1 - dMouse / localR : 0;
+    p.theta +=
+      (bh.K * 0.06) / Math.pow(Math.max(p.r, 0.2), 1.5) + localPull * 0.04 + globalPull * 0.012;
+    p.vr = Math.max(p.vr - localPull * 0.004 - globalPull * 0.008, -0.06);
     p.r += p.vr; // vr 为负且大
     if (p.r <= 0.075) {
       // 坠入视界 → 从更外围重新出现，形成持续吸入流
