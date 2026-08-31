@@ -457,18 +457,18 @@ function drawWhiteHole(now: number, alpha: number) {
   if (!ctx) return;
   ctx.save();
   ctx.globalAlpha = alpha;
-  // 明亮蓝空底色（带明显冷蓝调，让白色喷射/核心强对比可见）
+  // 明亮蓝空底色（偏深的天蓝，让白色喷射/核心有对比；slate-900 深色文字仍可读）
   const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#f4f9ff');
-  g.addColorStop(0.5, '#ddeaff');
-  g.addColorStop(1, '#bcd5fa');
+  g.addColorStop(0, '#e8f1ff');
+  g.addColorStop(0.5, '#c8e0ff');
+  g.addColorStop(1, '#96bdf5');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // 核心暖光晕
+  // 核心暖光晕（白核的底色，浅蓝天空上更亮）
   const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.72);
-  halo.addColorStop(0, 'rgba(255, 248, 236, 1)');
-  halo.addColorStop(0.4, 'rgba(244, 248, 255, 0.6)');
-  halo.addColorStop(1, 'rgba(230, 240, 255, 0)');
+  halo.addColorStop(0, 'rgba(255, 250, 244, 1)');
+  halo.addColorStop(0.4, 'rgba(240, 246, 255, 0.55)');
+  halo.addColorStop(1, 'rgba(220, 235, 255, 0)');
   ctx.fillStyle = halo;
   ctx.fillRect(0, 0, w, h);
 
@@ -485,10 +485,10 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 激波环
+  // 激波环（浅蓝天空上用偏深蓝，保证轮廓可见）
   for (const rg of wh.rings) {
     ctx.globalAlpha = alpha * rg.a;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.strokeStyle = 'rgba(70, 120, 210, 0.9)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(holeX, holeY, rg.r, 0, Math.PI * 2);
@@ -549,13 +549,13 @@ function drawWhiteHole(now: number, alpha: number) {
   const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
   const pulse = 1 + 0.06 * Math.sin(now / 380);
   ctx.globalCompositeOperation = 'lighter';
-  // 反光子环：与黑洞光子环同位置同粗细，颜色相反（白环，而非橙环）
+  // 反光子环：与黑洞光子环同位置同粗细，颜色相反（白环 + 深蓝外缘，浅色天空上可见）
   const pr2 = wh.coreR * 1.42;
   const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
   prGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-  prGrad.addColorStop(0.5, 'rgba(255, 250, 240, 0.9)');
+  prGrad.addColorStop(0.5, 'rgba(255, 252, 244, 0.95)');
   prGrad.addColorStop(0.8, 'rgba(255, 255, 255, 1)');
-  prGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  prGrad.addColorStop(1, 'rgba(120, 160, 235, 0)');
   ctx.globalAlpha = alpha;
   ctx.fillStyle = prGrad;
   ctx.beginPath();
@@ -566,19 +566,22 @@ function drawWhiteHole(now: number, alpha: number) {
   const glow = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, r1);
   glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
   glow.addColorStop(0.3, `rgba(255, 255, 255, ${0.95 + prox * 0.05})`);
-  glow.addColorStop(0.7, 'rgba(170, 200, 255, 0.5)');
-  glow.addColorStop(1, 'rgba(150, 185, 255, 0)');
+  glow.addColorStop(0.7, 'rgba(150, 190, 255, 0.5)');
+  glow.addColorStop(1, 'rgba(120, 160, 240, 0)');
   ctx.globalAlpha = alpha * (0.85 + prox * 0.3);
   ctx.fillStyle = glow;
   ctx.beginPath();
   ctx.arc(holeX, holeY, r1, 0, Math.PI * 2);
   ctx.fill();
-  // 白核：与黑洞视界同半径的纯白圆（样式相反：纯黑 ↔ 纯白）
+  // 白核：与黑洞视界同半径的纯白圆 + 深蓝描边（浅色天空上轮廓清晰）
   ctx.globalAlpha = alpha;
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.arc(holeX, holeY, wh.coreR * pulse, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(80, 130, 220, 0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
   ctx.restore();
 }
