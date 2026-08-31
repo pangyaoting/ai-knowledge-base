@@ -278,7 +278,10 @@ function onDocPointerDown(e: MouseEvent) {
 }
 
 onMounted(() => document.addEventListener('mousedown', onDocPointerDown));
-onBeforeUnmount(() => document.removeEventListener('mousedown', onDocPointerDown));
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocPointerDown);
+  stopThinkingTimer();
+});
 const defaultModelConfigId = computed(
   () => modelConfigs.value.find((c) => c.isDefault)?.id ?? null,
 );
@@ -595,6 +598,25 @@ async function handleExportSession(id: string) {
 
 // ==================== 提问与流式 ====================
 
+/** 思考计时：发送开始计时，首个 token/完成/停止时清零停表（右侧显示已等待时间） */
+const thinkingSeconds = ref(0);
+let thinkingTimer: ReturnType<typeof setInterval> | null = null;
+function startThinkingTimer() {
+  stopThinkingTimer();
+  thinkingSeconds.value = 0;
+  thinkingTimer = setInterval(() => thinkingSeconds.value++, 1000);
+}
+function stopThinkingTimer() {
+  if (thinkingTimer) {
+    clearInterval(thinkingTimer);
+    thinkingTimer = null;
+  }
+}
+function formatThinkingTime(s: number): string {
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
 const canSend = computed(
   () =>
     (input.value.trim().length > 0 ||
@@ -634,6 +656,7 @@ async function handleSend() {
   streaming.value = true;
   streamContent.value = '';
   streamSources.value = { kb: [], web: [] };
+  startThinkingTimer();
 
   // 乐观渲染：用户消息立即上屏
   messages.value.push({
@@ -690,12 +713,14 @@ async function handleSend() {
   } finally {
     streaming.value = false;
     abortController.value = null;
+    stopThinkingTimer();
   }
 }
 
 function handleStop() {
   abortController.value?.abort();
   streaming.value = false;
+  stopThinkingTimer();
 }
 
 // ==================== 交互 ====================
@@ -1097,14 +1122,15 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <!-- 流式回答中 -->
           <div v-if="streaming" class="flex justify-start">
             <div class="w-full">
-              <!-- 等待首个 token：动画思考指示器（跳动圆点，不是静态三个点） -->
+              <!-- 等待首个 token：蓝色文字 + 白色光条从左到右扫过（循环）+ 右侧计时 -->
               <div v-if="!streamContent" class="flex items-center gap-2">
-                <div class="flex items-center gap-1.5 rounded-2xl border bg-muted/40 px-4 py-3">
-                  <span class="thinking-dot" />
-                  <span class="thinking-dot" />
-                  <span class="thinking-dot" />
-                </div>
-                <span class="text-xs text-muted-foreground">思考中</span>
+                <span class="thinking-shimmer-wrap">
+                  <span class="thinking-shimmer-base">检索思考中...</span>
+                  <span class="thinking-shimmer-overlay" aria-hidden="true">检索思考中...</span>
+                </span>
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {{ formatThinkingTime(thinkingSeconds) }}
+                </span>
               </div>
               <div
                 v-else
@@ -1468,30 +1494,39 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   display: none;
 }
 
-/* 思考中：三个跳动的圆点（ChatGPT 风格动画，替代静态省略号） */
-.thinking-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: hsl(var(--muted-foreground));
-  animation: thinking-bounce 1.2s infinite ease-in-out;
+/* 检索思考中：蓝色文字 + 白色光条从左到右循环扫过（文字被扫过处变白） */
+.thinking-shimmer-wrap {
+  position: relative;
+  display: inline-block;
+  font-size: 0.875rem; /* text-sm */
+  font-weight: 500;
+  line-height: 1.4;
 }
-.thinking-dot:nth-child(2) {
-  animation-delay: 0.15s;
+.thinking-shimmer-base {
+  color: #3b82f6; /* 蓝色 */
 }
-.thinking-dot:nth-child(3) {
-  animation-delay: 0.3s;
+.thinking-shimmer-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    #fff 40%,
+    #fff 60%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-sweep 1.6s linear infinite;
 }
-@keyframes thinking-bounce {
-  0%,
-  80%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.35;
+@keyframes shimmer-sweep {
+  0% {
+    background-position: 100% 0;
   }
-  40% {
-    transform: translateY(-5px);
-    opacity: 1;
+  100% {
+    background-position: 0% 0;
   }
 }
 
