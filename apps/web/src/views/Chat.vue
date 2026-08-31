@@ -20,8 +20,6 @@ import {
   GitBranch,
   PanelLeftClose,
   PanelLeftOpen,
-  Maximize2,
-  Minimize2,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -235,27 +233,6 @@ const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
 const sidebarCollapsed = ref(false); // 桌面端：会话列表侧边栏收起/展开
-
-// ===== 对话布局：标准（居中 max-w-5xl）/ 宽屏（除侧边栏外占满） =====
-const chatLayout = ref<'standard' | 'wide'>(
-  localStorage.getItem('chat-layout') === 'wide' ? 'wide' : 'standard',
-);
-const layoutCls = computed(() =>
-  chatLayout.value === 'wide' ? 'mx-auto w-full px-6' : 'mx-auto max-w-5xl px-4',
-);
-function toggleChatLayout() {
-  // 切换布局时按"滚动比例"恢复位置（宽度变化会重排，绝对位置会跳到别处/看起来内容消失）
-  const scroller = messageContainer.value;
-  const ratio =
-    scroller && scroller.scrollHeight > 0 ? scroller.scrollTop / scroller.scrollHeight : 0;
-  chatLayout.value = chatLayout.value === 'wide' ? 'standard' : 'wide';
-  localStorage.setItem('chat-layout', chatLayout.value);
-  nextTick(() => {
-    if (messageContainer.value && messageContainer.value.scrollHeight > 0) {
-      messageContainer.value.scrollTop = ratio * messageContainer.value.scrollHeight;
-    }
-  });
-}
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -874,15 +851,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <PanelLeftClose v-if="!sidebarCollapsed" class="h-4 w-4" />
           <PanelLeftOpen v-else class="h-4 w-4" />
         </button>
-        <!-- 对话布局：标准居中 / 宽屏占满 -->
-        <button
-          class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :title="chatLayout === 'wide' ? '切换为标准布局（居中）' : '切换为宽屏布局（占满）'"
-          @click="toggleChatLayout"
-        >
-          <Minimize2 v-if="chatLayout === 'wide'" class="h-4 w-4" />
-          <Maximize2 v-else class="h-4 w-4" />
-        </button>
         <h2 class="min-w-0 flex-1 truncate text-sm font-semibold">{{ currentTitle }}</h2>
         <span
           class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -917,7 +885,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <p class="mt-3 text-sm text-muted-foreground">选择或新建一个会话开始提问</p>
         </div>
 
-        <div v-else class="space-y-6 py-6" :class="layoutCls">
+        <div v-else class="mx-auto max-w-5xl space-y-6 px-4 py-6">
           <!-- 历史消息 -->
           <div
             v-for="(msg, i) in messages"
@@ -971,7 +939,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
               <div
                 v-else
                 class="markdown-body px-1"
-                :class="chatLayout === 'wide' ? 'md-wide' : ''"
                 @click="handleMessageClick"
                 v-html="renderMarkdown(msg.content)"
               />
@@ -1103,7 +1070,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             <div class="w-full">
               <div
                 class="markdown-body px-1"
-                :class="chatLayout === 'wide' ? 'md-wide' : ''"
                 @click="handleMessageClick"
                 v-html="renderMarkdown(streamContent || '…')"
               />
@@ -1134,8 +1100,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 问答范围（常驻可见，点击可修改当前会话） -->
         <div
           v-if="currentSessionId"
-          class="mb-2 flex items-center gap-2 text-[11px]"
-          :class="layoutCls"
+          class="mx-auto mb-2 flex max-w-5xl items-center gap-2 text-[11px]"
         >
           <span class="shrink-0 text-muted-foreground">问答范围</span>
           <button
@@ -1225,8 +1190,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 待发送图片/文件预览：在输入框上方横排展示（有图片或文件时显示） -->
         <div
           v-if="pendingImages.length || pendingFiles.length"
-          class="mb-2 flex items-center gap-2 overflow-x-auto pb-1"
-          :class="layoutCls"
+          class="mx-auto mb-2 flex max-w-5xl items-center gap-2 overflow-x-auto pb-1"
         >
           <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
             <img
@@ -1263,7 +1227,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </button>
           </div>
         </div>
-        <div class="flex items-end gap-2" :class="layoutCls">
+        <div class="mx-auto flex max-w-5xl items-end gap-2">
           <!-- 上传本地图片（可多选） -->
           <button
             type="button"
@@ -1318,8 +1282,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </Button>
         </div>
         <p
-          class="mt-2 flex items-center justify-center gap-4 text-[11px] text-muted-foreground"
-          :class="layoutCls"
+          class="mx-auto mt-2 flex max-w-5xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
         >
           <label class="flex cursor-pointer items-center gap-1.5 select-none">
             <input
@@ -1474,9 +1437,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   color: var(--foreground);
 }
 /* 宽屏布局：字号再大一档 */
-.md-wide.markdown-body {
-  font-size: 1.375rem;
-}
+
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
 .markdown-body :deep(h3),
