@@ -15,6 +15,8 @@ export function createChatSession(data: {
   knowledgeBaseIds?: string[];
   useKnowledgeBase?: boolean;
   modelConfigId?: string;
+  /** 分支：把之前的对话历史注入新会话 */
+  seedMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }) {
   return request.post<unknown, ChatSession>('/chat/sessions', data);
 }

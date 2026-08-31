@@ -61,6 +61,17 @@ export class ChatService {
         title: dto.title || '新对话',
         useKnowledgeBase,
         modelConfigId,
+        // 分支功能：把之前的对话作为历史消息注入新会话（LLM 回答时能读到前文）
+        ...(dto.seedMessages?.length
+          ? {
+              messages: {
+                create: dto.seedMessages.map((m) => ({
+                  role: m.role,
+                  content: m.content,
+                })),
+              },
+            }
+          : {}),
         ...(kbIds
           ? { knowledgeBases: { create: kbIds.map((id) => ({ knowledgeBaseId: id })) } }
           : {}),

@@ -202,6 +202,11 @@ async function copyMessage(msg: ChatMessage) {
 async function handleBranch(idx: number) {
   if (streaming.value || !currentSessionId.value) return;
   let question = '';
+  // 分支点之前的对话作为历史注入新会话（LLM 能读到前文，继续追问有上下文）
+  const seedMessages = messages.value
+    .slice(0, idx)
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: msgHead(m) }))
+    .filter((m) => m.content.trim().length > 0);
   for (let i = idx - 1; i >= 0; i--) {
     if (messages.value[i].role === 'user') {
       question = msgHead(messages.value[i]);
@@ -211,6 +216,7 @@ async function handleBranch(idx: number) {
   try {
     const session = await createChatSession({
       ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+      ...(seedMessages.length ? { seedMessages } : {}),
     });
     sessionSearch.value = '';
     await loadSessions();
@@ -219,7 +225,7 @@ async function handleBranch(idx: number) {
     input.value = question || '请继续分析刚才的图片/内容：';
     await nextTick();
     messageTextarea.value?.focus();
-    toast.success('已基于该回答新建会话，可修改问题后继续');
+    toast.success('已基于该回答分支：新会话保留了之前的对话，可直接继续追问');
   } catch (e) {
     toast.error((e as Error).message);
   }

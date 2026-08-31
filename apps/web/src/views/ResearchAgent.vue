@@ -626,7 +626,7 @@ onBeforeUnmount(() => {
     <main class="flex flex-1 flex-col overflow-hidden">
       <!-- ========== 新建表单 ========== -->
       <div v-if="!currentId" class="flex flex-1 flex-col items-center overflow-y-auto p-6">
-        <div class="w-full max-w-2xl pb-8">
+        <div class="w-full max-w-4xl pb-8">
           <!-- 未绑定模型：前置引导（自主研究消耗用户自己的 Key） -->
           <div
             v-if="modelConfigs.length === 0"
@@ -860,7 +860,7 @@ onBeforeUnmount(() => {
 
         <div class="flex-1 overflow-y-auto">
           <!-- 待确认：方向拆解完成，确认后才开始研究 -->
-          <div v-if="current.status === 'awaiting_confirm'" class="mx-auto max-w-2xl px-4 py-6">
+          <div v-if="current.status === 'awaiting_confirm'" class="mx-auto max-w-4xl px-4 py-6">
             <div class="rounded-lg border bg-card p-5">
               <div class="flex items-center gap-2">
                 <Sparkles class="h-4 w-4 text-primary" />
@@ -929,7 +929,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 运行中：方向进度 -->
-          <div v-else-if="polling" class="mx-auto max-w-2xl px-4 py-6">
+          <div v-else-if="polling" class="mx-auto max-w-4xl px-4 py-6">
             <div class="rounded-lg border bg-card p-4">
               <div class="flex items-center gap-2">
                 <Loader2 class="h-4 w-4 animate-spin text-primary" />
@@ -993,7 +993,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 已停止：阶段成果（先摘要后展开）+ 继续研究提示 -->
-          <div v-else-if="current.status === 'stopped'" class="mx-auto max-w-3xl px-4 py-6">
+          <div v-else-if="current.status === 'stopped'" class="mx-auto max-w-6xl px-4 py-6">
             <div
               class="mb-4 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10"
             >
@@ -1094,7 +1094,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- 完成：摘要卡片 + 一个方向一个卡片 + 来源 -->
-          <div v-else-if="current.report" class="mx-auto max-w-3xl px-4 py-6">
+          <div v-else-if="current.report" class="mx-auto max-w-6xl px-4 py-6">
             <div
               v-if="current.summary"
               class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
@@ -1282,27 +1282,41 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* AI 报告的 Markdown 排版（复用对话页/报告页样式） */
+/* AI 报告的 Markdown 排版（正文放大不加粗，标题按等级加粗+大小） */
+.markdown-body {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--foreground);
+}
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
 .markdown-body :deep(h3),
 .markdown-body :deep(h4) {
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
   margin: 0.75em 0 0.4em;
 }
 .markdown-body :deep(h1) {
-  font-size: 1.3em;
+  font-size: 1.5em;
+  font-weight: 700;
 }
 .markdown-body :deep(h2) {
-  font-size: 1.15em;
+  font-size: 1.32em;
+  font-weight: 700;
 }
 .markdown-body :deep(h3) {
+  font-size: 1.16em;
+  font-weight: 700;
+}
+.markdown-body :deep(h4) {
   font-size: 1.05em;
+  font-weight: 600;
 }
 .markdown-body :deep(p) {
   margin: 0.5em 0;
-  line-height: 1.7;
+  line-height: 1.8;
+  font-size: 1.25rem;
+  font-weight: 400;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -1311,6 +1325,7 @@ onBeforeUnmount(() => {
 }
 .markdown-body :deep(li) {
   margin: 0.25em 0;
+  font-size: 1.25rem;
 }
 .markdown-body :deep(a) {
   color: var(--primary);
@@ -1319,7 +1334,7 @@ onBeforeUnmount(() => {
 .markdown-body :deep(blockquote) {
   border-left: 3px solid var(--border);
   padding-left: 0.75em;
-  color: var(--muted-foreground);
+  color: hsl(var(--foreground) / 0.72);
   margin: 0.5em 0;
 }
 .markdown-body :deep(table) {
@@ -1333,10 +1348,11 @@ onBeforeUnmount(() => {
   padding: 0.35em 0.6em;
 }
 .markdown-body :deep(code:not(pre code)) {
-  background: var(--muted);
+  background: hsl(var(--muted));
   border-radius: 4px;
   padding: 0.1em 0.35em;
-  font-size: 0.9em;
+  font-size: 0.95em;
+  color: var(--foreground);
 }
 .markdown-body :deep(.code-block) {
   position: relative;
@@ -1346,9 +1362,10 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   overflow-x: auto;
   padding: 0.9em 1em;
-  font-size: 0.85em;
-  line-height: 1.5;
+  font-size: 0.95em;
+  line-height: 1.6;
   background: hsl(var(--muted));
+  color: var(--foreground);
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;

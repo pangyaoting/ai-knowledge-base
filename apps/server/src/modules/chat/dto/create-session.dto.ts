@@ -1,5 +1,25 @@
-import { IsArray, IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+
+class SeedMessageDto {
+  @IsIn(['user', 'assistant'], { message: '角色只能是 user / assistant' })
+  role!: 'user' | 'assistant';
+
+  @IsString({ message: '内容必须是字符串' })
+  @MaxLength(100_000, { message: '单条内容过长' })
+  content!: string;
+}
 
 export class CreateSessionDto {
   @ApiProperty({ example: 'Vue3 学习问答', description: '会话标题', required: false })
@@ -36,4 +56,17 @@ export class CreateSessionDto {
   @IsOptional()
   @IsUUID('4', { message: '模型配置ID格式不正确' })
   modelConfigId?: string;
+
+  @ApiProperty({
+    example: [{ role: 'user', content: '…' }],
+    description: '分支注入的历史消息（把之前的对话带进新会话，最多 20 条）',
+    required: false,
+    type: [SeedMessageDto],
+  })
+  @IsOptional()
+  @IsArray({ message: 'seedMessages 必须是数组' })
+  @ArrayMaxSize(20, { message: '最多注入 20 条历史消息' })
+  @ValidateNested({ each: true })
+  @Type(() => SeedMessageDto)
+  seedMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }

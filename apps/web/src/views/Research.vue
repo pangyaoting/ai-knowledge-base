@@ -478,7 +478,7 @@ onBeforeUnmount(stopPolling);
           </div>
 
           <!-- 完成：报告正文 + 来源 -->
-          <div v-else-if="current.content" class="mx-auto max-w-3xl px-4 py-6">
+          <div v-else-if="current.content" class="mx-auto max-w-6xl px-4 py-6">
             <div
               class="markdown-body rounded-lg border bg-card px-5 py-4"
               @click="handleReportClick"
@@ -535,27 +535,41 @@ onBeforeUnmount(stopPolling);
 </template>
 
 <style scoped>
-/* AI 报告的 Markdown 排版（复用对话页样式） */
+/* AI 报告的 Markdown 排版（正文放大不加粗，标题按等级加粗+大小） */
+.markdown-body {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--foreground);
+}
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
 .markdown-body :deep(h3),
 .markdown-body :deep(h4) {
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
   margin: 0.75em 0 0.4em;
 }
 .markdown-body :deep(h1) {
-  font-size: 1.3em;
+  font-size: 1.5em;
+  font-weight: 700;
 }
 .markdown-body :deep(h2) {
-  font-size: 1.15em;
+  font-size: 1.32em;
+  font-weight: 700;
 }
 .markdown-body :deep(h3) {
+  font-size: 1.16em;
+  font-weight: 700;
+}
+.markdown-body :deep(h4) {
   font-size: 1.05em;
+  font-weight: 600;
 }
 .markdown-body :deep(p) {
   margin: 0.5em 0;
-  line-height: 1.7;
+  line-height: 1.8;
+  font-size: 1.25rem;
+  font-weight: 400;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -564,6 +578,7 @@ onBeforeUnmount(stopPolling);
 }
 .markdown-body :deep(li) {
   margin: 0.25em 0;
+  font-size: 1.25rem;
 }
 .markdown-body :deep(a) {
   color: var(--primary);
@@ -572,7 +587,7 @@ onBeforeUnmount(stopPolling);
 .markdown-body :deep(blockquote) {
   border-left: 3px solid var(--border);
   padding-left: 0.75em;
-  color: var(--muted-foreground);
+  color: hsl(var(--foreground) / 0.72);
   margin: 0.5em 0;
 }
 .markdown-body :deep(table) {
@@ -586,10 +601,11 @@ onBeforeUnmount(stopPolling);
   padding: 0.35em 0.6em;
 }
 .markdown-body :deep(code:not(pre code)) {
-  background: var(--muted);
+  background: hsl(var(--muted));
   border-radius: 4px;
   padding: 0.1em 0.35em;
-  font-size: 0.9em;
+  font-size: 0.95em;
+  color: var(--foreground);
 }
 .markdown-body :deep(.code-block) {
   position: relative;
@@ -599,9 +615,10 @@ onBeforeUnmount(stopPolling);
   border-radius: 8px;
   overflow-x: auto;
   padding: 0.9em 1em;
-  font-size: 0.85em;
-  line-height: 1.5;
+  font-size: 0.95em;
+  line-height: 1.6;
   background: hsl(var(--muted));
+  color: var(--foreground);
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;
