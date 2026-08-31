@@ -1508,25 +1508,28 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 .thinking-shimmer-overlay {
   position: absolute;
   inset: 0;
+  /* 白峰收窄在中间（细光条），两侧渐隐，避免一大片白光 */
   background: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0) 0%,
-    #fff 40%,
-    #fff 60%,
+    rgba(255, 255, 255, 0) 44%,
+    #fff 50%,
+    rgba(255, 255, 255, 0) 56%,
     rgba(255, 255, 255, 0) 100%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: shimmer-sweep 1.6s linear infinite;
+  animation: shimmer-sweep 1.5s linear infinite;
 }
 @keyframes shimmer-sweep {
+  /* 行程只比容器宽一点点：光条刚出右端（-10%），下一圈就从左端（110%）接上，几乎无空白 */
   0% {
-    background-position: 100% 0;
+    background-position: 110% 0;
   }
   100% {
-    background-position: 0% 0;
+    background-position: -10% 0;
   }
 }
 
