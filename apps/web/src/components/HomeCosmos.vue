@@ -181,9 +181,10 @@ function buildWhiteHole() {
   wh.coreR = bh.R * 0.72;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
-  const n = Math.min(1600, Math.round((w * h) / 850));
+  // 喷射要"激烈"：径向速度明显大于黑洞默认吸入（学黑洞吸入粒子的观感，方向相反）
+  const n = Math.min(1800, Math.round((w * h) / 750));
   for (let i = 0; i < n; i++) {
-    wh.particles.push(makeWhParticle(rand(0.0005, 0.0014)));
+    wh.particles.push(makeWhParticle(rand(0.0028, 0.0052)));
   }
   wh.dust = [];
   const d = Math.min(200, Math.round((w * h) / 8000));
@@ -296,13 +297,13 @@ function updateWhiteHole() {
     p.theta += wh.K / Math.pow(p.r, 1.5);
     const prevR = p.r;
     p.r += p.vr;
-    p.vr *= 0.9994; // 喷射逐渐减速
+    p.vr *= 0.9996; // 喷射轻微减速（保持锐利喷射，不软塌）
     // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
     if (p.r > 1.9) {
-      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt）
+      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt，保持激烈速度）
       p.r = rand(0.08, 0.16);
       p.theta = rand(0, Math.PI * 2);
-      p.vr = rand(0.0005, 0.0014);
+      p.vr = rand(0.0028, 0.0052);
       p.tilt = rand(0.5, 1);
       p.size = rand(1.3, 3.2);
     } else if (p.r > 1.05 && prevR <= 1.05) {
@@ -576,11 +577,11 @@ function drawWhiteHole(now: number, alpha: number) {
     const cr = p.color[0];
     const cg = p.color[1];
     const cb = p.color[2];
-    const tail = 6;
-    // 拖尾：细线，略淡，尾部渐隐感
+    const tail = 9;
+    // 拖尾：细线，略淡，尾部渐隐感（速度快 → 拉出明显的喷流尾迹）
     ctx!.globalAlpha = Math.min(1, a * 0.5);
     ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
-    ctx!.lineWidth = Math.max(0.6, p.size * 0.45);
+    ctx!.lineWidth = Math.max(0.7, p.size * 0.6);
     ctx!.beginPath();
     ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
     ctx!.lineTo(p.sx, p.sy);
