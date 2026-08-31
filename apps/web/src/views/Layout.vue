@@ -234,11 +234,13 @@ async function handleLogout() {
       </div>
     </header>
 
-    <!-- 页面内容（带路由切换过渡） -->
+    <!-- 页面内容（带路由切换过渡；对话/自主研究/报告缓存，切导航再回来状态不丢） -->
     <main class="relative">
       <RouterView v-slot="{ Component }">
         <Transition name="page" mode="out-in">
-          <component :is="Component" />
+          <KeepAlive :include="['ChatView', 'ResearchAgentView', 'ResearchView']">
+            <component :is="Component" />
+          </KeepAlive>
         </Transition>
       </RouterView>
     </main>

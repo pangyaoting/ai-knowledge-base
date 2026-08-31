@@ -1,4 +1,5 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
+defineOptions({ name: 'ResearchAgentView' });
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import {
   Bot,

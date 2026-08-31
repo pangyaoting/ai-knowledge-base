@@ -1,4 +1,5 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
+defineOptions({ name: 'ChatView' });
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
   MessageSquare,
@@ -706,12 +707,18 @@ async function handleMessageClick(e: MouseEvent) {
   }
 }
 
-// 自动滚动到底部
-watch([messages, streamContent], async () => {
+// 自动滚动到底部：监听消息条数与流式内容变化；用户手动上滚时暂停，避免被拉回
+let autoScroll = true;
+function onMessageScroll() {
+  const el = messageContainer.value;
+  if (!el) return;
+  autoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+watch([() => messages.value.length, streamContent], async () => {
+  if (!autoScroll) return;
   await nextTick();
-  if (messageContainer.value) {
-    messageContainer.value.scrollTop = messageContainer.value.scrollHeight;
-  }
+  const el = messageContainer.value;
+  if (el) el.scrollTop = el.scrollHeight;
 });
 
 // 初始化：加载会话，没有就新建
@@ -881,7 +888,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </Button>
       </div>
       <!-- 消息区 -->
-      <div ref="messageContainer" class="flex-1 overflow-y-auto">
+      <div ref="messageContainer" class="flex-1 overflow-y-auto" @scroll="onMessageScroll">
         <div
           v-if="!currentSessionId"
           class="relative flex h-full flex-col items-center justify-center text-center"

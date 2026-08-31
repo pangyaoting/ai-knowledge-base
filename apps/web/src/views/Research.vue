@@ -1,4 +1,5 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
+defineOptions({ name: 'ResearchView' });
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import {
   FileText,
