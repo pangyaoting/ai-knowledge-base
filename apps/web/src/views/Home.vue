@@ -54,7 +54,7 @@ onMounted(async () => {
 
 <template>
   <div
-    class="relative flex min-h-[calc(100vh-4rem)] flex-col items-center overflow-hidden py-20 text-center"
+    class="relative flex min-h-[calc(100dvh-4rem-1px)] flex-col items-center overflow-hidden py-20 text-center"
   >
     <!-- 背景层：暗黑=黑洞 / 浅色=白洞，Canvas 实时渲染并随全局主题交叉切换 -->
     <div class="pointer-events-none absolute inset-0" aria-hidden="true">

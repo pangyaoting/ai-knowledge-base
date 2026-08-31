@@ -201,6 +201,8 @@ async function loadModelConfigs() {
 
 async function selectTask(id: string) {
   currentId.value = id;
+  // 记忆当前任务：切到别的导航再回来，仍停留在该任务
+  sessionStorage.setItem('research-agent-active-task', id);
   error.value = '';
   try {
     current.value = await getAgentTask(id);
@@ -556,7 +558,11 @@ async function handleRedecompose() {
 onMounted(async () => {
   startClock();
   await loadTasks();
-  if (tasks.value.length > 0) {
+  // 优先恢复上次的任务（切导航再回来仍停留）；不存在则选第一个
+  const saved = sessionStorage.getItem('research-agent-active-task');
+  if (saved && tasks.value.some((t) => t.id === saved)) {
+    await selectTask(saved);
+  } else if (tasks.value.length > 0) {
     await selectTask(tasks.value[0].id);
   }
   await loadModelConfigs();

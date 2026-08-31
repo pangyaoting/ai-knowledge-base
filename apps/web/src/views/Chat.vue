@@ -465,6 +465,8 @@ watch(sessionSearch, () => {
 
 async function selectSession(id: string) {
   if (streaming.value) return;
+  // 记忆当前会话：切到别的导航再回来，仍停留在该会话
+  sessionStorage.setItem('chat-active-session', id);
   // 按会话保存/恢复输入草稿：切走时存当前输入，切回时恢复（不串台也不丢失）
   if (currentSessionId.value) {
     inputDrafts.value[currentSessionId.value] = input.value;
@@ -710,7 +712,11 @@ watch([messages, streamContent], async () => {
 onMounted(async () => {
   loadModelConfigs(); // 模型下拉选项（BYO key）
   await loadSessions();
-  if (sessions.value.length > 0) {
+  // 优先恢复上次的会话（切导航再回来仍在旧会话）；不存在则选第一个
+  const saved = sessionStorage.getItem('chat-active-session');
+  if (saved && sessions.value.some((s) => s.id === saved)) {
+    await selectSession(saved);
+  } else if (sessions.value.length > 0) {
     await selectSession(sessions.value[0].id);
   } else {
     await handleNewSession();

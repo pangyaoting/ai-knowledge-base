@@ -116,6 +116,8 @@ async function loadReports() {
 
 async function selectReport(id: string) {
   currentId.value = id;
+  // 记忆当前报告：切到别的导航再回来，仍停留在该报告
+  sessionStorage.setItem('research-active-report', id);
   error.value = '';
   try {
     current.value = await getReport(id);
@@ -245,7 +247,11 @@ function similarityPercent(s: number): string {
 
 onMounted(async () => {
   await loadReports();
-  if (reports.value.length > 0) {
+  // 优先恢复上次的报告（切导航再回来仍停留）；不存在则选第一个
+  const saved = sessionStorage.getItem('research-active-report');
+  if (saved && reports.value.some((r) => r.id === saved)) {
+    await selectReport(saved);
+  } else if (reports.value.length > 0) {
     await selectReport(reports.value[0].id);
   }
   await loadModelConfigs();
@@ -255,7 +261,7 @@ onBeforeUnmount(stopPolling);
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-4rem)] overflow-hidden">
+  <div class="flex h-[calc(100dvh-4rem-1px)] overflow-hidden">
     <!-- 左侧：报告列表 -->
     <aside class="flex w-64 flex-col border-r bg-card/50">
       <div class="p-3">
