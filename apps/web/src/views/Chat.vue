@@ -202,9 +202,9 @@ async function copyMessage(msg: ChatMessage) {
 async function handleBranch(idx: number) {
   if (streaming.value || !currentSessionId.value) return;
   let question = '';
-  // 分支点之前的对话作为历史注入新会话（LLM 能读到前文，继续追问有上下文）
+  // 分支点之前的对话（含分支点本身）作为历史注入新会话（LLM 能读到前文，继续追问有上下文）
   const seedMessages = messages.value
-    .slice(0, idx)
+    .slice(0, idx + 1)
     .map((m) => ({ role: m.role as 'user' | 'assistant', content: msgHead(m) }))
     .filter((m) => m.content.trim().length > 0);
   for (let i = idx - 1; i >= 0; i--) {
