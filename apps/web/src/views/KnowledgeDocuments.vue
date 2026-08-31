@@ -8,37 +8,29 @@
  * - 文件图标按扩展名着色 + 扩展名徽标（区分 html/css/ts/vue…）
  * - 支持代码文件参与检索、图片等作为附件保管；自动跳过 node_modules/.git/dist 与 .env
  */
-import { ref, computed, reactive, onMounted, onBeforeUnmount, type Ref } from 'vue';
+defineOptions({ name: 'KnowledgeDocumentsView' });
+import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import {
-  ArrowLeft,
-  File as FileIcon,
-  FileText,
-  FileCode,
-  FileImage,
-  FileArchive,
-  Loader2,
-  Trash2,
-  Download,
-  RefreshCw,
-  Pencil,
-  FolderOpen,
-  FolderTree,
-  Folder,
-  ChevronRight,
-  Search,
-} from 'lucide-vue-next';
+import { ArrowLeft, RefreshCw, FolderOpen, FolderTree, Search } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
+import DocCodeEditor from '@/components/knowledge/DocCodeEditor.vue';
+import DocTableRow from '@/components/knowledge/DocTableRow.vue';
 import { toast } from '@/composables/useToast';
 import {
   getDocuments,
   uploadDocument,
   deleteDocument,
   downloadDocumentFile,
-  getDocumentContent,
   updateDocument,
 } from '@/api/knowledge';
+import {
+  buildDocTree,
+  flattenTree,
+  countFolders,
+  collectFolderFiles,
+  type DocTreeNode,
+} from '@/utils/doc-tree';
 import type { Document } from '@/types/knowledge';
 
 const route = useRoute();
@@ -56,148 +48,7 @@ const filteredDocs = computed(() => {
   return list.value.filter((d) => d.filename.toLowerCase().includes(q));
 });
 
-// ==================== 文件图标（按扩展名着色 + 徽标，区分 html/css/ts…） ====================
-
-const EXT_COLORS: Record<string, string> = {
-  html: '#e44d26',
-  htm: '#e44d26',
-  css: '#2965f1',
-  scss: '#c6538c',
-  less: '#1d365d',
-  ts: '#3178c6',
-  tsx: '#3178c6',
-  js: '#d9b225',
-  jsx: '#d9b225',
-  vue: '#42b883',
-  json: '#b58a00',
-  py: '#3572a5',
-  java: '#b07219',
-  go: '#00add8',
-  rs: '#dea584',
-  c: '#5a5a5a',
-  cpp: '#f34b7d',
-  h: '#5a5a5a',
-  hpp: '#f34b7d',
-  sh: '#4eaa25',
-  bash: '#4eaa25',
-  yml: '#cb171e',
-  yaml: '#cb171e',
-  toml: '#9c4221',
-  sql: '#e38c00',
-  md: '#519aba',
-  markdown: '#519aba',
-  txt: '#8a94a6',
-  pdf: '#e74c3c',
-  docx: '#2b579a',
-  png: '#e91e8c',
-  jpg: '#e91e8c',
-  jpeg: '#e91e8c',
-  gif: '#e91e8c',
-  webp: '#e91e8c',
-  svg: '#e91e8c',
-  ico: '#e91e8c',
-  zip: '#d4a017',
-  rar: '#d4a017',
-  '7z': '#d4a017',
-  tar: '#d4a017',
-  gz: '#d4a017',
-};
-
-function fileExtOf(name: string): string {
-  return (name.split('.').pop() ?? '').toLowerCase();
-}
-
-function fileColorOf(name: string): string {
-  return EXT_COLORS[fileExtOf(name)] ?? '#8a94a6';
-}
-
-/** 按扩展名返回图标类别（代码/图片/压缩包/文档） */
-function fileIconOf(name: string): typeof FileIcon {
-  const t = fileExtOf(name);
-  if (
-    /^(ts|tsx|js|jsx|vue|html?|css|s[ca]ss|less|json|py|java|go|rs|c|cpp|h|hpp|sh|bash|ya?ml|toml|ini|sql|xml|proto|graphql|prisma|env)$/.test(
-      t,
-    )
-  ) {
-    return FileCode;
-  }
-  if (/^(png|jpe?g|gif|webp|svg|bmp|ico|avif|pdf)$/.test(t)) {
-    return FileImage;
-  }
-  if (/^(zip|rar|7z|tar|gz|bz2|xz)$/.test(t)) {
-    return FileArchive;
-  }
-  if (/^(md|markdown|txt|docx)$/.test(t)) {
-    return FileText;
-  }
-  return FileIcon;
-}
-
-// ==================== 目录树（文件夹上传保持文件夹形态） ====================
-
-interface DocTreeNode {
-  type: 'folder' | 'file';
-  name: string;
-  path: string;
-  doc?: Document;
-  children?: DocTreeNode[];
-  docCount?: number;
-  totalSize?: number;
-  chunkCount?: number;
-}
-
-function buildDocTree(docs: Document[]): DocTreeNode[] {
-  const root: DocTreeNode[] = [];
-  const dirMap = new Map<string, DocTreeNode>();
-
-  const ensureDir = (dirPath: string): DocTreeNode => {
-    const cached = dirMap.get(dirPath);
-    if (cached) return cached;
-    const segs = dirPath.split('/');
-    const node: DocTreeNode = {
-      type: 'folder',
-      name: segs[segs.length - 1],
-      path: dirPath,
-      children: [],
-      docCount: 0,
-      totalSize: 0,
-      chunkCount: 0,
-    };
-    dirMap.set(dirPath, node);
-    const parentPath = segs.slice(0, -1).join('/');
-    if (parentPath) ensureDir(parentPath).children!.push(node);
-    else root.push(node);
-    return node;
-  };
-
-  for (const doc of docs) {
-    const idx = doc.filename.lastIndexOf('/');
-    if (idx < 0) {
-      root.push({ type: 'file', name: doc.filename, path: doc.filename, doc });
-    } else {
-      const dir = ensureDir(doc.filename.slice(0, idx));
-      dir.docCount! += 1;
-      dir.totalSize! += doc.fileSize;
-      dir.chunkCount! += doc._count?.chunks ?? 0;
-      dir.children!.push({
-        type: 'file',
-        name: doc.filename.slice(idx + 1),
-        path: doc.filename,
-        doc,
-      });
-    }
-  }
-
-  const sortLevel = (nodes: DocTreeNode[]) => {
-    nodes.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-      return a.name.localeCompare(b.name, 'zh');
-    });
-    nodes.forEach((n) => n.type === 'folder' && sortLevel(n.children!));
-  };
-  sortLevel(root);
-  return root;
-}
+// ==================== 目录树 ====================
 
 const tree = computed(() => buildDocTree(list.value));
 
@@ -226,38 +77,13 @@ function toggleAll(expand: boolean) {
   walk(tree.value);
 }
 
-/** 按展开状态摊平成表格行（带缩进层级） */
-const visibleTreeNodes = computed(() => {
-  const out: Array<DocTreeNode & { depth: number }> = [];
-  const walk = (nodes: DocTreeNode[], depth: number) => {
-    for (const n of nodes) {
-      out.push({ ...n, depth });
-      if (n.type === 'folder' && isExpanded(n) && n.children?.length) {
-        walk(n.children, depth + 1);
-      }
-    }
-  };
-  walk(tree.value, 0);
-  return out;
-});
-
 /** 搜索时展示扁平列表，否则展示目录树 */
-const displayNodes = computed(() => (docSearch.value.trim() ? null : visibleTreeNodes.value));
+const displayNodes = computed(() =>
+  docSearch.value.trim() ? null : flattenTree(tree.value, isExpanded),
+);
 
 /** 文件夹总数（工具条统计） */
-const folderCount = computed(() => {
-  let n = 0;
-  const walk = (nodes: DocTreeNode[]) => {
-    for (const node of nodes) {
-      if (node.type === 'folder') {
-        n++;
-        walk(node.children!);
-      }
-    }
-  };
-  walk(tree.value);
-  return n;
-});
+const folderCount = computed(() => countFolders(tree.value));
 
 // ==================== 上传（选择即传，Cherry 风格 + 环形进度） ====================
 
@@ -526,110 +352,6 @@ function watchBusyDocs() {
   parsePollTimer = window.setTimeout(tick, 1500);
 }
 
-// ==================== 整页代码编辑（本页内全屏编辑视图，非小弹窗） ====================
-
-const editingDoc = ref<Document | null>(null);
-const editFilename = ref('');
-const editContent = ref('');
-const loadingContent = ref(false);
-const savingEdit = ref(false);
-
-const editGutter = ref<HTMLDivElement | null>(null);
-const editPre = ref<HTMLPreElement | null>(null);
-
-function lineNumbersOf(text: string): string {
-  const n = text.split('\n').length;
-  return Array.from({ length: n }, (_, i) => i + 1).join('\n') + '\n';
-}
-const editLineNumbers = computed(() => lineNumbersOf(editContent.value));
-const editHighlighted = computed(() => highlightCode(editContent.value));
-
-/** 轻量语法高亮（无依赖）：先转义 HTML，再给注释/字符串/关键字/数字包上高亮 span */
-function highlightCode(code: string): string {
-  const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  // 类名写成字面量，保证 tailwind 内容扫描能收集到
-  return esc.replace(
-    /(\/\/[^\n]*|#[^\n]*)|(\/\*[\s\S]*?\*\/)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)|\b(const|let|var|function|export|import|from|return|if|else|for|while|class|interface|type|extends|implements|new|async|await|def|true|false|null|undefined|public|private|static)\b|\b(\d+(?:\.\d+)?)\b/g,
-    (m, lineComment, blockComment, str, kw, num) => {
-      if (lineComment)
-        return `<span class="text-slate-400 dark:text-slate-500">${lineComment}</span>`;
-      if (blockComment)
-        return `<span class="text-slate-400 dark:text-slate-500">${blockComment}</span>`;
-      if (str) return `<span class="text-amber-600 dark:text-amber-400">${str}</span>`;
-      if (kw) return `<span class="text-blue-600 dark:text-blue-400">${kw}</span>`;
-      if (num) return `<span class="text-emerald-600 dark:text-emerald-400">${num}</span>`;
-      return m;
-    },
-  );
-}
-
-/** 高亮层 + 行号栏与文本框同步滚动 */
-function syncEditorScroll(gutter: Ref<HTMLDivElement | null>, pre: Ref<HTMLPreElement | null>) {
-  return (e: Event) => {
-    const ta = e.target as HTMLTextAreaElement;
-    if (gutter.value) gutter.value.scrollTop = ta.scrollTop;
-    if (pre.value) {
-      pre.value.scrollTop = ta.scrollTop;
-      pre.value.scrollLeft = ta.scrollLeft;
-    }
-  };
-}
-const onEditScroll = syncEditorScroll(editGutter, editPre);
-
-/** Tab 键插入两个空格（代码缩进友好，不跳焦点） */
-function insertTab(content: Ref<string>) {
-  return (e: KeyboardEvent) => {
-    const ta = e.target as HTMLTextAreaElement;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    content.value = content.value.slice(0, start) + '  ' + content.value.slice(end);
-    requestAnimationFrame(() => {
-      ta.selectionStart = ta.selectionEnd = start + 2;
-    });
-  };
-}
-const onEditTab = insertTab(editContent);
-
-async function openDocEdit(doc: Document) {
-  editingDoc.value = doc;
-  editFilename.value = doc.filename;
-  editContent.value = '';
-  loadingContent.value = true;
-  try {
-    const data = await getDocumentContent(knowledgeBaseId, doc.id);
-    editContent.value = data.content;
-  } catch (e) {
-    toast.error((e as Error).message);
-    editingDoc.value = null;
-  } finally {
-    loadingContent.value = false;
-  }
-}
-
-function cancelEdit() {
-  editingDoc.value = null;
-  editContent.value = '';
-}
-
-async function saveDocEdit() {
-  const doc = editingDoc.value;
-  if (!doc) return;
-  savingEdit.value = true;
-  try {
-    await updateDocument(knowledgeBaseId, doc.id, {
-      filename: editFilename.value.trim(),
-      content: editContent.value,
-    });
-    editingDoc.value = null;
-    await load();
-    toast.success('文档已保存并重新向量化');
-  } catch (e) {
-    toast.error((e as Error).message);
-  } finally {
-    savingEdit.value = false;
-  }
-}
-
 // ==================== 列表 / 文档操作 ====================
 
 async function load() {
@@ -641,12 +363,6 @@ async function load() {
   } finally {
     loading.value = false;
   }
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
 async function handleDelete(docId: string, filename: string) {
@@ -727,17 +443,6 @@ async function handleReplace(docId: string, file: File) {
 }
 
 // ==================== 文件夹操作（重命名 / 删除） ====================
-
-/** 收集文件夹下的所有文件节点（含子文件夹） */
-function collectFolderFiles(node: DocTreeNode): Document[] {
-  const docs: Document[] = [];
-  const walk = (n: DocTreeNode) => {
-    if (n.type === 'file' && n.doc) docs.push(n.doc);
-    else n.children?.forEach(walk);
-  };
-  walk(node);
-  return docs;
-}
 
 /** 重命名文件夹 = 批量把其下所有文件的路径前缀换成新名 */
 async function handleRenameFolder(node: DocTreeNode) {
@@ -868,31 +573,11 @@ function toggleSelectFolder(node: DocTreeNode) {
   }
 }
 
-/** 文件夹是否全选（用于复选框半选/全选态） */
-function folderSelected(node: DocTreeNode): boolean {
-  const docs = collectFolderFiles(node);
-  return docs.length > 0 && docs.every((d) => selectedIds.has(d.id));
-}
+// ---- 代码编辑（整页编辑视图） ----
+const editingDoc = ref<Document | null>(null);
 
-const statusText: Record<string, string> = {
-  pending: '排队中',
-  processing: '解析中',
-  replacing: '替换中',
-  done: '已完成',
-  failed: '失败',
-};
-
-function statusClass(status: string): string {
-  switch (status) {
-    case 'done':
-      return 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-400';
-    case 'failed':
-      return 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400';
-    case 'replacing':
-      return 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400';
-    default:
-      return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400';
-  }
+function openDocEdit(doc: Document) {
+  editingDoc.value = doc;
 }
 
 onMounted(async () => {
@@ -915,64 +600,13 @@ onBeforeUnmount(stopParsePoll);
 <template>
   <div class="container py-10">
     <!-- 整页编辑视图（非小弹窗）：编辑代码/文档时替代列表 -->
-    <template v-if="editingDoc">
-      <div class="mx-auto max-w-6xl">
-        <div class="mb-4 flex items-center gap-3">
-          <Button variant="ghost" size="icon" :disabled="savingEdit" @click="cancelEdit">
-            <ArrowLeft class="h-4 w-4" />
-          </Button>
-          <Input
-            v-model="editFilename"
-            class="h-9 flex-1 font-mono text-sm"
-            placeholder="文件名（可带相对路径，如 src/Button.ts）"
-          />
-          <Button variant="ghost" size="sm" :disabled="savingEdit" @click="cancelEdit">取消</Button>
-          <Button
-            size="sm"
-            :disabled="savingEdit || loadingContent || !editFilename.trim()"
-            @click="saveDocEdit"
-          >
-            <Loader2 v-if="savingEdit" class="h-4 w-4 animate-spin" />
-            {{ savingEdit ? '保存中...' : '保存并重新向量化' }}
-          </Button>
-        </div>
-        <p class="mb-3 text-xs text-muted-foreground">
-          编辑只影响知识库内的检索内容，不影响上传的原文件（下载始终拿到原始文件）
-        </p>
-        <div
-          class="flex h-[calc(100vh-15rem)] overflow-hidden rounded-lg border border-input font-mono text-sm leading-relaxed"
-        >
-          <div
-            ref="editGutter"
-            class="w-10 shrink-0 select-none overflow-hidden border-r border-input bg-muted/30 py-2 text-right text-muted-foreground/60"
-            aria-hidden="true"
-          >
-            <pre class="px-1.5">{{ editLineNumbers }}</pre>
-          </div>
-          <div class="relative flex-1 overflow-hidden bg-background">
-            <div v-if="loadingContent" class="flex h-full items-center justify-center">
-              <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-            <template v-else>
-              <pre
-                ref="editPre"
-                class="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre px-3 py-2 text-foreground"
-                aria-hidden="true"
-                v-html="editHighlighted"
-              />
-              <textarea
-                v-model="editContent"
-                class="absolute inset-0 h-full w-full resize-none overflow-auto whitespace-pre bg-transparent px-3 py-2 text-transparent caret-foreground outline-none selection:bg-primary/25"
-                spellcheck="false"
-                placeholder="文档内容..."
-                @scroll="onEditScroll"
-                @keydown.tab.prevent="onEditTab"
-              />
-            </template>
-          </div>
-        </div>
-      </div>
-    </template>
+    <DocCodeEditor
+      v-if="editingDoc"
+      :knowledge-base-id="knowledgeBaseId"
+      :doc="editingDoc"
+      @close="editingDoc = null"
+      @saved="load"
+    />
 
     <!-- 列表视图 -->
     <template v-else>
@@ -1132,241 +766,44 @@ onBeforeUnmount(stopParsePoll);
           <tbody class="divide-y">
             <!-- 搜索模式：扁平列表（文件名保留完整相对路径） -->
             <template v-if="displayNodes === null">
-              <tr v-for="doc in filteredDocs" :key="doc.id">
-                <td class="max-w-[280px] truncate px-4 py-3 font-medium" :title="doc.filename">
-                  <span class="flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      class="h-3.5 w-3.5 shrink-0 accent-blue-500"
-                      :checked="selectedIds.has(doc.id)"
-                      @change="toggleSelect(doc.id)"
-                    />
-                    <component
-                      :is="fileIconOf(doc.filename)"
-                      class="h-4 w-4 shrink-0"
-                      :style="{ color: fileColorOf(doc.filename) }"
-                    />
-                    <span
-                      class="shrink-0 rounded px-1 text-[10px] font-semibold uppercase leading-4"
-                      :style="{
-                        color: fileColorOf(doc.filename),
-                        backgroundColor: fileColorOf(doc.filename) + '1a',
-                      }"
-                    >
-                      {{ fileExtOf(doc.filename) }}
-                    </span>
-                    <span class="truncate">{{ doc.filename }}</span>
-                  </span>
-                </td>
-                <td class="px-4 py-3 uppercase text-muted-foreground">{{ doc.fileType }}</td>
-                <td class="px-4 py-3 text-muted-foreground">{{ formatFileSize(doc.fileSize) }}</td>
-                <td class="px-4 py-3">
-                  <span
-                    class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs"
-                    :class="statusClass(doc.status)"
-                    :title="doc.error ?? ''"
-                  >
-                    <span
-                      v-if="doc.status === 'processing' || doc.status === 'pending'"
-                      class="h-1.5 w-1.5 animate-pulse rounded-full bg-current"
-                    />
-                    {{ statusText[doc.status] }}
-                  </span>
-                </td>
-                <td class="px-4 py-3 text-muted-foreground">{{ doc._count?.chunks ?? 0 }}</td>
-                <td class="px-4 py-3 text-right">
-                  <div class="flex items-center justify-end gap-1">
-                    <button
-                      class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      :title="'编辑 ' + doc.filename"
-                      @click="openDocEdit(doc)"
-                    >
-                      <Pencil class="h-4 w-4" />
-                    </button>
-                    <button
-                      class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      :title="'下载 ' + doc.filename"
-                      @click="handleDownload(doc)"
-                    >
-                      <Download class="h-4 w-4" />
-                    </button>
-                    <label
-                      class="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      :title="'更新（重新上传替换）'"
-                    >
-                      <Loader2 v-if="updatingId === doc.id" class="h-4 w-4 animate-spin" />
-                      <RefreshCw v-else class="h-4 w-4" />
-                      <input
-                        type="file"
-                        class="hidden"
-                        :disabled="updatingId !== null"
-                        @change="onReplaceFileChange($event, doc.id)"
-                      />
-                    </label>
-                    <button
-                      class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      :title="'删除 ' + doc.filename"
-                      @click="handleDelete(doc.id, doc.filename)"
-                    >
-                      <Trash2 class="h-4 w-4" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+              <DocTableRow
+                v-for="doc in filteredDocs"
+                :key="doc.id"
+                :node="{ type: 'file', name: doc.filename, path: doc.filename, doc, depth: 0 }"
+                :selected-ids="selectedIds"
+                :updating-id="updatingId"
+                :expanded-paths="expandedPaths"
+                @toggle-folder="toggleFolder"
+                @toggle-select-folder="toggleSelectFolder"
+                @toggle-select="toggleSelect"
+                @edit="openDocEdit"
+                @download="handleDownload"
+                @replace="onReplaceFileChange"
+                @delete="handleDelete"
+                @rename-folder="handleRenameFolder"
+                @delete-folder="handleDeleteFolder"
+              />
             </template>
 
             <!-- 目录树模式：文件夹行可展开折叠，文件行按层级缩进 -->
             <template v-else>
-              <tr
+              <DocTableRow
                 v-for="node in displayNodes"
                 :key="node.type === 'folder' ? 'dir:' + node.path : 'file:' + node.doc!.id"
-              >
-                <!-- 文件夹行 -->
-                <template v-if="node.type === 'folder'">
-                  <td
-                    class="cursor-pointer select-none px-4 py-2.5 transition-colors hover:bg-muted/50"
-                    @click="toggleFolder(node)"
-                  >
-                    <div
-                      class="flex items-center gap-2"
-                      :style="{ paddingLeft: node.depth * 20 + 'px' }"
-                    >
-                      <input
-                        type="checkbox"
-                        class="h-3.5 w-3.5 shrink-0 accent-blue-500"
-                        :checked="folderSelected(node)"
-                        @click.stop
-                        @change="toggleSelectFolder(node)"
-                      />
-                      <ChevronRight
-                        class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
-                        :class="{ 'rotate-90': isExpanded(node) }"
-                      />
-                      <Folder class="h-4 w-4 shrink-0 text-primary" />
-                      <span class="font-medium">{{ node.name }}</span>
-                    </div>
-                  </td>
-                  <td class="px-4 py-2.5 uppercase text-muted-foreground">文件夹</td>
-                  <td class="px-4 py-2.5 text-muted-foreground">
-                    {{ formatFileSize(node.totalSize ?? 0) }}
-                  </td>
-                  <td class="px-4 py-2.5 text-muted-foreground">{{ node.docCount }} 个文档</td>
-                  <td class="px-4 py-2.5 text-muted-foreground">{{ node.chunkCount ?? 0 }}</td>
-                  <td class="px-4 py-2.5 text-right">
-                    <div class="flex items-center justify-end gap-1">
-                      <button
-                        class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        :title="'重命名文件夹 ' + node.name"
-                        @click.stop="handleRenameFolder(node)"
-                      >
-                        <Pencil class="h-4 w-4" />
-                      </button>
-                      <button
-                        class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        :title="'删除文件夹 ' + node.name"
-                        @click.stop="handleDeleteFolder(node)"
-                      >
-                        <Trash2 class="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </template>
-
-                <!-- 文件行 -->
-                <template v-else>
-                  <td
-                    class="max-w-[280px] truncate px-4 py-3 font-medium"
-                    :title="node.doc!.filename"
-                  >
-                    <div
-                      class="flex items-center gap-1.5"
-                      :style="{ paddingLeft: node.depth * 20 + 'px' }"
-                    >
-                      <input
-                        type="checkbox"
-                        class="h-3.5 w-3.5 shrink-0 accent-blue-500"
-                        :checked="selectedIds.has(node.doc!.id)"
-                        @change="toggleSelect(node.doc!.id)"
-                      />
-                      <component
-                        :is="fileIconOf(node.doc!.filename)"
-                        class="h-4 w-4 shrink-0"
-                        :style="{ color: fileColorOf(node.doc!.filename) }"
-                      />
-                      <span
-                        class="shrink-0 rounded px-1 text-[10px] font-semibold uppercase leading-4"
-                        :style="{
-                          color: fileColorOf(node.doc!.filename),
-                          backgroundColor: fileColorOf(node.doc!.filename) + '1a',
-                        }"
-                      >
-                        {{ fileExtOf(node.doc!.filename) }}
-                      </span>
-                      <span class="truncate">{{ node.name }}</span>
-                    </div>
-                  </td>
-                  <td class="px-4 py-3 uppercase text-muted-foreground">
-                    {{ node.doc!.fileType }}
-                  </td>
-                  <td class="px-4 py-3 text-muted-foreground">
-                    {{ formatFileSize(node.doc!.fileSize) }}
-                  </td>
-                  <td class="px-4 py-3">
-                    <span
-                      class="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs"
-                      :class="statusClass(node.doc!.status)"
-                      :title="node.doc!.error ?? ''"
-                    >
-                      <span
-                        v-if="node.doc!.status === 'processing' || node.doc!.status === 'pending'"
-                        class="h-1.5 w-1.5 animate-pulse rounded-full bg-current"
-                      />
-                      {{ statusText[node.doc!.status] }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3 text-muted-foreground">
-                    {{ node.doc!._count?.chunks ?? 0 }}
-                  </td>
-                  <td class="px-4 py-3 text-right">
-                    <div class="flex items-center justify-end gap-1">
-                      <button
-                        class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        :title="'编辑 ' + node.doc!.filename"
-                        @click="openDocEdit(node.doc!)"
-                      >
-                        <Pencil class="h-4 w-4" />
-                      </button>
-                      <button
-                        class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        :title="'下载 ' + node.doc!.filename"
-                        @click="handleDownload(node.doc!)"
-                      >
-                        <Download class="h-4 w-4" />
-                      </button>
-                      <label
-                        class="cursor-pointer rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        :title="'更新（重新上传替换）'"
-                      >
-                        <Loader2 v-if="updatingId === node.doc!.id" class="h-4 w-4 animate-spin" />
-                        <RefreshCw v-else class="h-4 w-4" />
-                        <input
-                          type="file"
-                          class="hidden"
-                          :disabled="updatingId !== null"
-                          @change="onReplaceFileChange($event, node.doc!.id)"
-                        />
-                      </label>
-                      <button
-                        class="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        :title="'删除 ' + node.doc!.filename"
-                        @click="handleDelete(node.doc!.id, node.doc!.filename)"
-                      >
-                        <Trash2 class="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </template>
-              </tr>
+                :node="node"
+                :selected-ids="selectedIds"
+                :updating-id="updatingId"
+                :expanded-paths="expandedPaths"
+                @toggle-folder="toggleFolder"
+                @toggle-select-folder="toggleSelectFolder"
+                @toggle-select="toggleSelect"
+                @edit="openDocEdit"
+                @download="handleDownload"
+                @replace="onReplaceFileChange"
+                @delete="handleDelete"
+                @rename-folder="handleRenameFolder"
+                @delete-folder="handleDeleteFolder"
+              />
             </template>
           </tbody>
         </table>
