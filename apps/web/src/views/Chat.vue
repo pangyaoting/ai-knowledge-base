@@ -244,12 +244,16 @@ const layoutCls = computed(() =>
   chatLayout.value === 'wide' ? 'mx-auto w-full px-6' : 'mx-auto max-w-5xl px-4',
 );
 function toggleChatLayout() {
-  // 切换布局时保持滚动位置，避免"瞬间往下走一段"
-  const top = messageContainer.value?.scrollTop ?? 0;
+  // 切换布局时按"滚动比例"恢复位置（宽度变化会重排，绝对位置会跳到别处/看起来内容消失）
+  const scroller = messageContainer.value;
+  const ratio =
+    scroller && scroller.scrollHeight > 0 ? scroller.scrollTop / scroller.scrollHeight : 0;
   chatLayout.value = chatLayout.value === 'wide' ? 'standard' : 'wide';
   localStorage.setItem('chat-layout', chatLayout.value);
   nextTick(() => {
-    if (messageContainer.value) messageContainer.value.scrollTop = top;
+    if (messageContainer.value && messageContainer.value.scrollHeight > 0) {
+      messageContainer.value.scrollTop = ratio * messageContainer.value.scrollHeight;
+    }
   });
 }
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
@@ -897,7 +901,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         </Button>
       </div>
       <!-- 消息区 -->
-      <div ref="messageContainer" class="hide-scrollbar flex-1 overflow-y-auto">
+      <div ref="messageContainer" class="flex-1 overflow-y-auto">
         <div
           v-if="!currentSessionId"
           class="relative flex h-full flex-col items-center justify-center text-center"
@@ -958,7 +962,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 </div>
                 <div
                   v-if="msgHead(msg)"
-                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[19px] font-semibold text-foreground"
+                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[18px] text-foreground"
                 >
                   {{ msgHead(msg) }}
                 </div>
@@ -1462,10 +1466,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   display: none;
 }
 
-/* AI 回答的 Markdown 排版（无白色卡片背景，直接铺在页面背景上；暗黑可读） */
+/* AI 回答的 Markdown 排版（无白色卡片背景，直接铺在页面背景上；暗黑可读）
+   正文只放大不加粗；标题按等级加粗 + 大小 */
 .markdown-body {
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--foreground);
 }
 /* 宽屏布局：字号再大一档 */
@@ -1481,19 +1486,26 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   margin: 0.75em 0 0.4em;
 }
 .markdown-body :deep(h1) {
-  font-size: 1.4em;
+  font-size: 1.5em;
+  font-weight: 700;
 }
 .markdown-body :deep(h2) {
-  font-size: 1.25em;
+  font-size: 1.32em;
+  font-weight: 700;
 }
 .markdown-body :deep(h3) {
-  font-size: 1.12em;
+  font-size: 1.16em;
+  font-weight: 700;
+}
+.markdown-body :deep(h4) {
+  font-size: 1.05em;
+  font-weight: 600;
 }
 .markdown-body :deep(p) {
   margin: 0.5em 0;
   line-height: 1.8;
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 400;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -1543,10 +1555,6 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   line-height: 1.6;
   background: hsl(var(--muted));
   color: var(--foreground);
-  scrollbar-width: none;
-}
-.markdown-body :deep(.code-block pre::-webkit-scrollbar) {
-  display: none;
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;
