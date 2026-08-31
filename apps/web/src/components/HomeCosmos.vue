@@ -91,15 +91,15 @@ interface WhDiskParticle {
   color: [number, number, number];
 }
 
-/** 白洞喷流的柔和色板（浅蓝天空上协调：暖杏/橙/粉 + 冷紫/蓝/青/绿） */
+/** 白洞喷流的饱和色板（大胆多彩：金黄/橙红/玫红/紫罗兰/天蓝/亮青/翠绿） */
 const WH_JET_PALETTE: Array<[number, number, number]> = [
-  [255, 206, 158], // 淡杏
-  [255, 172, 138], // 淡橙
-  [255, 152, 192], // 淡粉
-  [196, 166, 255], // 淡紫
-  [148, 196, 255], // 淡蓝
-  [136, 232, 218], // 淡青
-  [176, 236, 172], // 淡绿
+  [255, 186, 48], // 金黄
+  [255, 110, 62], // 橙红
+  [255, 82, 132], // 玫红
+  [196, 96, 255], // 紫罗兰
+  [86, 152, 255], // 天蓝
+  [52, 208, 240], // 亮青
+  [72, 224, 132], // 翠绿
 ];
 interface Dust {
   x: number;
@@ -109,6 +109,8 @@ interface Dust {
   size: number;
   tw: number;
   depth: number;
+  /** 光尘颜色（从色板取，淡色漂浮） */
+  color: [number, number, number];
 }
 
 const wh = {
@@ -183,6 +185,7 @@ function buildWhiteHole() {
       size: rand(0.8, 2.6),
       tw: rand(0.5, 2),
       depth: rand(0.5, 1),
+      color: WH_JET_PALETTE[Math.floor(Math.random() * WH_JET_PALETTE.length)],
     });
   }
 }
@@ -465,21 +468,21 @@ function drawWhiteHole(now: number, alpha: number) {
   ctx.fillStyle = halo;
   ctx.fillRect(0, 0, w, h);
 
-  // 漂浮光尘（视差）
+  // 漂浮光尘（视差，多彩淡色）
   ctx.globalCompositeOperation = 'source-over';
   for (const d of wh.dust) {
     const px = d.x - mx * d.depth * 10;
     const py = d.y - my * d.depth * 8;
     const tw = 0.5 + 0.5 * Math.sin((now / 900) * d.tw + d.x);
-    ctx.globalAlpha = alpha * (0.16 + 0.26 * tw) * d.depth;
-    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = alpha * (0.14 + 0.22 * tw) * d.depth;
+    ctx.fillStyle = `rgb(${d.color[0]},${d.color[1]},${d.color[2]})`;
     ctx.beginPath();
     ctx.arc(px, py, d.size, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // 喷射粒子（叠加发光；每个粒子直接呈现各自的柔和目标色 → 多彩喷流）
-  ctx.globalCompositeOperation = 'lighter';
+  // 喷射粒子（普通覆盖混合：饱和色直接可见，不会被白色核心加色冲白 → 全程多彩）
+  ctx.globalCompositeOperation = 'source-over';
   for (const p of wh.particles) {
     const rn = clamp(p.r / 1.9, 0, 1);
     const wv = wh.K / Math.pow(Math.max(p.r, 0.1), 1.5);
@@ -487,8 +490,8 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    const a = alpha * (0.35 + 0.65 * (1 - rn)) * (0.5 + 0.5 * flick);
-    // 直接使用目标色（柔和淡色）；近核仍会被白色核心光晕自然冲淡
+    // 近核（rn 小）alpha 高 → 从产生就呈现饱和色
+    const a = alpha * (0.55 + 0.45 * (1 - rn)) * (0.6 + 0.4 * flick);
     const cr = p.color[0];
     const cg = p.color[1];
     const cb = p.color[2];
@@ -505,7 +508,7 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.arc(p.sx, p.sy, p.size * 0.7, 0, Math.PI * 2);
     ctx!.fill();
     if (rn < 0.35) {
-      ctx!.globalAlpha = Math.min(1, a * 0.4);
+      ctx!.globalAlpha = Math.min(1, a * 0.35);
       ctx!.beginPath();
       ctx!.arc(p.sx, p.sy, p.size * 3, 0, Math.PI * 2);
       ctx!.fill();
