@@ -209,8 +209,8 @@ export class ChatService {
     if (!content) {
       throw new BadRequestException('未能从文件中提取到文本（可能是扫描件或图片型 PDF）');
     }
-    // 防止超大文本撑爆模型上下文：截断到 6 万字符
-    const MAX_FILE_CHARS = 60_000;
+    // 防止超大文本撑爆模型上下文：单文件截断到 3 万字符（3 个文件 ≈ 9 万字符，模型上下文内）
+    const MAX_FILE_CHARS = 30_000;
     const truncated = content.length > MAX_FILE_CHARS;
     return {
       filename,

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
   MessageSquare,
@@ -61,7 +61,7 @@ const inputDrafts = ref<Record<string, string>>({});
 const imageDrafts = ref<Record<string, string[]>>({});
 
 // ==================== 图片（粘贴 / 上传，最多 6 张，压缩后进消息） ====================
-const MAX_IMAGES = 6;
+const MAX_IMAGES = 9;
 const pendingImages = ref<string[]>([]);
 
 /** 粘贴图片：收集剪贴板全部图片 → 压缩 → 加入待发送列表 */
@@ -134,7 +134,7 @@ async function onPickImage(e: Event) {
   }
 }
 // ==================== 上传文件（文本/代码/PDF/Word，提取内容后随消息发送） ====================
-const MAX_FILES = 3;
+const MAX_FILES = 5;
 const pendingFiles = ref<Array<{ name: string; content: string }>>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
 
@@ -197,12 +197,18 @@ async function handleBranch(idx: number) {
     sessionSearch.value = '';
     await loadSessions();
     await selectSession(session.id);
-    if (question) input.value = question;
+    // 预填对应问题（纯图片消息没有文字时给个引导），并聚焦输入框
+    input.value = question || '请继续分析刚才的图片/内容：';
+    await nextTick();
+    messageTextarea.value?.focus();
     toast.success('已基于该回答新建会话，可修改问题后继续');
   } catch (e) {
     toast.error((e as Error).message);
   }
 }
+/** 右侧文件内容预览面板（点击输入框中的文件 chip 打开） */
+const filePreview = ref<{ name: string; content: string } | null>(null);
+const messageTextarea = ref<HTMLTextAreaElement | null>(null);
 const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
@@ -861,7 +867,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <p class="mt-3 text-sm text-muted-foreground">选择或新建一个会话开始提问</p>
         </div>
 
-        <div v-else class="mx-auto max-w-4xl space-y-6 px-4 py-6">
+        <div v-else class="mx-auto max-w-5xl space-y-6 px-4 py-6">
           <!-- 历史消息 -->
           <div
             v-for="(msg, i) in messages"
@@ -905,7 +911,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 </details>
                 <div
                   v-if="msgHead(msg)"
-                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-sm text-foreground"
+                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[15px] text-foreground"
                 >
                   {{ msgHead(msg) }}
                 </div>
@@ -917,26 +923,27 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 @click="handleMessageClick"
                 v-html="renderMarkdown(msg.content)"
               />
-              <!-- 操作条：复制（提问/回答）+ 分支（回答） -->
+              <!-- 操作条：复制（提问/回答）+ 分支（回答）；一直显示，提问右对齐 -->
               <div
-                class="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+                class="mt-1.5 flex items-center gap-1"
+                :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
               >
                 <button
-                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   title="复制整条消息"
                   @click="copyMessage(msg)"
                 >
-                  <Copy class="h-3 w-3" />
+                  <Copy class="h-3.5 w-3.5" />
                   复制
                 </button>
                 <button
                   v-if="msg.role === 'assistant'"
-                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   title="基于这条回答新建会话，换个角度继续提问"
                   @click="handleBranch(i)"
                 >
-                  <GitBranch class="h-3 w-3" />
-                  在新对话中分支
+                  <GitBranch class="h-3.5 w-3.5" />
+                  分支
                 </button>
               </div>
 
@@ -1074,7 +1081,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 问答范围（常驻可见，点击可修改当前会话） -->
         <div
           v-if="currentSessionId"
-          class="mx-auto mb-2 flex max-w-4xl items-center gap-2 text-[11px]"
+          class="mx-auto mb-2 flex max-w-5xl items-center gap-2 text-[11px]"
         >
           <span class="shrink-0 text-muted-foreground">问答范围</span>
           <button
@@ -1161,7 +1168,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 待发送图片/文件预览：在输入框上方横排展示（有图片或文件时显示） -->
         <div
           v-if="pendingImages.length || pendingFiles.length"
-          class="mx-auto mb-2 flex max-w-4xl items-center gap-2 overflow-x-auto pb-1"
+          class="mx-auto mb-2 flex max-w-5xl items-center gap-2 overflow-x-auto pb-1"
         >
           <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
             <img
@@ -1178,25 +1185,27 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </button>
           </div>
           <p class="flex items-center text-[11px] text-muted-foreground">
-            {{ pendingImages.length }}/6
+            {{ pendingImages.length }}/9
           </p>
           <div
             v-for="(f, i) in pendingFiles"
             :key="'file-' + i"
-            class="relative flex shrink-0 items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs"
+            class="group relative flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs transition-colors hover:bg-accent"
+            title="点击在右侧查看文件内容"
+            @click="filePreview = f"
           >
             <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span class="max-w-[140px] truncate">{{ f.name }}</span>
             <button
-              class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              class="rounded p-0.5 text-muted-foreground opacity-60 transition-colors hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
               title="移除这个文件"
-              @click="removeFile(i)"
+              @click.stop="removeFile(i)"
             >
               <X class="h-3 w-3" />
             </button>
           </div>
         </div>
-        <div class="mx-auto flex max-w-4xl items-end gap-2">
+        <div class="mx-auto flex max-w-5xl items-end gap-2">
           <!-- 上传本地图片（可多选） -->
           <button
             type="button"
@@ -1232,6 +1241,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             @change="onPickFile"
           />
           <textarea
+            ref="messageTextarea"
             v-model="input"
             rows="1"
             class="max-h-40 min-h-[44px] flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1250,7 +1260,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </Button>
         </div>
         <p
-          class="mx-auto mt-2 flex max-w-4xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
+          class="mx-auto mt-2 flex max-w-5xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
         >
           <label class="flex cursor-pointer items-center gap-1.5 select-none">
             <input
@@ -1361,13 +1371,36 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         previewChunkIndex = null;
       "
     />
+
+    <!-- 上传文件内容预览：右侧弹出，占一半宽度（点击输入框中的文件 chip 打开） -->
+    <div
+      v-if="filePreview"
+      class="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l bg-card shadow-2xl sm:w-1/2"
+    >
+      <div class="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+        <p class="min-w-0 truncate text-sm font-semibold">
+          <FileText class="mr-1.5 inline h-4 w-4 text-muted-foreground" />
+          {{ filePreview.name }}
+        </p>
+        <button
+          class="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="关闭预览"
+          @click="filePreview = null"
+        >
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+      <pre
+        class="flex-1 overflow-auto whitespace-pre-wrap p-4 font-mono text-xs leading-relaxed text-foreground"
+        >{{ filePreview.content }}</pre>
+    </div>
   </div>
 </template>
 
 <style scoped>
 /* AI 回答的 Markdown 排版（暗黑模式可读性：显式文字色，避免继承导致看不清） */
 .markdown-body {
-  font-size: 0.95rem;
+  font-size: 1rem;
   color: var(--foreground);
 }
 .markdown-body :deep(h1),
@@ -1390,7 +1423,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 .markdown-body :deep(p) {
   margin: 0.5em 0;
   line-height: 1.75;
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {

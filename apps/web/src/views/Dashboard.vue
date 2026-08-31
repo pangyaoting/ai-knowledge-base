@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 // echarts 按需引入：只注册用到的图表与组件，砍掉整包体积
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart } from 'echarts/charts';
@@ -121,19 +121,6 @@ function fmtTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
 }
-
-/** 费用合计（元） */
-const costTotal = computed(() => {
-  const c = data.value?.tokens.cost;
-  if (!c) return 0;
-  return c.chat + c.report + c.agentTask;
-});
-
-/** 金额显示：¥x.xx（不足 0.01 显示三位小数） */
-function fmtMoney(n: number): string {
-  if (n > 0 && n < 0.01) return `¥${n.toFixed(3)}`;
-  return `¥${n.toFixed(2)}`;
-}
 </script>
 
 <template>
@@ -236,29 +223,6 @@ function fmtMoney(n: number): string {
               }}</span>
             </p>
           </div>
-          <!-- 费用估算 -->
-          <div class="mt-2 rounded-md bg-primary/5 px-3 py-2 text-[11px]">
-            <p class="flex justify-between">
-              <span class="text-muted-foreground">费用估算</span>
-              <span class="font-bold text-primary">{{ fmtMoney(costTotal) }}</span>
-            </p>
-            <p class="mt-0.5 flex justify-between text-muted-foreground">
-              <span>对话</span>
-              <span>{{ fmtMoney(data.tokens.cost.chat) }}</span>
-            </p>
-            <p class="flex justify-between text-muted-foreground">
-              <span>研究报告</span>
-              <span>{{ fmtMoney(data.tokens.cost.report) }}</span>
-            </p>
-            <p class="flex justify-between text-muted-foreground">
-              <span>自主研究</span>
-              <span>{{ fmtMoney(data.tokens.cost.agentTask) }}</span>
-            </p>
-          </div>
-          <p class="mt-1 text-[10px] text-muted-foreground/70">
-            * 按 DeepSeek 通用单价估算（输入 ¥1/百万、输出 ¥2/百万、研究
-            ¥1.5/百万），实际以服务商账单为准
-          </p>
         </div>
       </div>
 
