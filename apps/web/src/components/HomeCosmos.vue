@@ -478,7 +478,7 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 喷射粒子（叠加发光；每个粒子从白色渐变到各自的柔和目标色 → 多色喷流）
+  // 喷射粒子（叠加发光；每个粒子直接呈现各自的柔和目标色 → 多彩喷流）
   ctx.globalCompositeOperation = 'lighter';
   for (const p of wh.particles) {
     const rn = clamp(p.r / 1.9, 0, 1);
@@ -487,11 +487,11 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    const a = alpha * (1 - rn) * (0.5 + 0.5 * flick);
-    // 内区近白 → 外区渐变为该粒子目标色（柔和色板，浅蓝天空上协调）
-    const cr = Math.round(lerp(255, p.color[0], rn));
-    const cg = Math.round(lerp(255, p.color[1], rn));
-    const cb = Math.round(lerp(255, p.color[2], rn));
+    const a = alpha * (0.35 + 0.65 * (1 - rn)) * (0.5 + 0.5 * flick);
+    // 直接使用目标色（柔和淡色）；近核仍会被白色核心光晕自然冲淡
+    const cr = p.color[0];
+    const cg = p.color[1];
+    const cb = p.color[2];
     const tail = 7;
     ctx!.globalAlpha = Math.min(1, a);
     ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
