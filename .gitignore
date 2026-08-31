@@ -34,3 +34,13 @@ apps/server/uploads/*
 # Docker data
 postgres-data/
 redis-data/
+
+# 临时测试/CI 目录
+.e2e*/
+.tmp-ci*/
+
+# Windows 批处理启动脚本
+start-backend.bat
+start-frontend.bat
+一键启动.bat
+check-port.bat

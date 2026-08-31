@@ -518,7 +518,7 @@ export class AgentRunner {
       stop,
     );
     if (!res) return null;
-    let q = res.text
+    const q = res.text
       .replace(/^["'“”\s]+|["'“”\s]+$/g, '')
       .replace(/^搜索词[:：]\s*/i, '')
       .trim();

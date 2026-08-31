@@ -7,7 +7,6 @@ import {
   Send,
   Square,
   Trash2,
-  Loader2,
   BookOpen,
   Database,
   Download,

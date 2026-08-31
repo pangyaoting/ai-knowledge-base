@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NestInterceptor,
-  ExecutionContext,
-  CallHandler,
-} from '@nestjs/common';
+import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
@@ -13,10 +8,14 @@ import { map } from 'rxjs/operators';
  * 例外：SSE 流式接口（response 已开始写出）跳过包装，保持 text/event-stream 协议
  */
 @Injectable()
-export class TransformInterceptor<T>
-  implements NestInterceptor<T, { code: number; message: string; data: T }>
-{
-  intercept(context: ExecutionContext, next: CallHandler<T>): Observable<{ code: number; message: string; data: T }> {
+export class TransformInterceptor<T> implements NestInterceptor<
+  T,
+  { code: number; message: string; data: T }
+> {
+  intercept(
+    context: ExecutionContext,
+    next: CallHandler<T>,
+  ): Observable<{ code: number; message: string; data: T }> {
     const response = context.switchToHttp().getResponse();
     // 响应已开始写出（SSE 或手动管理），不包装
     if (response.headersSent) {

@@ -1,17 +1,7 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 defineOptions({ name: 'ResearchView' });
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import {
-  FileText,
-  Plus,
-  Trash2,
-  Loader2,
-  BookOpen,
-  Sparkles,
-  Download,
-  MessageSquare,
-  Database,
-} from 'lucide-vue-next';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { FileText, Plus, Trash2, Loader2, BookOpen, Sparkles, Download } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
@@ -70,6 +60,8 @@ const progressText = computed(() => {
       return '已完成';
     case 'failed':
       return '生成失败';
+    default:
+      return '';
   }
 });
 

@@ -52,7 +52,10 @@ export function renderMarkdown(text: string): string {
   const html = md.render(text);
   // 给每个代码块包容器 + 复制按钮
   return html
-    .replace(/<pre class="hljs">/g, '<div class="code-block"><button type="button" class="code-copy" title="复制代码">复制</button><pre class="hljs">')
+    .replace(
+      /<pre class="hljs">/g,
+      '<div class="code-block"><button type="button" class="code-copy" title="复制代码">复制</button><pre class="hljs">',
+    )
     .replace(/<\/pre>/g, '</pre></div>');
 }
 
@@ -61,5 +64,5 @@ export function getCopyCode(target: HTMLElement): string | null {
   const block = target.closest('.code-block');
   if (!block) return null;
   const pre = block.querySelector('pre');
-  return pre ? pre.textContent ?? null : null;
+  return pre ? (pre.textContent ?? null) : null;
 }

@@ -52,9 +52,7 @@ export class EmbeddingService {
           input: batch,
         });
         // 返回顺序与输入一致（按 index 排序，保险起见）
-        return resp.data
-          .sort((a, b) => a.index - b.index)
-          .map((item) => item.embedding);
+        return resp.data.sort((a, b) => a.index - b.index).map((item) => item.embedding);
       } catch (err) {
         lastError = err;
         const delay = 500 * 2 ** (attempt - 1); // 500ms, 1s, 2s

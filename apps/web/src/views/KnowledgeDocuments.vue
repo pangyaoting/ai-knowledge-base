@@ -375,7 +375,7 @@ async function startUpload(files: File[]) {
   try {
     let nextIndex = 0;
     const worker = async () => {
-      while (true) {
+      while (nextIndex < nonEmpty.length) {
         const idx = nextIndex++;
         if (idx >= nonEmpty.length) break;
         const f = nonEmpty[idx];
@@ -649,12 +649,6 @@ function formatFileSize(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
-/** 文件名去掉目录前缀（只显示最末一段） */
-function baseName(name: string): string {
-  const idx = name.lastIndexOf('/');
-  return idx < 0 ? name : name.slice(idx + 1);
-}
-
 async function handleDelete(docId: string, filename: string) {
   // eslint-disable-next-line no-alert
   if (!window.confirm(`删除文档「${filename}」及其向量数据？`)) return;
@@ -771,7 +765,7 @@ async function handleRenameFolder(node: DocTreeNode) {
   const errors: string[] = [];
   let next = 0;
   const worker = async () => {
-    while (true) {
+    while (next < docs.length) {
       const idx = next++;
       if (idx >= docs.length) break;
       const d = docs[idx];
@@ -779,7 +773,7 @@ async function handleRenameFolder(node: DocTreeNode) {
         await updateDocument(knowledgeBaseId, d.id, {
           filename: newName + d.filename.slice(oldPath.length),
         });
-      } catch (e) {
+      } catch {
         errors.push(d.filename);
       }
     }
@@ -805,13 +799,13 @@ async function handleDeleteFolder(node: DocTreeNode) {
   const errors: string[] = [];
   let next = 0;
   const worker = async () => {
-    while (true) {
+    while (next < docs.length) {
       const idx = next++;
       if (idx >= docs.length) break;
       const d = docs[idx];
       try {
         await deleteDocument(knowledgeBaseId, d.id);
-      } catch (e) {
+      } catch {
         errors.push(d.filename);
       }
     }
@@ -845,13 +839,13 @@ async function deleteSelected() {
   const errors: string[] = [];
   let next = 0;
   const worker = async () => {
-    while (true) {
+    while (next < docs.length) {
       const idx = next++;
       if (idx >= docs.length) break;
       const d = docs[idx];
       try {
         await deleteDocument(knowledgeBaseId, d.id);
-      } catch (e) {
+      } catch {
         errors.push(d.filename);
       }
     }
