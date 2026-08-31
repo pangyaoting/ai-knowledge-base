@@ -9,8 +9,9 @@
  *    白核（= 视界半径 R）+ 反光子环（= 1.42R，白环而非橙环），物质从核心向外喷射、
  *    旋转减速并淡出，配旋转光晕射线、周期性激波环、漂浮光尘。
  *  - 核心位于页面下方（0.74h），避开欢迎区/卡片/引导文字；鼠标互动：核心跟随鼠标缓动，
- *    白洞核心附近粒子被鼠标"能量斥力"偏转；黑洞相反——鼠标附近的粒子加速旋转并被吸入，
- *    鼠标悬停在黑洞上时整盘粒子加速旋转、加速坠入视界（"吞噬"）；主题切换时两套场景交叉淡入淡出。
+ *    白洞核心附近粒子被鼠标"能量斥力"偏转，鼠标悬停白洞上时全部粒子加速爆发（默认缓速喷射）；
+ *    黑洞相反——鼠标附近的粒子加速旋转并被吸入，鼠标悬停在黑洞上时整盘粒子加速旋转、
+ *    加速坠入视界（"吞噬"）；主题切换时两套场景交叉淡入淡出。
  */
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useTheme } from '@/composables/useTheme';
@@ -169,10 +170,10 @@ function buildWhiteHole() {
   wh.coreR = bh.R * 0.72;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
-  // 喷射要"壮观"：高速放射（学黑洞吸入粒子的激烈观感，方向相反）+ 高密度
+  // 默认缓速喷射；鼠标悬停白洞核心时全部粒子加速爆发（见 updateWhiteHole）
   const n = Math.min(2400, Math.round((w * h) / 600));
   for (let i = 0; i < n; i++) {
-    wh.particles.push(makeWhParticle(rand(0.006, 0.011)));
+    wh.particles.push(makeWhParticle(rand(0.0028, 0.0052)));
   }
   wh.dust = [];
   const d = Math.min(200, Math.round((w * h) / 8000));
@@ -270,6 +271,9 @@ function updateWhiteHole() {
   // 鼠标能量斥力仅在鼠标真正移动过后生效（初始保持原速）
   const cxp = mouseActive ? mouse.x * window.innerWidth : -9999;
   const cyp = mouseActive ? mouse.y * window.innerHeight : -9999;
+  // 鼠标悬停白洞核心上 → 全部粒子加速喷发（速度对齐黑洞互动时的激烈观感）
+  const dCore = Math.hypot(cxp - holeX, cyp - holeY);
+  const globalBoost = clamp(1 - dCore / (wh.coreR * 2.5), 0, 1);
   for (const p of wh.particles) {
     // 鼠标能量斥力：核心附近的粒子被弹开（互动）
     const dx = p.sx - cxp;
@@ -283,14 +287,16 @@ function updateWhiteHole() {
     }
     p.theta += wh.K / Math.pow(p.r, 1.5);
     const prevR = p.r;
+    // 鼠标在白洞上：每帧给 vr 叠加加速（封顶 0.014，约 2 秒一轮爆发喷射）
+    p.vr = Math.min(p.vr + globalBoost * 0.001, 0.014);
     p.r += p.vr;
     p.vr *= 0.9998; // 喷射几乎不减速（保持高速锐利的喷流）
     // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
     if (p.r > 1.9) {
-      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt，保持高速）
+      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt；鼠标不在核心时保持默认缓速）
       p.r = rand(0.08, 0.16);
       p.theta = rand(0, Math.PI * 2);
-      p.vr = rand(0.006, 0.011);
+      p.vr = rand(0.0028, 0.0052);
       p.tilt = rand(0.5, 1);
       p.size = rand(1.3, 3.2);
     } else if (p.r > 1.05 && prevR <= 1.05) {
@@ -320,6 +326,26 @@ function diskColor(rn: number): string {
     [0.25, [255, 214, 140]],
     [0.5, [255, 158, 96]],
     [0.75, [208, 108, 168]],
+    [1, [136, 122, 232]],
+  ];
+  const t = clamp(rn, 0, 1);
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const [t0, c0] = stops[i - 1];
+      const [t1, c1] = stops[i];
+      const k = (t - t0) / (t1 - t0);
+      return `rgb(${Math.round(lerp(c0[0], c1[0], k))},${Math.round(lerp(c0[1], c1[1], k))},${Math.round(lerp(c0[2], c1[2], k))})`;
+    }
+  }
+  return 'rgb(136,122,232)';
+}
+
+/** 白洞喷流粒子颜色：近核纯白 → 炽白 → 淡蓝 → 外圈蓝紫（与黑洞外圈同色，内圈更白） */
+function whJetColor(rn: number): string {
+  const stops: Array<[number, [number, number, number]]> = [
+    [0, [255, 253, 250]],
+    [0.3, [255, 244, 224]],
+    [0.7, [196, 214, 255]],
     [1, [136, 122, 232]],
   ];
   const t = clamp(rn, 0, 1);
@@ -549,7 +575,7 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 喷射粒子（普通覆盖混合；配色与黑洞同款：核心炽白 → 外圈蓝紫，真实冷却渐变）
+  // 喷射粒子（普通覆盖混合；配色：近核纯白/炽白 → 外圈蓝紫，真实冷却渐变）
   // 精致渲染：白色高光芯 + 目标色主体 + 淡色光晕，三层发光球；拖尾细线
   ctx.globalCompositeOperation = 'source-over';
   for (const p of wh.particles) {
@@ -561,7 +587,7 @@ function drawWhiteHole(now: number, alpha: number) {
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
     // 近核（rn 小）alpha 高 → 喷流从核心处最亮
     const a = alpha * (0.55 + 0.45 * (1 - rn)) * (0.6 + 0.4 * flick);
-    const col = diskColor(rn);
+    const col = whJetColor(rn);
     const tail = 12;
     // 拖尾：细线，略淡，尾部渐隐感（高速 → 拉出壮观的放射状喷流尾迹）
     ctx!.globalAlpha = Math.min(1, a * 0.5);
