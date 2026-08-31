@@ -8,6 +8,7 @@
     "dev:server": "pnpm --filter @app/server start:dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
+    "test": "pnpm --filter @app/server test && pnpm --filter @app/web test",
     "format": "prettier --write \"**/*.{ts,vue,js,json,md}\"",
     "prepare": "husky install",
     "prisma:migrate": "prisma migrate dev --schema apps/server/prisma/schema.prisma",
@@ -25,5 +26,13 @@
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=8.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "unrs-resolver",
+      "esbuild",
+      "@nestjs/core"
+    ]
   }
 }

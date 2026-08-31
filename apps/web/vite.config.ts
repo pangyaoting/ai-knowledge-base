@@ -9,6 +9,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  test: {
+    environment: 'jsdom', // getCopyCode 等 DOM 操作需要 jsdom
+    include: ['src/**/*.spec.ts'],
+  },
   server: {
     port: 5173,
     proxy: {

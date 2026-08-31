@@ -6,9 +6,11 @@ packages:
 # 必须在此白名单显式放行。键名是 allowBuilds（pnpm 11 起取代 onlyBuiltDependencies），值为 true。
 allowBuilds:
   '@nestjs/core': true # NestJS 的 opencollective 赞助提示脚本
+  '@parcel/watcher': true # Vite/Vitest 文件监听的原生绑定
   '@prisma/client': true # 安装时自动生成 Prisma Client
   '@prisma/engines': true # 下载 Prisma 查询引擎二进制
   esbuild: true # 下载/链接 esbuild 平台二进制（Vite 打包依赖）
   msgpackr-extract: true # BullMQ 序列化依赖的原生二进制
   prisma: true # Prisma CLI 预安装脚本
+  unrs-resolver: true # oxc-resolver 原生绑定（pnpm 依赖解析）
   vue-demi: true # 自动切换 Vue 2/3 版本（@vueuse 依赖它）

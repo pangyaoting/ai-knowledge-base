@@ -32,6 +32,12 @@ jobs:
       - name: Type check server
         run: cd apps/server && npx tsc --noEmit
 
+      - name: Test server (Jest)
+        run: cd apps/server && npx jest --silent
+
+      - name: Test web (Vitest)
+        run: pnpm --filter @app/web test
+
       - name: Build frontend
         run: pnpm --filter @app/web build
 

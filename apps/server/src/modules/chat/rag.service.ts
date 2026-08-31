@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from '../knowledge/embedding.service';
 import { RerankService } from '../knowledge/rerank.service';
+import { rrfMerge } from './rrf';
 
 /** 检索命中的来源片段（similarity 为 null 表示来自知识图谱扩展的关联片段，无向量相似度） */
 export interface RetrievalSource {
@@ -13,9 +14,6 @@ export interface RetrievalSource {
   filename: string;
   similarity: number | null;
 }
-
-/** 混合检索参数（RRF 融合常量） */
-const RRF_K = 60; // RRF 平滑常数（论文默认值）
 
 /**
  * RAG 检索服务：问题 → 向量化 → pgvector 余弦检索（语义）
@@ -192,38 +190,3 @@ export class RagService {
     return gated;
   }
 }
-
-/**
- * RRF（Reciprocal Rank Fusion）：把两路按排名合并为总分
- * 只依赖排名，不依赖分数量纲 → 向量相似度(0~1)和关键词相似度(0~1)可直接融合，无需归一化
- */
-function rrfMerge(vectorRows: RawRow[], keywordRows: RawRow[], topK: number): RawRow[] {
-  const scores = new Map<string, { score: number; row: RawRow }>();
-  const add = (rows: RawRow[]) => {
-    rows.forEach((row, i) => {
-      const rank = i + 1;
-      const contribution = 1 / (RRF_K + rank);
-      const cur = scores.get(row.chunk_id);
-      if (cur) {
-        cur.score += contribution;
-      } else {
-        scores.set(row.chunk_id, { score: contribution, row });
-      }
-    });
-  };
-  add(vectorRows); // 先加向量：融合分相同时，语义命中优先展示
-  add(keywordRows);
-  return [...scores.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map((x) => x.row);
-}
-
-type RawRow = {
-  chunk_id: string;
-  content: string;
-  chunk_index: number;
-  document_id: string;
-  filename: string;
-  similarity: number;
-};
