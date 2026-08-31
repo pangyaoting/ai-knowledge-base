@@ -107,6 +107,8 @@ const wh = {
   coreR: 42,
   K: 0.0007,
   particles: [] as WhDiskParticle[],
+  /** 环绕白核的黑色星带（浅色天空上的暗环，对比强烈） */
+  belt: [] as WhDiskParticle[],
   dust: [] as Dust[],
   rings: [] as Ring[],
   rayAngle: 0,
@@ -158,13 +160,31 @@ function makeDiskParticle(vr: number): DiskParticle {
 }
 
 function buildWhiteHole() {
-  // 白洞核心与黑洞视界同尺寸（buildBlackHole 先执行，bh.R 已就绪）；样式相反：黑↔白
-  wh.coreR = bh.R;
+  // 白洞核心比黑洞视界小一圈（视觉：白洞小巧 + 周围黑带环绕）；样式相反：黑↔白
+  wh.coreR = bh.R * 0.72;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
   const n = Math.min(700, Math.round((w * h) / 2000));
   for (let i = 0; i < n; i++) {
     wh.particles.push(makeWhParticle(rand(0.0005, 0.0014)));
+  }
+  // 黑色星带：环绕白核的暗色粒子环（薄盘倾角，像吸积盘剪影）
+  wh.belt = [];
+  const bn = Math.min(260, Math.round((w * h) / 2600));
+  for (let i = 0; i < bn; i++) {
+    const p: WhDiskParticle = {
+      r: rand(1.45, 2.6),
+      theta: rand(0, Math.PI * 2),
+      vr: 0,
+      size: rand(1.2, 2.8),
+      phase: rand(0, Math.PI * 2),
+      tilt: rand(bh.inc * 0.8, bh.inc * 1.25),
+      sx: 0,
+      sy: 0,
+    };
+    p.sx = holeX + p.r * bh.coreR * Math.cos(p.theta);
+    p.sy = holeY + p.r * bh.coreR * Math.sin(p.theta) * p.tilt;
+    wh.belt.push(p);
   }
   wh.dust = [];
   const d = Math.min(110, Math.round((w * h) / 15000));
@@ -258,6 +278,12 @@ function updateWhiteHole() {
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
+  }
+  // 黑色星带：绕白核缓慢旋转（像吸积盘剪影，粒子不掉落）
+  for (const p of wh.belt) {
+    p.theta += (wh.K / Math.pow(Math.max(p.r, 1.2), 1.5)) * 0.8;
+    p.sx = holeX + p.r * wh.coreR * Math.cos(p.theta);
+    p.sy = holeY + p.r * wh.coreR * Math.sin(p.theta) * p.tilt;
   }
   // 激波环
   if (performance.now() - lastRingAt > 2400) {
@@ -545,7 +571,18 @@ function drawWhiteHole(now: number, alpha: number) {
     }
   }
 
-  // 高能核心（脉动 + 鼠标靠近增亮）——与黑洞同尺寸：白核 = R，反光子环 = 1.42R
+  // 黑色星带：环绕白核的暗粒子环（普通混合压暗，浅色天空上清晰可见）
+  ctx.globalCompositeOperation = 'source-over';
+  for (const p of wh.belt) {
+    const flick = 0.7 + 0.3 * Math.sin(now / 800 + p.phase);
+    ctx!.globalAlpha = alpha * 0.55 * flick;
+    ctx!.fillStyle = 'rgba(23, 34, 58, 0.9)';
+    ctx!.beginPath();
+    ctx!.arc(p.sx, p.sy, p.size * 0.8, 0, Math.PI * 2);
+    ctx!.fill();
+  }
+
+  // 高能核心（脉动 + 鼠标靠近增亮）——白核比黑洞视界小：白核 = 0.72R，反光子环 = 1.42×白核
   const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
   const pulse = 1 + 0.06 * Math.sin(now / 380);
   ctx.globalCompositeOperation = 'lighter';
