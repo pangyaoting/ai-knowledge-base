@@ -739,7 +739,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 </script>
 
 <template>
-  <div class="relative flex h-[calc(100vh-4rem)] overflow-hidden">
+  <div class="relative flex h-[calc(100dvh-4rem-1px)] overflow-hidden">
     <!-- 移动端：打开会话列表时的遮罩 -->
     <div
       v-if="sidebarOpen"
@@ -893,7 +893,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             class="group flex"
             :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
           >
-            <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'w-full'">
+            <div
+              :class="
+                msg.role === 'user' ? 'ml-auto flex w-fit max-w-[80%] flex-col items-end' : 'w-full'
+              "
+            >
               <!-- 用户消息：图片/文件独立展示在气泡外，文字用中性气泡 -->
               <template v-if="msg.role === 'user'">
                 <div

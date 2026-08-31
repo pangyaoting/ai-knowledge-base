@@ -569,7 +569,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-4rem)] overflow-hidden">
+  <div class="flex h-[calc(100dvh-4rem-1px)] overflow-hidden">
     <!-- 左侧：任务列表 -->
     <aside class="flex w-64 flex-col border-r bg-card/50">
       <div class="p-3">
