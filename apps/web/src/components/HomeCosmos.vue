@@ -8,7 +8,7 @@
  *  - 浅色模式 → 白洞：黑洞的时间反演 —— 同样的倾斜盘面几何、同尺寸核心，样式相反：
  *    白核（= 视界半径 R）+ 反光子环（= 1.42R，白环而非橙环），物质从核心向外喷射、
  *    减速并淡出；背景为上浅下深的深空渐变（顶部浅蓝保证文字可读，下方深空衬白色喷流），
- *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、外圈渐隐，全程连续不跳变。
+ *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、全程饱满不渐隐，外圈渐变深蓝紫。
  *  - 核心位于页面下方（0.74h），避开欢迎区/卡片/引导文字；鼠标互动：核心跟随鼠标缓动，
  *    白洞核心附近粒子被鼠标"能量斥力"偏转，鼠标悬停白洞上时全部粒子加速爆发（默认缓速喷射）；
  *    黑洞相反——鼠标附近的粒子加速旋转并被吸入，鼠标悬停在黑洞上时整盘粒子加速旋转、
@@ -308,8 +308,8 @@ function updateWhiteHole() {
     const prevR = p.r;
     // 出生年龄增长（淡入用，约 0.25 秒内完全显现）
     p.age = Math.min(1, p.age + 0.012);
-    // 鼠标在白洞上：每帧给 vr 叠加加速（封顶 0.014，约 2 秒一轮爆发喷射）
-    p.vr = Math.min(p.vr + globalBoost * 0.001, 0.014);
+    // 鼠标在白洞上：每帧给 vr 叠加加速（封顶 0.028，约 1 秒一轮爆发喷射，快一倍）
+    p.vr = Math.min(p.vr + globalBoost * 0.002, 0.028);
     p.r += p.vr;
     p.vr *= 0.9998; // 喷射几乎不减速（保持高速锐利的喷流）
     // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
@@ -362,13 +362,14 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：近核纯白 → 炽白 → 淡蓝 → 外圈蓝紫（与黑洞外圈同色，内圈更白） */
+/** 白洞喷流粒子颜色：近核纯白 → 炽白 → 淡蓝 → 外圈深蓝紫（饱满渐变，不淡出） */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
     [0, [255, 253, 250]],
-    [0.3, [255, 244, 224]],
-    [0.7, [196, 214, 255]],
-    [1, [136, 122, 232]],
+    [0.25, [255, 244, 224]],
+    [0.55, [190, 200, 245]],
+    [0.8, [110, 100, 220]],
+    [1, [70, 58, 200]],
   ];
   const t = clamp(rn, 0, 1);
   for (let i = 1; i < stops.length; i++) {
@@ -619,10 +620,9 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    // 生命周期：核心涌现（age 淡入）→ 中段最亮 → 外圈渐隐（fadeOut），全程连续无跳变
+    // 核心涌现（age 淡入）；全程保持饱满不渐隐，外圈粒子渐变深蓝紫
     const fadeIn = Math.min(1, p.age * 6);
-    const fadeOut = rn > 0.78 ? (1 - rn) / 0.22 : 1;
-    const a = alpha * (0.62 + 0.38 * (1 - rn)) * (0.7 + 0.3 * flick) * fadeIn * fadeOut;
+    const a = alpha * (0.62 + 0.38 * (1 - rn)) * (0.7 + 0.3 * flick) * fadeIn;
     const col = whJetColor(rn);
     const tail = 12;
     // 拖尾：细线，略淡，尾部渐隐感（高速 → 拉出壮观的放射状喷流尾迹）
