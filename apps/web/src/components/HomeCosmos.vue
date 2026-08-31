@@ -107,8 +107,6 @@ const wh = {
   coreR: 42,
   K: 0.0007,
   particles: [] as WhDiskParticle[],
-  /** 环绕白核的黑色星带（浅色天空上的暗环，对比强烈） */
-  belt: [] as WhDiskParticle[],
   dust: [] as Dust[],
   rings: [] as Ring[],
   rayAngle: 0,
@@ -167,24 +165,6 @@ function buildWhiteHole() {
   const n = Math.min(700, Math.round((w * h) / 2000));
   for (let i = 0; i < n; i++) {
     wh.particles.push(makeWhParticle(rand(0.0005, 0.0014)));
-  }
-  // 黑色星带：环绕白核的暗色粒子环（薄盘倾角，像吸积盘剪影）
-  wh.belt = [];
-  const bn = Math.min(260, Math.round((w * h) / 2600));
-  for (let i = 0; i < bn; i++) {
-    const p: WhDiskParticle = {
-      r: rand(1.45, 2.6),
-      theta: rand(0, Math.PI * 2),
-      vr: 0,
-      size: rand(1.2, 2.8),
-      phase: rand(0, Math.PI * 2),
-      tilt: rand(bh.inc * 0.8, bh.inc * 1.25),
-      sx: 0,
-      sy: 0,
-    };
-    p.sx = holeX + p.r * bh.coreR * Math.cos(p.theta);
-    p.sy = holeY + p.r * bh.coreR * Math.sin(p.theta) * p.tilt;
-    wh.belt.push(p);
   }
   wh.dust = [];
   const d = Math.min(110, Math.round((w * h) / 15000));
@@ -278,12 +258,6 @@ function updateWhiteHole() {
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
-  }
-  // 黑色星带：绕白核缓慢旋转（像吸积盘剪影，粒子不掉落）
-  for (const p of wh.belt) {
-    p.theta += (wh.K / Math.pow(Math.max(p.r, 1.2), 1.5)) * 0.8;
-    p.sx = holeX + p.r * wh.coreR * Math.cos(p.theta);
-    p.sy = holeY + p.r * wh.coreR * Math.sin(p.theta) * p.tilt;
   }
   // 激波环
   if (performance.now() - lastRingAt > 2400) {
@@ -571,16 +545,32 @@ function drawWhiteHole(now: number, alpha: number) {
     }
   }
 
-  // 黑色星带：环绕白核的暗粒子环（普通混合压暗，浅色天空上清晰可见）
+  // 星环：环绕白核的连续暗色环带（渐变填充的圆环，非离散粒子）
   ctx.globalCompositeOperation = 'source-over';
-  for (const p of wh.belt) {
-    const flick = 0.7 + 0.3 * Math.sin(now / 800 + p.phase);
-    ctx!.globalAlpha = alpha * 0.55 * flick;
-    ctx!.fillStyle = 'rgba(23, 34, 58, 0.9)';
+  const beltPulse = 0.8 + 0.2 * Math.sin(now / 2200);
+  // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），深蓝黑、两端渐隐 → 连续平滑的星环
+  const drawBelt = (r0: number, r1: number, peak: number) => {
+    const g = ctx.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
+    g.addColorStop(0, 'rgba(23, 34, 58, 0)');
+    g.addColorStop(0.45, `rgba(23, 34, 58, ${peak * beltPulse * alpha})`);
+    g.addColorStop(1, 'rgba(23, 34, 58, 0)');
+    ctx!.fillStyle = g;
     ctx!.beginPath();
-    ctx!.arc(p.sx, p.sy, p.size * 0.8, 0, Math.PI * 2);
+    ctx!.arc(holeX, holeY, r1 * wh.coreR, 0, Math.PI * 2);
+    ctx!.arc(holeX, holeY, r0 * wh.coreR, 0, Math.PI * 2, true);
     ctx!.fill();
-  }
+  };
+  // 外环 + 内环，中间留一条细缝（类似土星环的卡西尼缝）
+  drawBelt(1.5, 2.5, 0.55);
+  drawBelt(1.62, 1.78, 0.3);
+  // 环边缘细线勾勒，强化"环"的轮廓
+  ctx!.globalAlpha = alpha * 0.35 * beltPulse;
+  ctx!.strokeStyle = 'rgba(23, 34, 58, 0.8)';
+  ctx!.lineWidth = 1;
+  ctx!.beginPath();
+  ctx!.arc(holeX, holeY, 1.5 * wh.coreR, 0, Math.PI * 2);
+  ctx!.arc(holeX, holeY, 2.5 * wh.coreR, 0, Math.PI * 2);
+  ctx!.stroke();
 
   // 高能核心（脉动 + 鼠标靠近增亮）——白核比黑洞视界小：白核 = 0.72R，反光子环 = 1.42×白核
   const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
