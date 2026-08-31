@@ -8,6 +8,11 @@ export interface DailyStat {
   researchTokens: number; // 研究报告 + 自主研究 token
 }
 
+/** 费用估算单价（元/百万 token，参考 DeepSeek 通用价；仅估算展示，实际以模型服务商账单为准） */
+const INPUT_PRICE_PER_M = 1; // 输入
+const OUTPUT_PRICE_PER_M = 2; // 输出
+const RESEARCH_PRICE_PER_M = 1.5; // 研究报告/自主研究（输入输出混合平均）
+
 /**
  * 数据看板统计服务：全部按当前用户隔离（ownerId）
  * 问题数 = 该用户的 user 消息数；Token = assistant 消息上记录的流式 usage 汇总
@@ -108,6 +113,14 @@ export class StatsService {
         // 研究报告 / 自主研究 消耗的 token（与对话 token 分开统计）
         reportTokens,
         agentTaskTokens,
+        // 费用估算（元，按 DeepSeek 通用单价，仅供参考）
+        cost: {
+          chat:
+            (promptTotal / 1_000_000) * INPUT_PRICE_PER_M +
+            (completionTotal / 1_000_000) * OUTPUT_PRICE_PER_M,
+          report: (reportTokens / 1_000_000) * RESEARCH_PRICE_PER_M,
+          agentTask: (agentTaskTokens / 1_000_000) * RESEARCH_PRICE_PER_M,
+        },
       },
       daily: this.fillLast7Days(
         dailyRows.map((r) => ({

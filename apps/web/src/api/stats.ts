@@ -16,6 +16,7 @@ export interface OverviewData {
     completionTotal: number;
     reportTokens: number;
     agentTaskTokens: number;
+    cost: { chat: number; report: number; agentTask: number };
   };
   daily: Array<{ day: string; questions: number; tokens: number; researchTokens: number }>;
   topKbs: Array<{ id: string; name: string; documents: number }>;

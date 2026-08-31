@@ -16,6 +16,10 @@ import {
   X,
   ImagePlus,
   FileText,
+  Copy,
+  GitBranch,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -165,11 +169,46 @@ function msgFileBlock(msg: ChatMessage): string {
   const i = msg.content.indexOf('【上传文件内容】');
   return i < 0 ? '' : msg.content.slice(i);
 }
+
+/** 复制整条消息（回答或提问） */
+async function copyMessage(msg: ChatMessage) {
+  try {
+    await navigator.clipboard.writeText(msg.content);
+    toast.success('已复制');
+  } catch {
+    toast.error('复制失败');
+  }
+}
+
+/** 分支：基于该回答新建会话，预填其对应的问题，方便换个角度继续追问 */
+async function handleBranch(idx: number) {
+  if (streaming.value || !currentSessionId.value) return;
+  let question = '';
+  for (let i = idx - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      question = msgHead(messages.value[i]);
+      break;
+    }
+  }
+  try {
+    const session = await createChatSession({
+      ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+    });
+    sessionSearch.value = '';
+    await loadSessions();
+    await selectSession(session.id);
+    if (question) input.value = question;
+    toast.success('已基于该回答新建会话，可修改问题后继续');
+  } catch (e) {
+    toast.error((e as Error).message);
+  }
+}
 const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
+const sidebarCollapsed = ref(false); // 桌面端：会话列表侧边栏收起/展开
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -525,7 +564,9 @@ async function handleExportSession(id: string) {
 
 const canSend = computed(
   () =>
-    (input.value.trim().length > 0 || pendingImages.value.length > 0) &&
+    (input.value.trim().length > 0 ||
+      pendingImages.value.length > 0 ||
+      pendingFiles.value.length > 0) &&
     !streaming.value &&
     !!currentSessionId.value,
 );
@@ -684,8 +725,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 
     <!-- 左侧：会话列表（移动端默认收起，从左侧滑出） -->
     <aside
-      class="absolute inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r bg-card/50 shadow-xl transition-transform duration-200 md:static md:z-auto md:translate-x-0 md:shadow-none"
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      class="absolute inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col border-r bg-card/50 shadow-xl transition-all duration-200 md:static md:z-auto md:translate-x-0 md:shadow-none"
+      :class="[
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+        sidebarCollapsed ? 'md:w-0 md:overflow-hidden md:border-r-0' : 'md:w-64',
+      ]"
     >
       <div class="p-3">
         <Button class="w-full" @click="openNewSessionPicker">
@@ -774,6 +818,15 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         >
           <Menu class="h-5 w-5" />
         </button>
+        <!-- 桌面端：收起/展开会话列表侧边栏 -->
+        <button
+          class="hidden rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:inline-flex"
+          :title="sidebarCollapsed ? '展开会话列表' : '收起会话列表'"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        >
+          <PanelLeftClose v-if="!sidebarCollapsed" class="h-4 w-4" />
+          <PanelLeftOpen v-else class="h-4 w-4" />
+        </button>
         <h2 class="min-w-0 flex-1 truncate text-sm font-semibold">{{ currentTitle }}</h2>
         <span
           class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -808,28 +861,20 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <p class="mt-3 text-sm text-muted-foreground">选择或新建一个会话开始提问</p>
         </div>
 
-        <div v-else class="mx-auto max-w-3xl space-y-6 px-4 py-6">
+        <div v-else class="mx-auto max-w-4xl space-y-6 px-4 py-6">
           <!-- 历史消息 -->
           <div
             v-for="(msg, i) in messages"
             :key="i"
-            class="flex"
+            class="group flex"
             :class="msg.role === 'user' ? 'justify-end' : 'justify-start'"
           >
             <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'w-full'">
-              <div
-                v-if="msg.role === 'assistant'"
-                class="markdown-body rounded-lg border bg-card px-4 py-3"
-                @click="handleMessageClick"
-                v-html="renderMarkdown(msg.content)"
-              />
-              <div
-                v-else
-                class="rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground whitespace-pre-wrap"
-              >
+              <!-- 用户消息：图片/文件独立展示在气泡外，文字用中性气泡 -->
+              <template v-if="msg.role === 'user'">
                 <div
                   v-if="msg.imageDataUrls?.length"
-                  class="mb-2 grid max-w-[360px] gap-1.5"
+                  class="mb-1.5 grid max-w-[360px] gap-1.5"
                   :class="msg.imageDataUrls.length > 1 ? 'grid-cols-2' : ''"
                 >
                   <img
@@ -844,13 +889,12 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 <img
                   v-else-if="msg.imageDataUrl"
                   :src="msg.imageDataUrl"
-                  class="mb-2 max-h-48 rounded-md object-cover"
+                  class="mb-1.5 max-h-48 rounded-md object-cover"
                   alt="粘贴图片"
                 />
-                <span class="whitespace-pre-wrap">{{ msgHead(msg) }}</span>
                 <details
                   v-if="msgFileBlock(msg)"
-                  class="mt-1.5 rounded-md border border-dashed px-2 py-1.5 text-xs"
+                  class="mb-1.5 rounded-md border border-dashed bg-card px-2 py-1.5 text-xs"
                 >
                   <summary class="cursor-pointer font-medium text-muted-foreground">
                     📄 上传文件内容（点击展开）
@@ -859,6 +903,41 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                     class="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
                     >{{ msgFileBlock(msg) }}</pre>
                 </details>
+                <div
+                  v-if="msgHead(msg)"
+                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-sm text-foreground"
+                >
+                  {{ msgHead(msg) }}
+                </div>
+              </template>
+              <!-- 助手消息：Markdown -->
+              <div
+                v-else
+                class="markdown-body rounded-lg border bg-card px-4 py-3"
+                @click="handleMessageClick"
+                v-html="renderMarkdown(msg.content)"
+              />
+              <!-- 操作条：复制（提问/回答）+ 分支（回答） -->
+              <div
+                class="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+              >
+                <button
+                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  title="复制整条消息"
+                  @click="copyMessage(msg)"
+                >
+                  <Copy class="h-3 w-3" />
+                  复制
+                </button>
+                <button
+                  v-if="msg.role === 'assistant'"
+                  class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  title="基于这条回答新建会话，换个角度继续提问"
+                  @click="handleBranch(i)"
+                >
+                  <GitBranch class="h-3 w-3" />
+                  在新对话中分支
+                </button>
               </div>
 
               <!-- 知识库模式但没有任何引用：回答来自模型自身知识，明示来源 -->
@@ -995,7 +1074,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 问答范围（常驻可见，点击可修改当前会话） -->
         <div
           v-if="currentSessionId"
-          class="mx-auto mb-2 flex max-w-3xl items-center gap-2 text-[11px]"
+          class="mx-auto mb-2 flex max-w-4xl items-center gap-2 text-[11px]"
         >
           <span class="shrink-0 text-muted-foreground">问答范围</span>
           <button
@@ -1082,7 +1161,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 待发送图片/文件预览：在输入框上方横排展示（有图片或文件时显示） -->
         <div
           v-if="pendingImages.length || pendingFiles.length"
-          class="mx-auto mb-2 flex max-w-3xl items-center gap-2 overflow-x-auto pb-1"
+          class="mx-auto mb-2 flex max-w-4xl items-center gap-2 overflow-x-auto pb-1"
         >
           <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
             <img
@@ -1117,7 +1196,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </button>
           </div>
         </div>
-        <div class="mx-auto flex max-w-3xl items-end gap-2">
+        <div class="mx-auto flex max-w-4xl items-end gap-2">
           <!-- 上传本地图片（可多选） -->
           <button
             type="button"
@@ -1171,7 +1250,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </Button>
         </div>
         <p
-          class="mx-auto mt-2 flex max-w-3xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
+          class="mx-auto mt-2 flex max-w-4xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
         >
           <label class="flex cursor-pointer items-center gap-1.5 select-none">
             <input
@@ -1286,7 +1365,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 </template>
 
 <style scoped>
-/* AI 回答的 Markdown 排版 */
+/* AI 回答的 Markdown 排版（暗黑模式可读性：显式文字色，避免继承导致看不清） */
+.markdown-body {
+  font-size: 0.95rem;
+  color: var(--foreground);
+}
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
 .markdown-body :deep(h3),
@@ -1306,7 +1389,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 }
 .markdown-body :deep(p) {
   margin: 0.5em 0;
-  line-height: 1.7;
+  line-height: 1.75;
+  font-size: 0.95rem;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -1323,7 +1407,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 .markdown-body :deep(blockquote) {
   border-left: 3px solid var(--border);
   padding-left: 0.75em;
-  color: var(--muted-foreground);
+  color: hsl(var(--foreground) / 0.72);
   margin: 0.5em 0;
 }
 .markdown-body :deep(table) {
@@ -1337,10 +1421,11 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   padding: 0.35em 0.6em;
 }
 .markdown-body :deep(code:not(pre code)) {
-  background: var(--muted);
+  background: hsl(var(--muted));
   border-radius: 4px;
   padding: 0.1em 0.35em;
   font-size: 0.9em;
+  color: var(--foreground);
 }
 
 /* 代码块 + 复制按钮 */
@@ -1352,9 +1437,10 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   border-radius: 8px;
   overflow-x: auto;
   padding: 0.9em 1em;
-  font-size: 0.85em;
-  line-height: 1.5;
+  font-size: 0.9em;
+  line-height: 1.55;
   background: hsl(var(--muted));
+  color: var(--foreground);
 }
 .markdown-body :deep(.code-copy) {
   position: absolute;
