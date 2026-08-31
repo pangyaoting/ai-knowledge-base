@@ -34,6 +34,8 @@ let holeY = 0;
 // 鼠标偏移 -1..1（平滑后）
 let mx = 0;
 let my = 0;
+// 鼠标是否真正移动过（初始未移动时不启用互动，粒子保持原速）
+let mouseActive = false;
 const mouse = { x: 0.5, y: 0.5 };
 const targetMouse = { x: 0.5, y: 0.5 };
 // 场景混合：0 = 黑洞，1 = 白洞
@@ -147,11 +149,11 @@ function buildBlackHole() {
   for (let i = 0; i < n; i++) {
     bh.disk.push(makeDiskParticle(-rand(0.0001, 0.00034)));
   }
-  // 被吸入粒子：数量少但径向速度大，肉眼可见"从四周被吸进黑洞"
+  // 被吸入粒子：数量少但径向速度大，肉眼可见"从四周被吸进黑洞"（默认缓慢盘旋入内）
   bh.infall = [];
   const inf = Math.min(160, Math.round((w * h) / 6000));
   for (let i = 0; i < inf; i++) {
-    bh.infall.push(makeDiskParticle(-rand(0.0022, 0.0045)));
+    bh.infall.push(makeDiskParticle(-rand(0.0007, 0.0015)));
   }
 }
 
@@ -225,8 +227,9 @@ function updateBlackHole() {
   // 鼠标互动（与白洞"能量斥力"对称，黑洞是"引力吞噬"）：
   //  - 局部：鼠标附近的粒子加速旋转 + 加速吸入（vr 更负 = 更快坠向视界）
   //  - 全局：鼠标悬停在黑洞核心上 → 全部粒子加速旋转并加速被吸
-  const cxp = mouse.x * window.innerWidth;
-  const cyp = mouse.y * window.innerHeight;
+  //  - 鼠标未移动过（mouseActive=false）时互动不生效，所有粒子保持原速
+  const cxp = mouseActive ? mouse.x * window.innerWidth : -9999;
+  const cyp = mouseActive ? mouse.y * window.innerHeight : -9999;
   const dCore = Math.hypot(cxp - holeX, cyp - holeY);
   const globalPull = clamp(1 - dCore / (bh.R * 2.5), 0, 1);
   const localR = Math.max(90, Math.min(w, h) * 0.16);
@@ -263,9 +266,10 @@ function updateBlackHole() {
     p.vr = Math.max(p.vr - localPull * 0.004 - globalPull * 0.008, -0.06);
     p.r += p.vr; // vr 为负且大
     if (p.r <= 0.075) {
-      // 坠入视界 → 从更外围重新出现，形成持续吸入流
+      // 坠入视界 → 从更外围重新出现，形成持续吸入流；重置为默认慢速
       p.r = rand(1.3, 1.9);
       p.theta = rand(0, Math.PI * 2);
+      p.vr = -rand(0.0007, 0.0015);
       p.tilt = rand(0.25, 0.9);
       p.size = rand(0.8, 2);
     }
@@ -275,8 +279,9 @@ function updateBlackHole() {
 }
 
 function updateWhiteHole() {
-  const cxp = mouse.x * window.innerWidth;
-  const cyp = mouse.y * window.innerHeight;
+  // 鼠标能量斥力仅在鼠标真正移动过后生效（初始保持原速）
+  const cxp = mouseActive ? mouse.x * window.innerWidth : -9999;
+  const cyp = mouseActive ? mouse.y * window.innerHeight : -9999;
   for (const p of wh.particles) {
     // 鼠标能量斥力：核心附近的粒子被弹开（互动）
     const dx = p.sx - cxp;
@@ -711,6 +716,7 @@ function onResize() {
 }
 
 function onMouseMove(e: MouseEvent) {
+  mouseActive = true;
   targetMouse.x = e.clientX / window.innerWidth;
   targetMouse.y = e.clientY / window.innerHeight;
 }
