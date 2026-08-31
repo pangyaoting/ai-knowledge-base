@@ -504,7 +504,7 @@ function drawWhiteHole(now: number, alpha: number) {
   // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），深蓝黑、两端渐隐 → 连续平滑的星环
   // 渐变从环带内侧起笔：内侧最深、向外逐渐变淡，避免出现边缘硬线
   const drawBelt = (r0: number, r1: number, peak: number) => {
-    const g = ctx.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
+    const g = ctx!.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
     g.addColorStop(0, `rgba(15, 24, 46, ${peak * beltPulse * alpha})`);
     g.addColorStop(0.4, `rgba(15, 24, 46, ${peak * 0.9 * beltPulse * alpha})`);
     g.addColorStop(1, 'rgba(15, 24, 46, 0)');
