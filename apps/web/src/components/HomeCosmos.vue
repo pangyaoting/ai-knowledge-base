@@ -87,7 +87,20 @@ interface WhDiskParticle {
   tilt: number;
   sx: number;
   sy: number;
+  /** 喷射目标色（RGB）：粒子从白色渐变到该色，多色喷流 */
+  color: [number, number, number];
 }
+
+/** 白洞喷流的柔和色板（浅蓝天空上协调：暖杏/橙/粉 + 冷紫/蓝/青/绿） */
+const WH_JET_PALETTE: Array<[number, number, number]> = [
+  [255, 206, 158], // 淡杏
+  [255, 172, 138], // 淡橙
+  [255, 152, 192], // 淡粉
+  [196, 166, 255], // 淡紫
+  [148, 196, 255], // 淡蓝
+  [136, 232, 218], // 淡青
+  [176, 236, 172], // 淡绿
+];
 interface Dust {
   x: number;
   y: number;
@@ -184,6 +197,7 @@ function makeWhParticle(vr: number): WhDiskParticle {
     tilt: 0,
     sx: 0,
     sy: 0,
+    color: WH_JET_PALETTE[Math.floor(Math.random() * WH_JET_PALETTE.length)],
   };
   p.tilt = p.r > 1.05 ? rand(0.15, 1) : rand(bh.inc * 0.75, bh.inc * 1.3);
   p.size = p.r > 1.05 ? rand(0.6, 1.6) : rand(1, 2.6);
@@ -464,7 +478,7 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx.fill();
   }
 
-  // 喷射粒子（叠加发光，白→淡蓝；个别金色）
+  // 喷射粒子（叠加发光；每个粒子从白色渐变到各自的柔和目标色 → 多色喷流）
   ctx.globalCompositeOperation = 'lighter';
   for (const p of wh.particles) {
     const rn = clamp(p.r / 1.9, 0, 1);
@@ -474,10 +488,10 @@ function drawWhiteHole(now: number, alpha: number) {
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
     const a = alpha * (1 - rn) * (0.5 + 0.5 * flick);
-    const gold = p.phase > 2.9;
-    const cr = gold ? 255 : Math.round(lerp(255, 176, rn));
-    const cg = gold ? 232 : Math.round(lerp(255, 208, rn));
-    const cb = gold ? 190 : Math.round(lerp(255, 255, rn));
+    // 内区近白 → 外区渐变为该粒子目标色（柔和色板，浅蓝天空上协调）
+    const cr = Math.round(lerp(255, p.color[0], rn));
+    const cg = Math.round(lerp(255, p.color[1], rn));
+    const cb = Math.round(lerp(255, p.color[2], rn));
     const tail = 7;
     ctx!.globalAlpha = Math.min(1, a);
     ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
@@ -486,7 +500,7 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
     ctx!.lineTo(p.sx, p.sy);
     ctx!.stroke();
-    ctx!.fillStyle = '#ffffff';
+    ctx!.fillStyle = `rgb(${cr},${cg},${cb})`;
     ctx!.beginPath();
     ctx!.arc(p.sx, p.sy, p.size * 0.7, 0, Math.PI * 2);
     ctx!.fill();
