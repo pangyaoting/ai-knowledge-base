@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
   MessageSquare,
@@ -20,6 +20,8 @@ import {
   GitBranch,
   PanelLeftClose,
   PanelLeftOpen,
+  Maximize2,
+  Minimize2,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -170,6 +172,24 @@ function msgFileBlock(msg: ChatMessage): string {
   return i < 0 ? '' : msg.content.slice(i);
 }
 
+/** 解析消息里上传文件的 { 文件名, 内容 } 列表（点击文件名在右侧预览） */
+function msgFiles(msg: ChatMessage): Array<{ name: string; content: string }> {
+  const block = msgFileBlock(msg);
+  if (!block) return [];
+  const parts = block.split(/\n---\s/).slice(1);
+  return parts
+    .map((p) => {
+      const nl = p.indexOf('\n');
+      const name = (nl < 0 ? p : p.slice(0, nl))
+        .replace(/^\s*---\s*/, '')
+        .replace(/\s*---\s*$/, '')
+        .trim();
+      const content = nl < 0 ? '' : p.slice(nl + 1).trim();
+      return { name, content };
+    })
+    .filter((f) => f.name);
+}
+
 /** 复制整条消息（回答或提问） */
 async function copyMessage(msg: ChatMessage) {
   try {
@@ -215,6 +235,18 @@ const loadingSessions = ref(false);
 const useWebSearch = ref(false); // 联网检索开关
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
 const sidebarCollapsed = ref(false); // 桌面端：会话列表侧边栏收起/展开
+
+// ===== 对话布局：标准（居中 max-w-5xl）/ 宽屏（除侧边栏外占满） =====
+const chatLayout = ref<'standard' | 'wide'>(
+  localStorage.getItem('chat-layout') === 'wide' ? 'wide' : 'standard',
+);
+const layoutCls = computed(() =>
+  chatLayout.value === 'wide' ? 'mx-auto w-full px-6' : 'mx-auto max-w-5xl px-4',
+);
+function toggleChatLayout() {
+  chatLayout.value = chatLayout.value === 'wide' ? 'standard' : 'wide';
+  localStorage.setItem('chat-layout', chatLayout.value);
+}
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -833,6 +865,15 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <PanelLeftClose v-if="!sidebarCollapsed" class="h-4 w-4" />
           <PanelLeftOpen v-else class="h-4 w-4" />
         </button>
+        <!-- 对话布局：标准居中 / 宽屏占满 -->
+        <button
+          class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          :title="chatLayout === 'wide' ? '切换为标准布局（居中）' : '切换为宽屏布局（占满）'"
+          @click="toggleChatLayout"
+        >
+          <Minimize2 v-if="chatLayout === 'wide'" class="h-4 w-4" />
+          <Maximize2 v-else class="h-4 w-4" />
+        </button>
         <h2 class="min-w-0 flex-1 truncate text-sm font-semibold">{{ currentTitle }}</h2>
         <span
           class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
@@ -867,7 +908,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           <p class="mt-3 text-sm text-muted-foreground">选择或新建一个会话开始提问</p>
         </div>
 
-        <div v-else class="mx-auto max-w-5xl space-y-6 px-4 py-6">
+        <div v-else class="space-y-6 py-6" :class="layoutCls">
           <!-- 历史消息 -->
           <div
             v-for="(msg, i) in messages"
@@ -898,20 +939,21 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                   class="mb-1.5 max-h-48 rounded-md object-cover"
                   alt="粘贴图片"
                 />
-                <details
-                  v-if="msgFileBlock(msg)"
-                  class="mb-1.5 rounded-md border border-dashed bg-card px-2 py-1.5 text-xs"
-                >
-                  <summary class="cursor-pointer font-medium text-muted-foreground">
-                    📄 上传文件内容（点击展开）
-                  </summary>
-                  <pre
-                    class="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
-                    >{{ msgFileBlock(msg) }}</pre>
-                </details>
+                <div v-if="msgFiles(msg).length" class="mb-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    v-for="(f, fi) in msgFiles(msg)"
+                    :key="fi"
+                    class="flex cursor-pointer items-center gap-1 rounded-md border bg-muted/40 px-2 py-1 text-xs transition-colors hover:bg-accent"
+                    title="点击在右侧查看文件内容"
+                    @click="filePreview = f"
+                  >
+                    <FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span class="max-w-[200px] truncate">{{ f.name }}</span>
+                  </button>
+                </div>
                 <div
                   v-if="msgHead(msg)"
-                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[15px] text-foreground"
+                  class="inline-block max-w-full whitespace-pre-wrap rounded-2xl rounded-br-sm bg-muted px-4 py-2.5 text-[17px] font-medium text-foreground"
                 >
                   {{ msgHead(msg) }}
                 </div>
@@ -1081,7 +1123,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 问答范围（常驻可见，点击可修改当前会话） -->
         <div
           v-if="currentSessionId"
-          class="mx-auto mb-2 flex max-w-5xl items-center gap-2 text-[11px]"
+          class="mb-2 flex items-center gap-2 text-[11px]"
+          :class="layoutCls"
         >
           <span class="shrink-0 text-muted-foreground">问答范围</span>
           <button
@@ -1148,6 +1191,9 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
                 <p class="border-t px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">
                   推理等级（思考越多越准也越贵）
                 </p>
+                <p class="px-3 pb-1 text-[10px] text-muted-foreground/70">
+                  不设置 = 模型默认（V4 默认会简单思考）；部分模型不支持该参数，报错时请选「关闭」
+                </p>
                 <button
                   v-for="e in REASONING_OPTIONS"
                   :key="e.value"
@@ -1168,7 +1214,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
         <!-- 待发送图片/文件预览：在输入框上方横排展示（有图片或文件时显示） -->
         <div
           v-if="pendingImages.length || pendingFiles.length"
-          class="mx-auto mb-2 flex max-w-5xl items-center gap-2 overflow-x-auto pb-1"
+          class="mb-2 flex items-center gap-2 overflow-x-auto pb-1"
+          :class="layoutCls"
         >
           <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
             <img
@@ -1205,7 +1252,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
             </button>
           </div>
         </div>
-        <div class="mx-auto flex max-w-5xl items-end gap-2">
+        <div class="flex items-end gap-2" :class="layoutCls">
           <!-- 上传本地图片（可多选） -->
           <button
             type="button"
@@ -1260,7 +1307,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
           </Button>
         </div>
         <p
-          class="mx-auto mt-2 flex max-w-5xl items-center justify-center gap-4 text-[11px] text-muted-foreground"
+          class="mt-2 flex items-center justify-center gap-4 text-[11px] text-muted-foreground"
+          :class="layoutCls"
         >
           <label class="flex cursor-pointer items-center gap-1.5 select-none">
             <input
@@ -1400,30 +1448,32 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
 <style scoped>
 /* AI 回答的 Markdown 排版（暗黑模式可读性：显式文字色，避免继承导致看不清） */
 .markdown-body {
-  font-size: 1rem;
+  font-size: 1.125rem;
+  font-weight: 500;
   color: var(--foreground);
 }
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
 .markdown-body :deep(h3),
 .markdown-body :deep(h4) {
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3;
   margin: 0.75em 0 0.4em;
 }
 .markdown-body :deep(h1) {
-  font-size: 1.3em;
+  font-size: 1.4em;
 }
 .markdown-body :deep(h2) {
-  font-size: 1.15em;
+  font-size: 1.25em;
 }
 .markdown-body :deep(h3) {
-  font-size: 1.05em;
+  font-size: 1.12em;
 }
 .markdown-body :deep(p) {
   margin: 0.5em 0;
-  line-height: 1.75;
-  font-size: 1rem;
+  line-height: 1.8;
+  font-size: 1.125rem;
+  font-weight: 500;
 }
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
@@ -1457,8 +1507,7 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   background: hsl(var(--muted));
   border-radius: 4px;
   padding: 0.1em 0.35em;
-  font-size: 0.9em;
-  color: var(--foreground);
+  font-size: 0.95em;
 }
 
 /* 代码块 + 复制按钮 */
@@ -1470,8 +1519,8 @@ function sourcesWeb(sources: ChatSources | RetrievalSource[] | null): WebSource[
   border-radius: 8px;
   overflow-x: auto;
   padding: 0.9em 1em;
-  font-size: 0.9em;
-  line-height: 1.55;
+  font-size: 0.95em;
+  line-height: 1.6;
   background: hsl(var(--muted));
   color: var(--foreground);
 }
