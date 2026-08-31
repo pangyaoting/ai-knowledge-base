@@ -73,6 +73,8 @@ const bh = {
   K: 0.00158,
   stars: [] as BgStar[],
   disk: [] as DiskParticle[],
+  /** 被吸入粒子：从外围沿径向快速坠入视界（明显"吸进去"的效果） */
+  infall: [] as DiskParticle[],
 };
 
 // ---------- 白洞场景 ----------
@@ -144,6 +146,12 @@ function buildBlackHole() {
   for (let i = 0; i < n; i++) {
     bh.disk.push(makeDiskParticle(-rand(0.0001, 0.00034)));
   }
+  // 被吸入粒子：数量少但径向速度大，肉眼可见"从四周被吸进黑洞"
+  bh.infall = [];
+  const inf = Math.min(160, Math.round((w * h) / 6000));
+  for (let i = 0; i < inf; i++) {
+    bh.infall.push(makeDiskParticle(-rand(0.0022, 0.0045)));
+  }
 }
 
 function makeDiskParticle(vr: number): DiskParticle {
@@ -202,8 +210,9 @@ function makeWhParticle(vr: number): WhDiskParticle {
     sy: 0,
     color: WH_JET_PALETTE[Math.floor(Math.random() * WH_JET_PALETTE.length)],
   };
-  p.tilt = p.r > 1.05 ? rand(0.15, 1) : rand(bh.inc * 0.75, bh.inc * 1.3);
-  p.size = p.r > 1.05 ? rand(0.6, 1.6) : rand(1, 2.6);
+  // 白洞向四周喷射：tilt 取大范围（近圆），粒子铺满所有方向而非压成两端
+  p.tilt = rand(0.5, 1);
+  p.size = p.r > 1.05 ? rand(0.7, 1.8) : rand(1.3, 3.2);
   p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
   p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
   return p;
@@ -231,6 +240,20 @@ function updateBlackHole() {
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
   }
+  // 被吸入粒子：几乎纯径向坠入（旋转很弱），从四周快速被吸进视界
+  for (const p of bh.infall) {
+    p.theta += (bh.K * 0.06) / Math.pow(Math.max(p.r, 0.2), 1.5);
+    p.r += p.vr; // vr 为负且大
+    if (p.r <= 0.075) {
+      // 坠入视界 → 从更外围重新出现，形成持续吸入流
+      p.r = rand(1.3, 1.9);
+      p.theta = rand(0, Math.PI * 2);
+      p.tilt = rand(0.25, 0.9);
+      p.size = rand(0.8, 2);
+    }
+    p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
+    p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
+  }
 }
 
 function updateWhiteHole() {
@@ -253,16 +276,16 @@ function updateWhiteHole() {
     p.vr *= 0.9994; // 喷射逐渐减速
     // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
     if (p.r > 1.9) {
-      // 逃逸远去 → 从核心重新喷出
+      // 逃逸远去 → 从核心重新喷出（向四周，大 tilt）
       p.r = rand(0.08, 0.16);
       p.theta = rand(0, Math.PI * 2);
       p.vr = rand(0.0005, 0.0014);
-      p.tilt = rand(bh.inc * 0.75, bh.inc * 1.3);
-      p.size = rand(1, 2.6);
+      p.tilt = rand(0.5, 1);
+      p.size = rand(1.3, 3.2);
     } else if (p.r > 1.05 && prevR <= 1.05) {
-      // 内区喷流散开到外围云 → 独立倾角铺满整页
-      p.tilt = rand(0.15, 1);
-      p.size = rand(0.6, 1.6);
+      // 内区喷流散开到外围 → 保持大 tilt 铺满四周
+      p.tilt = rand(0.5, 1);
+      p.size = rand(0.7, 1.8);
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
@@ -428,6 +451,40 @@ function drawBlackHole(now: number, alpha: number) {
   for (const p of bh.disk) {
     if (p.sy < holeY) continue;
     drawDiskDot(p, now, alpha);
+  }
+
+  // 被吸入粒子：沿径向快速坠向核心，拖尾指向黑洞（明显"吸进去"）
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of bh.infall) {
+    const rn = clamp(p.r / 1.9, 0, 1);
+    // 速度方向（几乎纯径向向内）
+    const vx = Math.cos(p.theta) * p.vr * bh.diskR;
+    const vy = Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
+    const flick = 0.7 + 0.3 * Math.sin(now / 600 + p.phase);
+    const a = alpha * (0.35 + 0.4 * (1 - rn)) * flick;
+    // 颜色：白热 → 橙黄（越接近视界越亮，像被加热）
+    const cr = Math.round(lerp(255, 255, rn));
+    const cg = Math.round(lerp(244, 180, rn));
+    const cb = Math.round(lerp(224, 110, rn));
+    const tail = 10;
+    ctx!.globalAlpha = Math.min(1, a);
+    ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
+    ctx!.lineWidth = p.size * 0.8;
+    ctx!.beginPath();
+    ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
+    ctx!.lineTo(p.sx, p.sy);
+    ctx!.stroke();
+    ctx!.fillStyle = `rgb(${cr},${cg},${cb})`;
+    ctx!.beginPath();
+    ctx!.arc(p.sx, p.sy, p.size * 0.8, 0, Math.PI * 2);
+    ctx!.fill();
+    if (rn < 0.3) {
+      // 近视界：炽热光晕
+      ctx!.globalAlpha = Math.min(1, a * 0.5);
+      ctx!.beginPath();
+      ctx!.arc(p.sx, p.sy, p.size * 3, 0, Math.PI * 2);
+      ctx!.fill();
+    }
   }
 
   // 暗角
