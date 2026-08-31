@@ -7,8 +7,9 @@
  *    光子环、事件视界遮挡（先画盘背侧 → 视界 → 盘前侧）、背景星引力透镜畸变。
  *  - 浅色模式 → 白洞：黑洞的时间反演 —— 同样的倾斜盘面几何、同尺寸核心，样式相反：
  *    白核（= 视界半径 R）+ 反光子环（= 1.42R，白环而非橙环），物质从核心向外喷射、
- *    减速并淡出；背景为上浅下深的深空渐变（顶部浅蓝保证文字可读，下方深空衬白色喷流），
- *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、全程饱满不渐隐，外圈渐变深蓝紫。
+ *    减速并淡出；背景为以白洞为圆心的径向渐变（核心周围深蓝 → 向外渐变到白色），
+ *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、全程饱满不渐隐、飞出屏幕才循环，
+ *    外圈渐变深蓝紫。
  *  - 核心位于页面下方（0.74h），避开欢迎区/卡片/引导文字；鼠标互动：核心跟随鼠标缓动，
  *    白洞核心附近粒子被鼠标"能量斥力"偏转，鼠标悬停白洞上时全部粒子加速爆发（默认缓速喷射）；
  *    黑洞相反——鼠标附近的粒子加速旋转并被吸入，鼠标悬停在黑洞上时整盘粒子加速旋转、
@@ -312,22 +313,24 @@ function updateWhiteHole() {
     p.vr = Math.min(p.vr + globalBoost * 0.002, 0.028);
     p.r += p.vr;
     p.vr *= 0.9998; // 喷射几乎不减速（保持高速锐利的喷流）
-    // 与黑洞对称：粒子喷发到整页（r 至 1.9）后消散重喷
-    if (p.r > 1.9) {
-      // 逃逸远去 → 从核心重新喷出（age 归零，在淡入区不可见处重生，视觉连续）
+    p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
+    p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
+    // 粒子完全飞出屏幕（边缘外 20px）才循环重生 → 屏幕内永不消失
+    if (p.sx < -20 || p.sx > w + 20 || p.sy < -20 || p.sy > h + 20) {
+      // 从核心重新喷出（age 归零，在淡入区不可见处重生，视觉连续）
       p.r = rand(0.075, 0.1);
       p.theta = rand(0, Math.PI * 2);
       p.vr = rand(0.0035, 0.0065);
       p.tilt = rand(0.5, 1);
       p.size = rand(1.6, 3.6);
       p.age = 0;
+      p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
+      p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
     } else if (p.r > 1.05 && prevR <= 1.05) {
       // 内区喷流散开到外围 → 保持大 tilt 铺满四周
       p.tilt = rand(0.5, 1);
       p.size = rand(1.0, 2.2);
     }
-    p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
-    p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
   }
   for (const d of wh.dust) {
     d.x += d.vx;
@@ -570,12 +573,13 @@ function drawWhiteHole(now: number, alpha: number) {
   if (!ctx) return;
   ctx.save();
   ctx.globalAlpha = alpha;
-  // 深空底色（上浅下深）：顶部保留浅蓝保证浅色模式文字可读，下方渐入深空蓝让白色喷流醒目
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#e8f1ff');
-  g.addColorStop(0.5, '#b9cdea');
-  g.addColorStop(0.72, '#3a4f8f');
-  g.addColorStop(1, '#182450');
+  // 背景：以白洞为圆心的径向渐变 —— 核心周围深蓝，向外渐变到白色
+  // （白色粒子在核心深蓝底上醒目，深蓝紫粒子在边缘白底上醒目）
+  const g = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.max(w, h));
+  g.addColorStop(0, '#16244f');
+  g.addColorStop(0.4, '#33508f');
+  g.addColorStop(0.72, '#8fb0dd');
+  g.addColorStop(1, '#f2f7ff');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
   // 核心暖光晕（白核的底色，深空上更亮）
