@@ -1,27 +1,24 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 defineOptions({ name: 'ResearchAgentView' });
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import {
-  Bot,
-  Plus,
-  Trash2,
-  Loader2,
-  Download,
   PauseCircle,
   PlayCircle,
+  Loader2,
+  Download,
+  Check,
+  Sparkles,
+  RefreshCw,
+  Zap,
+  Timer,
   CheckCircle2,
   Circle,
-  ExternalLink,
-  Timer,
-  Zap,
-  Sparkles,
-  ChevronRight,
-  RefreshCw,
-  Check,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
-import Input from '@/components/ui/Input.vue';
-import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
+import AgentTaskSidebar from '@/components/research/AgentTaskSidebar.vue';
+import AgentCreateForm from '@/components/research/AgentCreateForm.vue';
+import AgentExtendModal from '@/components/research/AgentExtendModal.vue';
+import AgentReportView from '@/components/research/AgentReportView.vue';
 import { toast } from '@/composables/useToast';
 import {
   getAgentTasks,
@@ -34,25 +31,10 @@ import {
   deleteAgentTask,
 } from '@/api/research-agent';
 import { getModelConfigs } from '@/api/model-configs';
-import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import type { AgentTask, AgentMode, AgentDirection } from '@/types/research-agent';
 import type { ModelConfig } from '@/types/model-config';
 
 // ==================== 预算档位 ====================
-
-interface Preset {
-  key: string;
-  label: string;
-  tokens: number;
-  minutes: number;
-  desc: string;
-}
-const PRESETS: Preset[] = [
-  { key: 'quick', label: '快速', tokens: 100_000, minutes: 40, desc: '约 40 分钟' },
-  { key: 'standard', label: '标准', tokens: 200_000, minutes: 90, desc: '约 1.5 小时' },
-  { key: 'deep', label: '深度', tokens: 300_000, minutes: 120, desc: '约 2 小时' },
-  { key: 'custom', label: '自定义', tokens: 0, minutes: 0, desc: '1万~50万' },
-];
 
 /** 预算 → 预估分钟（与后端一致：10万≈40分钟，封顶 6 小时） */
 function estimateMinutes(tokens: number): number {
@@ -83,8 +65,6 @@ const creating = ref(false);
 
 const modelConfigs = ref<ModelConfig[]>([]);
 const extendOpen = ref(false);
-const extTokens = ref(0);
-const extMinutes = ref(30);
 const extending = ref(false);
 const confirming = ref(false);
 const redecomposing = ref(false);
@@ -94,6 +74,13 @@ let clockTimer: ReturnType<typeof setInterval> | null = null;
 const now = ref(Date.now());
 
 // ==================== 派生数据 ====================
+
+const PRESETS = [
+  { key: 'quick', label: '快速', tokens: 100_000, minutes: 40, desc: '约 40 分钟' },
+  { key: 'standard', label: '标准', tokens: 200_000, minutes: 90, desc: '约 1.5 小时' },
+  { key: 'deep', label: '深度', tokens: 300_000, minutes: 120, desc: '约 2 小时' },
+  { key: 'custom', label: '自定义', tokens: 0, minutes: 0, desc: '1万~50万' },
+];
 
 const selectedTokens = computed(() => {
   const p = PRESETS.find((x) => x.key === presetKey.value);
@@ -334,14 +321,12 @@ async function handleStop() {
 }
 
 function openExtend() {
-  extTokens.value = 50_000;
-  extMinutes.value = 30;
   extendOpen.value = true;
 }
 
-async function handleExtend() {
-  if (extTokens.value < 0 || extMinutes.value < 0) return;
-  if (extTokens.value === 0 && extMinutes.value === 0) {
+async function handleExtend(tokens: number, minutes: number) {
+  if (tokens < 0 || minutes < 0) return;
+  if (tokens === 0 && minutes === 0) {
     toast.error('请至少追加 token 预算或续时');
     return;
   }
@@ -350,8 +335,8 @@ async function handleExtend() {
     const t = current.value;
     if (!t) return;
     const updated = await extendAgentTask(t.id, {
-      extraTokens: extTokens.value || undefined,
-      extraMinutes: extMinutes.value || undefined,
+      extraTokens: tokens || undefined,
+      extraMinutes: minutes || undefined,
     });
     current.value = updated;
     const i = tasks.value.findIndex((x) => x.id === t.id);
@@ -385,18 +370,6 @@ async function handleDelete(id: string) {
 
 // ==================== 报告渲染 ====================
 
-async function handleReportClick(e: MouseEvent) {
-  const target = e.target as HTMLElement;
-  if (target.classList.contains('code-copy')) {
-    const code = getCopyCode(target);
-    if (code) {
-      await navigator.clipboard.writeText(code);
-      target.textContent = '已复制';
-      setTimeout(() => (target.textContent = '复制'), 1500);
-    }
-  }
-}
-
 function handleExport() {
   const t = current.value;
   if (!t?.report) return;
@@ -414,59 +387,6 @@ function dirIcon(status: string) {
   if (status === 'done') return CheckCircle2;
   if (status === 'active') return Loader2;
   return Circle;
-}
-
-// ==================== 报告：摘要卡片 + 一个方向一个卡片 ====================
-
-interface ReportSection {
-  title: string;
-  body: string;
-  /** 在 sections 中的下标（展开状态用） */
-  idx: number;
-}
-
-/** 按 `## ` 二级标题把报告拆成小节（引言/各方向/结论） */
-const sections = computed<ReportSection[]>(() => {
-  const report = current.value?.report;
-  if (!report) return [];
-  const parts = report.split(/\n## /);
-  const out: ReportSection[] = [];
-  for (let i = 1; i < parts.length; i++) {
-    const lines = parts[i].split('\n');
-    const title = lines[0].replace(/^#+\s*/, '').trim();
-    const body = lines.slice(1).join('\n').trim();
-    if (title) out.push({ title, body, idx: out.length });
-  }
-  return out;
-});
-
-const isMetaTitle = (t: string) => t === '引言' || t === '结论';
-/** 方向小节（一个方向一张卡片）；过滤空内容节（旧报告可能残留重复空卡片） */
-const dirSections = computed(() =>
-  sections.value.filter((s) => !isMetaTitle(s.title) && s.body.trim()),
-);
-/** 引言 / 结论：不单独成卡片，作为正文段落自然呈现 */
-const introSection = computed(() =>
-  sections.value.find((s) => s.title === '引言' && s.body.trim()),
-);
-const conclusionSection = computed(() =>
-  sections.value.find((s) => s.title === '结论' && s.body.trim()),
-);
-
-/** 已展开的方向卡片下标（默认全部折叠，点标题展开） */
-const expanded = ref<Set<number>>(new Set());
-const allExpanded = ref(false);
-
-function toggleSection(i: number) {
-  const next = new Set(expanded.value);
-  if (next.has(i)) next.delete(i);
-  else next.add(i);
-  expanded.value = next;
-}
-
-function toggleAllSections() {
-  allExpanded.value = !allExpanded.value;
-  expanded.value = allExpanded.value ? new Set(dirSections.value.map((s) => s.idx)) : new Set();
 }
 
 // ==================== 确认 / 重新拆解 ====================
@@ -577,202 +497,41 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-[calc(100dvh-4rem-1px)] overflow-hidden">
-    <!-- 左侧：任务列表 -->
-    <aside class="flex w-64 flex-col border-r bg-card/50">
-      <div class="p-3">
-        <Button class="w-full" @click="handleNew">
-          <Plus class="h-4 w-4" />
-          新建研究任务
-        </Button>
-      </div>
-      <div class="flex-1 overflow-y-auto px-2 pb-2">
-        <div v-if="loading" class="py-2">
-          <ListSkeleton :rows="6" />
-        </div>
-        <div
-          v-for="t in tasks"
-          :key="t.id"
-          role="button"
-          tabindex="0"
-          class="mb-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm transition-colors"
-          :class="
-            t.id === currentId ? 'bg-primary/10 text-primary' : 'hover:bg-accent text-foreground'
-          "
-          @click="selectTask(t.id)"
-          @keydown.enter="selectTask(t.id)"
-        >
-          <Bot class="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span class="min-w-0 flex-1 truncate">{{ t.goal || '自主探索' }}</span>
-          <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px]" :class="statusClass(t.status)">
-            {{ statusText[t.status] }}
-          </span>
-          <button
-            class="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-destructive"
-            title="删除任务"
-            @click.stop="handleDelete(t.id)"
-          >
-            <Trash2 class="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <p
-          v-if="!loading && tasks.length === 0"
-          class="py-8 text-center text-xs text-muted-foreground"
-        >
-          还没有研究任务
-        </p>
-      </div>
-    </aside>
+    <AgentTaskSidebar
+      :tasks="tasks"
+      :current-id="currentId"
+      :loading="loading"
+      @new="handleNew"
+      @select="selectTask"
+      @delete="handleDelete"
+    />
 
     <!-- 右侧：新建 / 进度 / 报告 -->
     <main class="flex flex-1 flex-col overflow-hidden">
       <!-- ========== 新建表单 ========== -->
-      <div v-if="!currentId" class="flex flex-1 flex-col items-center overflow-y-auto p-6">
-        <div class="w-full max-w-4xl pb-8">
-          <!-- 未绑定模型：前置引导（自主研究消耗用户自己的 Key） -->
-          <div
-            v-if="modelConfigs.length === 0"
-            class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm"
-          >
-            <span class="text-muted-foreground">
-              自主研究由你自己的大模型 Key 驱动，请先绑定模型配置
-            </span>
-            <RouterLink
-              to="/model-configs"
-              class="shrink-0 font-medium text-primary hover:underline"
-            >
-              去绑定 →
-            </RouterLink>
-          </div>
-
-          <div class="mb-6 text-center">
-            <Bot class="mx-auto h-12 w-12 text-primary/60" />
-            <h1 class="mt-3 text-2xl font-bold tracking-tight">限时 · 限量 · 自主研究</h1>
-            <p class="mt-2 text-sm text-muted-foreground">
-              设定时间窗与 token 预算，Agent 自动联网搜索、筛选、精读、成稿；
-              预算用尽或时间到自动停止，可随时手动停止并续时继续
-            </p>
-          </div>
-
-          <div class="rounded-lg border bg-card p-5">
-            <!-- 模式 -->
-            <p class="text-sm font-medium">研究模式</p>
-            <div class="mt-1.5 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                class="rounded-md border p-2.5 text-left text-sm transition-colors hover:bg-accent"
-                :class="mode === 'targeted' ? 'border-primary bg-primary/5' : ''"
-                @click="mode = 'targeted'"
-              >
-                <p class="font-medium">定向研究</p>
-                <p class="mt-0.5 text-xs text-muted-foreground">
-                  填写目标，Agent 拆解成多个方向研究
-                </p>
-              </button>
-              <button
-                type="button"
-                class="rounded-md border p-2.5 text-left text-sm transition-colors hover:bg-accent"
-                :class="mode === 'open' ? 'border-primary bg-primary/5' : ''"
-                @click="mode = 'open'"
-              >
-                <p class="font-medium">自主探索</p>
-                <p class="mt-0.5 text-xs text-muted-foreground">不填目标，从你的知识库中挖掘方向</p>
-              </button>
-            </div>
-
-            <!-- 目标 -->
-            <div v-if="mode === 'targeted'" class="mt-4 space-y-1.5">
-              <label class="text-sm font-medium" for="agent-goal">研究目标</label>
-              <textarea
-                id="agent-goal"
-                v-model="goal"
-                rows="3"
-                placeholder="例如：2026 年 RAG 技术的主要发展趋势与工程落地"
-                class="w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
-                :disabled="creating"
-              />
-            </div>
-
-            <!-- 时间窗 -->
-            <div class="mt-4 grid grid-cols-2 gap-3">
-              <div class="space-y-1.5">
-                <label class="text-sm font-medium" for="agent-start">开始时间</label>
-                <Input
-                  id="agent-start"
-                  v-model="startAt"
-                  type="datetime-local"
-                  :disabled="creating"
-                />
-              </div>
-              <div class="space-y-1.5">
-                <label class="text-sm font-medium" for="agent-end">结束时间（停止硬上限）</label>
-                <Input id="agent-end" v-model="endAt" type="datetime-local" :disabled="creating" />
-              </div>
-            </div>
-
-            <!-- 预算 -->
-            <div class="mt-4">
-              <p class="text-sm font-medium">token 预算</p>
-              <div class="mt-1.5 grid grid-cols-4 gap-2">
-                <button
-                  v-for="p in PRESETS"
-                  :key="p.key"
-                  type="button"
-                  class="rounded-md border px-2 py-2 text-center text-sm transition-colors hover:bg-accent"
-                  :class="presetKey === p.key ? 'border-primary bg-primary/5' : ''"
-                  @click="pickPreset(p.key)"
-                >
-                  <p class="font-medium">{{ p.label }}</p>
-                  <p class="mt-0.5 text-[11px] text-muted-foreground">
-                    {{ p.key === 'custom' ? p.desc : `${fmtTokens(p.tokens)} · ${p.desc}` }}
-                  </p>
-                </button>
-              </div>
-              <div v-if="presetKey === 'custom'" class="mt-2 flex items-center gap-3">
-                <Input
-                  v-model.number="customTokens"
-                  type="number"
-                  min="10000"
-                  max="500000"
-                  step="10000"
-                  class="w-40"
-                  :disabled="creating"
-                  @input="onCustomTokens"
-                />
-                <span class="text-xs text-muted-foreground">
-                  1万 ~ 50万，预计约 {{ estimateMinutes(customTokens) }} 分钟
-                </span>
-              </div>
-              <p class="mt-2 text-[11px] text-muted-foreground">
-                预计 {{ selectedMinutes }} 分钟 · 可随时停止/续时；预算
-                {{ fmtTokens(selectedTokens) }} ≈ ¥{{
-                  (selectedTokens / 1000000).toFixed(2)
-                }}（DeepSeek 约 ¥1/百万 token）
-              </p>
-            </div>
-
-            <p v-if="error" class="mt-3 text-sm text-destructive">{{ error }}</p>
-            <Button
-              class="mt-4 w-full"
-              :disabled="creating || modelConfigs.length === 0"
-              @click="handleCreate"
-            >
-              <Loader2 v-if="creating" class="h-4 w-4 animate-spin" />
-              <Sparkles v-else class="h-4 w-4" />
-              {{
-                creating
-                  ? '创建中...'
-                  : modelConfigs.length === 0
-                    ? '请先绑定模型配置'
-                    : '开始自主研究'
-              }}
-            </Button>
-            <p class="mt-2 text-center text-[11px] text-muted-foreground">
-              停止条件：token 预算用尽永远停止；否则到达你设定的结束时间即停止；手动停止随时生效。
-              无论怎么停，都会先把手头笔记整理成正式报告（整理费另计 12k token，不占研究预算）
-            </p>
-          </div>
-        </div>
-      </div>
+      <AgentCreateForm
+        v-if="!currentId"
+        :mode="mode"
+        :goal="goal"
+        :start-at="startAt"
+        :end-at="endAt"
+        :preset-key="presetKey"
+        :custom-tokens="customTokens"
+        :selected-tokens="selectedTokens"
+        :selected-minutes="selectedMinutes"
+        :creating="creating"
+        :error="error"
+        :model-configs="modelConfigs"
+        @update:mode="mode = $event"
+        @update:goal="goal = $event"
+        @update:start-at="startAt = $event"
+        @update:end-at="endAt = $event"
+        @update:preset-key="presetKey = $event"
+        @update:custom-tokens="customTokens = $event"
+        @pick-preset="pickPreset"
+        @custom-tokens="onCustomTokens"
+        @create="handleCreate"
+      />
 
       <!-- ========== 任务详情 ========== -->
       <div v-else-if="current" class="flex flex-1 flex-col overflow-hidden">
@@ -1018,76 +777,7 @@ onBeforeUnmount(() => {
             </div>
 
             <template v-if="current.report">
-              <!-- 摘要卡片（含全部展开/收起） -->
-              <div
-                v-if="current.summary"
-                class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
-              >
-                <div class="flex items-center justify-between gap-2">
-                  <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
-                  <button
-                    type="button"
-                    class="shrink-0 text-xs font-medium text-primary hover:underline"
-                    @click="toggleAllSections"
-                  >
-                    {{ allExpanded ? '全部收起' : '全部展开' }}
-                  </button>
-                </div>
-                <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
-                  {{ current.summary }}
-                </p>
-              </div>
-
-              <!-- 引言：正文段落，不单独成卡片 -->
-              <div v-if="introSection" class="mb-4">
-                <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">
-                  📖 引言
-                </p>
-                <div
-                  class="markdown-body"
-                  @click="handleReportClick"
-                  v-html="renderMarkdown(introSection.body)"
-                />
-              </div>
-
-              <!-- 方向卡片：一个方向一个卡片（默认折叠，点标题展开） -->
-              <div class="space-y-2">
-                <div
-                  v-for="sec in dirSections"
-                  :key="sec.idx"
-                  class="overflow-hidden rounded-lg border bg-card"
-                >
-                  <button
-                    type="button"
-                    class="flex w-full select-none items-center gap-1.5 px-3 py-2.5 text-left text-sm font-semibold hover:bg-accent/60"
-                    @click="toggleSection(sec.idx)"
-                  >
-                    <ChevronRight
-                      class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
-                      :class="expanded.has(sec.idx) ? 'rotate-90' : ''"
-                    />
-                    {{ sec.title }}
-                  </button>
-                  <div
-                    v-show="expanded.has(sec.idx)"
-                    class="markdown-body border-t px-4 py-3"
-                    @click="handleReportClick"
-                    v-html="renderMarkdown(sec.body)"
-                  />
-                </div>
-              </div>
-
-              <!-- 结论：正文段落，不单独成卡片 -->
-              <div v-if="conclusionSection" class="mt-4">
-                <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">
-                  🏁 结论
-                </p>
-                <div
-                  class="markdown-body"
-                  @click="handleReportClick"
-                  v-html="renderMarkdown(conclusionSection.body)"
-                />
-              </div>
+              <AgentReportView :task="current" />
             </template>
             <p v-else class="py-8 text-center text-sm text-muted-foreground">
               已停止，暂无可整理的研究内容（可继续研究，让 Agent 先读一些资料）
@@ -1096,100 +786,7 @@ onBeforeUnmount(() => {
 
           <!-- 完成：摘要卡片 + 一个方向一个卡片 + 来源 -->
           <div v-else-if="current.report" class="mx-auto max-w-6xl px-4 py-6">
-            <div
-              v-if="current.summary"
-              class="mb-4 rounded-lg border border-primary/25 bg-primary/5 px-4 py-3"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <p class="text-xs font-semibold tracking-wide text-primary">📋 执行摘要</p>
-                <button
-                  type="button"
-                  class="shrink-0 text-xs font-medium text-primary hover:underline"
-                  @click="toggleAllSections"
-                >
-                  {{ allExpanded ? '全部收起' : '全部展开' }}
-                </button>
-              </div>
-              <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed">
-                {{ current.summary }}
-              </p>
-            </div>
-
-            <!-- 引言：正文段落，不单独成卡片 -->
-            <div v-if="introSection" class="mb-4">
-              <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">📖 引言</p>
-              <div
-                class="markdown-body"
-                @click="handleReportClick"
-                v-html="renderMarkdown(introSection.body)"
-              />
-            </div>
-
-            <!-- 方向卡片：一个方向一个卡片（默认折叠，点标题展开） -->
-            <div class="space-y-2">
-              <div
-                v-for="sec in dirSections"
-                :key="sec.idx"
-                class="overflow-hidden rounded-lg border bg-card"
-              >
-                <button
-                  type="button"
-                  class="flex w-full select-none items-center gap-1.5 px-3 py-2.5 text-left text-sm font-semibold hover:bg-accent/60"
-                  @click="toggleSection(sec.idx)"
-                >
-                  <ChevronRight
-                    class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
-                    :class="expanded.has(sec.idx) ? 'rotate-90' : ''"
-                  />
-                  {{ sec.title }}
-                </button>
-                <div
-                  v-show="expanded.has(sec.idx)"
-                  class="markdown-body border-t px-4 py-3"
-                  @click="handleReportClick"
-                  v-html="renderMarkdown(sec.body)"
-                />
-              </div>
-            </div>
-
-            <!-- 结论：正文段落，不单独成卡片 -->
-            <div v-if="conclusionSection" class="mt-4">
-              <p class="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">🏁 结论</p>
-              <div
-                class="markdown-body"
-                @click="handleReportClick"
-                v-html="renderMarkdown(conclusionSection.body)"
-              />
-            </div>
-            <div v-if="current.sources?.length" class="mt-4">
-              <details class="rounded-lg border bg-muted/40 px-3 py-2 text-xs">
-                <summary class="cursor-pointer font-medium text-muted-foreground">
-                  🌐 引用来源（{{ current.sources.length }} 条网页）
-                </summary>
-                <ul class="mt-2 space-y-1.5">
-                  <li
-                    v-for="src in current.sources"
-                    :key="src.number"
-                    class="flex items-start gap-2 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/60"
-                  >
-                    <span
-                      class="mt-0.5 shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
-                    >
-                      来源{{ src.number }}
-                    </span>
-                    <a
-                      :href="src.url"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="flex min-w-0 items-center gap-1 font-medium text-foreground hover:text-primary hover:underline"
-                    >
-                      <span class="truncate">{{ src.title || src.url }}</span>
-                      <ExternalLink class="h-3 w-3 shrink-0" />
-                    </a>
-                  </li>
-                </ul>
-              </details>
-            </div>
+            <AgentReportView :task="current" />
           </div>
 
           <div v-else class="flex justify-center py-16 text-sm text-muted-foreground">
@@ -1200,188 +797,11 @@ onBeforeUnmount(() => {
     </main>
 
     <!-- 续时/加预算弹窗 -->
-    <div v-if="extendOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div class="fixed inset-0 bg-black/40" @click="extendOpen = false" />
-      <div class="relative w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
-        <h3 class="text-base font-semibold">继续研究</h3>
-        <p class="mt-1 text-xs text-muted-foreground">
-          追加 token 预算和/或研究时长，Agent 从断点继续（不会从头再来）
-        </p>
-
-        <p class="mt-4 text-sm font-medium">追加 token 预算</p>
-        <div class="mt-1.5 flex flex-wrap gap-2">
-          <button
-            v-for="t in [50_000, 100_000, 200_000]"
-            :key="t"
-            type="button"
-            class="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
-            :class="extTokens === t ? 'border-primary bg-primary/5' : ''"
-            @click="extTokens = t"
-          >
-            +{{ fmtTokens(t) }}
-          </button>
-          <button
-            type="button"
-            class="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
-            :class="extTokens === 0 ? 'border-primary bg-primary/5' : ''"
-            @click="extTokens = 0"
-          >
-            不加
-          </button>
-        </div>
-        <Input
-          v-model.number="extTokens"
-          type="number"
-          min="0"
-          max="500000"
-          step="10000"
-          class="mt-2"
-          placeholder="或输入自定义追加预算（1~50万）"
-        />
-
-        <p class="mt-4 text-sm font-medium">追加研究时长（分钟）</p>
-        <div class="mt-1.5 flex flex-wrap gap-2">
-          <button
-            v-for="m in [30, 60, 120]"
-            :key="m"
-            type="button"
-            class="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
-            :class="extMinutes === m ? 'border-primary bg-primary/5' : ''"
-            @click="extMinutes = m"
-          >
-            +{{ m }} 分钟
-          </button>
-          <button
-            type="button"
-            class="rounded-md border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
-            :class="extMinutes === 0 ? 'border-primary bg-primary/5' : ''"
-            @click="extMinutes = 0"
-          >
-            不加
-          </button>
-        </div>
-        <Input
-          v-model.number="extMinutes"
-          type="number"
-          min="0"
-          max="720"
-          class="mt-2"
-          placeholder="或输入自定义分钟数（最多 720）"
-        />
-
-        <div class="mt-5 flex gap-2">
-          <Button variant="outline" class="flex-1" @click="extendOpen = false">取消</Button>
-          <Button class="flex-1" :disabled="extending" @click="handleExtend">
-            <Loader2 v-if="extending" class="h-4 w-4 animate-spin" />
-            <PlayCircle v-else class="h-4 w-4" />
-            确认继续
-          </Button>
-        </div>
-      </div>
-    </div>
+    <AgentExtendModal
+      :open="extendOpen"
+      :extending="extending"
+      @close="extendOpen = false"
+      @confirm="handleExtend"
+    />
   </div>
 </template>
-
-<style scoped>
-/* AI 报告的 Markdown 排版（正文放大不加粗，标题按等级加粗+大小） */
-.markdown-body {
-  font-size: 1.25rem;
-  font-weight: 400;
-  color: var(--foreground);
-}
-.markdown-body :deep(h1),
-.markdown-body :deep(h2),
-.markdown-body :deep(h3),
-.markdown-body :deep(h4) {
-  font-weight: 700;
-  line-height: 1.3;
-  margin: 0.75em 0 0.4em;
-}
-.markdown-body :deep(h1) {
-  font-size: 1.5em;
-  font-weight: 700;
-}
-.markdown-body :deep(h2) {
-  font-size: 1.32em;
-  font-weight: 700;
-}
-.markdown-body :deep(h3) {
-  font-size: 1.16em;
-  font-weight: 700;
-}
-.markdown-body :deep(h4) {
-  font-size: 1.05em;
-  font-weight: 600;
-}
-.markdown-body :deep(p) {
-  margin: 0.5em 0;
-  line-height: 1.8;
-  font-size: 1.25rem;
-  font-weight: 400;
-}
-.markdown-body :deep(ul),
-.markdown-body :deep(ol) {
-  margin: 0.5em 0;
-  padding-left: 1.5em;
-}
-.markdown-body :deep(li) {
-  margin: 0.25em 0;
-  font-size: 1.25rem;
-}
-.markdown-body :deep(a) {
-  color: var(--primary);
-  text-decoration: underline;
-}
-.markdown-body :deep(blockquote) {
-  border-left: 3px solid var(--border);
-  padding-left: 0.75em;
-  color: hsl(var(--foreground) / 0.72);
-  margin: 0.5em 0;
-}
-.markdown-body :deep(table) {
-  border-collapse: collapse;
-  margin: 0.5em 0;
-  font-size: 0.9em;
-}
-.markdown-body :deep(th),
-.markdown-body :deep(td) {
-  border: 1px solid var(--border);
-  padding: 0.35em 0.6em;
-}
-.markdown-body :deep(code:not(pre code)) {
-  background: hsl(var(--muted));
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
-  font-size: 0.95em;
-  color: var(--foreground);
-}
-.markdown-body :deep(.code-block) {
-  position: relative;
-  margin: 0.6em 0;
-}
-.markdown-body :deep(.code-block pre) {
-  border-radius: 8px;
-  overflow-x: auto;
-  padding: 0.9em 1em;
-  font-size: 0.95em;
-  line-height: 1.6;
-  background: hsl(var(--muted));
-  color: var(--foreground);
-}
-.markdown-body :deep(.code-copy) {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--card);
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-  color: var(--muted-foreground);
-}
-.markdown-body :deep(.code-copy:hover) {
-  color: var(--foreground);
-  border-color: var(--foreground);
-}
-</style>
