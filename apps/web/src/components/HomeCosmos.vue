@@ -453,36 +453,36 @@ function drawBlackHole(now: number, alpha: number) {
     drawDiskDot(p, now, alpha);
   }
 
-  // 被吸入粒子：沿径向快速坠向核心，拖尾指向黑洞（明显"吸进去"）
+  // 被吸入粒子：沿径向快速坠向核心，配色/画法与吸积盘环绕粒子一致
+  // （diskColor 按半径渐变：外圈蓝紫 → 品红 → 橙 → 内圈白热），只是径向运动更快、拖尾更长
   ctx.globalCompositeOperation = 'lighter';
   for (const p of bh.infall) {
-    const rn = clamp(p.r / 1.9, 0, 1);
-    // 速度方向（几乎纯径向向内）
+    const rn = clamp(p.r, 0.075, 1);
+    // 屏幕空间速度（几乎纯径向向内）
     const vx = Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
-    const flick = 0.7 + 0.3 * Math.sin(now / 600 + p.phase);
-    const a = alpha * (0.35 + 0.4 * (1 - rn)) * flick;
-    // 颜色：白热 → 橙黄（越接近视界越亮，像被加热）
-    const cr = Math.round(lerp(255, 255, rn));
-    const cg = Math.round(lerp(244, 180, rn));
-    const cb = Math.round(lerp(224, 110, rn));
+    // 与吸积盘同款：多普勒聚束 + 闪烁 + 随半径透明度
+    const dopp = 1 + 0.5 * Math.sin(p.theta);
+    const flick = 0.85 + 0.15 * Math.sin(now / 900 + p.phase);
+    const a = alpha * (0.32 + 0.55 * rn) * dopp * flick;
+    const col = diskColor(rn);
     const tail = 10;
     ctx!.globalAlpha = Math.min(1, a);
-    ctx!.strokeStyle = `rgb(${cr},${cg},${cb})`;
-    ctx!.lineWidth = p.size * 0.8;
+    ctx!.strokeStyle = col;
+    ctx!.lineWidth = p.size;
     ctx!.beginPath();
     ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
     ctx!.lineTo(p.sx, p.sy);
     ctx!.stroke();
-    ctx!.fillStyle = `rgb(${cr},${cg},${cb})`;
+    ctx!.fillStyle = col;
     ctx!.beginPath();
-    ctx!.arc(p.sx, p.sy, p.size * 0.8, 0, Math.PI * 2);
+    ctx!.arc(p.sx, p.sy, p.size * 0.75, 0, Math.PI * 2);
     ctx!.fill();
     if (rn < 0.3) {
-      // 近视界：炽热光晕
+      // 近视界：炽热光晕（同吸积盘内盘）
       ctx!.globalAlpha = Math.min(1, a * 0.5);
       ctx!.beginPath();
-      ctx!.arc(p.sx, p.sy, p.size * 3, 0, Math.PI * 2);
+      ctx!.arc(p.sx, p.sy, p.size * 3.2, 0, Math.PI * 2);
       ctx!.fill();
     }
   }
