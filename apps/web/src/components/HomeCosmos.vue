@@ -367,14 +367,14 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：冷白 → 暖白 → 淡蓝 → 蓝紫 → 近黑深蓝紫（末端渐变黑色） */
+/** 白洞喷流粒子颜色：冷白 → 暖白 → 淡蓝 → 蓝紫 → 深蓝紫 */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
     [0, [226, 234, 255]],
     [0.25, [255, 243, 196]],
     [0.6, [200, 208, 248]],
-    [0.85, [112, 102, 222]],
-    [1, [12, 12, 45]],
+    [0.82, [112, 102, 222]],
+    [1, [72, 60, 202]],
   ];
   const t = clamp(rn, 0, 1);
   for (let i = 1; i < stops.length; i++) {
@@ -659,15 +659,15 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.fill();
   }
 
-  // 星环：环绕白核的发光环带（渐变填充的圆环，非离散粒子；深空底上为淡蓝白反光）
+  // 星环：环绕白核的黑色环带（渐变填充的圆环，非离散粒子；白核+黑环带，黑白相反观感）
   ctx.globalCompositeOperation = 'source-over';
   const beltPulse = 0.85 + 0.15 * Math.sin(now / 2200);
-  // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），内侧最亮、向外渐隐 → 连续平滑
+  // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），内侧最深、向外渐隐 → 连续平滑
   const drawBelt = (r0: number, r1: number, peak: number) => {
     const g = ctx!.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
-    g.addColorStop(0, `rgba(216, 230, 255, ${peak * beltPulse * alpha})`);
-    g.addColorStop(0.4, `rgba(216, 230, 255, ${peak * 0.9 * beltPulse * alpha})`);
-    g.addColorStop(1, 'rgba(216, 230, 255, 0)');
+    g.addColorStop(0, `rgba(8, 10, 26, ${peak * beltPulse * alpha})`);
+    g.addColorStop(0.4, `rgba(8, 10, 26, ${peak * 0.9 * beltPulse * alpha})`);
+    g.addColorStop(1, 'rgba(8, 10, 26, 0)');
     ctx!.fillStyle = g;
     ctx!.beginPath();
     ctx!.arc(holeX, holeY, r1 * wh.coreR, 0, Math.PI * 2);
