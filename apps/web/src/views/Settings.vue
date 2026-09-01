@@ -70,6 +70,7 @@ async function onAvatarChange(e: Event) {
     await uploadAvatar(dataUrl);
     toast.success('头像已更新');
     await auth.fetchProfile();
+    auth.bumpAvatarVersion(); // 头像 URL 固定路径，加版本号强制刷新缓存
   } catch (err) {
     toast.error((err as Error).message);
   } finally {
@@ -339,8 +340,8 @@ async function handleDeleteAccount() {
               class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-2xl font-bold text-primary"
             >
               <img
-                v-if="auth.user?.avatar"
-                :src="auth.user.avatar"
+                v-if="auth.avatarSrc"
+                :src="auth.avatarSrc"
                 class="h-full w-full object-cover"
                 alt="头像"
               />

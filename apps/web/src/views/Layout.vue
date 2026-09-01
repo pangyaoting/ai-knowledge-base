@@ -167,8 +167,8 @@ async function handleLogout() {
               @click.stop="toggleMenu"
             >
               <img
-                v-if="auth.user?.avatar"
-                :src="auth.user.avatar"
+                v-if="auth.avatarSrc"
+                :src="auth.avatarSrc"
                 class="h-4 w-4 shrink-0 rounded-full object-cover"
                 alt=""
               />
@@ -196,8 +196,8 @@ async function handleLogout() {
             >
               <div class="flex items-center gap-2 border-b px-3 py-2">
                 <img
-                  v-if="auth.user?.avatar"
-                  :src="auth.user.avatar"
+                  v-if="auth.avatarSrc"
+                  :src="auth.avatarSrc"
                   class="h-8 w-8 shrink-0 rounded-full object-cover"
                   alt=""
                 />

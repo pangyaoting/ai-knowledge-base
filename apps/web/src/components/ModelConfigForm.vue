@@ -240,6 +240,14 @@ async function saveConfig() {
         <Label>API Key（{{ editing ? '留空则保留原 Key' : '加密存储，不返回明文' }}）</Label>
         <Input v-model="configForm.apiKey" type="password" placeholder="sk-..." />
       </div>
+      <div
+        class="rounded-md bg-muted/50 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground"
+      >
+        💡 同一个 Key 想用多个模型（如对话 + 视觉）→
+        分别建几条配置即可，对话页模型下拉会自动列出全部； 发图片需要一条「模型名」含
+        <code class="font-mono">vision</code> 的配置（如
+        <code class="font-mono">deepseek-v4-flash-vision-exp</code>），系统会自动路由识别图片。
+      </div>
     </div>
     <p v-if="configError" class="mt-3 text-sm text-destructive">{{ configError }}</p>
     <div class="mt-4 flex justify-end gap-2">

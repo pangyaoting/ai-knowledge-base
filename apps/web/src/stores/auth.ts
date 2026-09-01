@@ -13,9 +13,16 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserInfo | null>(null);
   const accessToken = ref<string>(localStorage.getItem('accessToken') || '');
   const refreshToken = ref<string>(localStorage.getItem('refreshToken') || '');
+  /** 头像版本号：上传/更换头像后自增，拼在头像 URL 上强制浏览器重新加载（固定路径 + 缓存导致旧头像不刷新） */
+  const avatarVersion = ref(0);
 
   // 计算属性
   const isLoggedIn = computed(() => !!accessToken.value);
+
+  /** 头像 URL（带版本号，换头像后立即生效）；未设置头像返回 null */
+  const avatarSrc = computed(() =>
+    user.value?.avatar ? `${user.value.avatar}?v=${avatarVersion.value}` : null,
+  );
 
   // 保存 token
   function setTokens(access: string, refresh: string) {
@@ -57,6 +64,11 @@ export const useAuthStore = defineStore('auth', () => {
     return profile;
   }
 
+  /** 头像已更换：自增版本号，触发头像 URL 重新加载 */
+  function bumpAvatarVersion() {
+    avatarVersion.value += 1;
+  }
+
   // 登出
   async function logout() {
     try {
@@ -73,9 +85,11 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken,
     refreshToken,
     isLoggedIn,
+    avatarSrc,
     login,
     register,
     fetchProfile,
+    bumpAvatarVersion,
     logout,
     clearAuth,
   };
