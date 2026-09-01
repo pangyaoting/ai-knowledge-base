@@ -22,18 +22,20 @@ const configError = ref('');
 const loadingModels = ref(false);
 const modelOptions = ref<string[]>([]);
 const modelFetchError = ref('');
-const manualModel = ref(false);
 const modelPickerOpen = ref(false);
 
 const configForm = reactive({
   name: props.editing?.name ?? '',
   baseURL: props.editing?.baseURL ?? 'https://api.deepseek.com',
   apiKey: '', // 编辑时留空 = 保留原 Key
-  model: props.editing?.model ?? '',
-  // 其他模型名（同一 Key 多模型；每行一个，不含主模型名）
-  extraModels: props.editing?.models?.length
-    ? (props.editing.models as string[]).filter((m) => m !== props.editing?.model).join('\n')
-    : '',
+  // 选中的模型名列表（同一 Key 多模型；第一项 = 默认模型）
+  selected: props.editing?.models?.length
+    ? [...(props.editing.models as string[])]
+    : props.editing?.model
+      ? [props.editing.model]
+      : [],
+  // 手动补充的模型名（探测不到/想临时加一个时用）
+  manualInput: '',
 });
 
 // 编辑时：当前模型名直接显示（不依赖探测），一眼看到在改谁
@@ -60,9 +62,23 @@ function toggleModelPicker() {
   }
 }
 
-function pickModel(m: string) {
-  configForm.model = m;
-  modelPickerOpen.value = false;
+/** 下拉多选：点一下勾选/取消（选中的都在 selected 里，第一个为默认模型） */
+function toggleModel(m: string) {
+  const i = configForm.selected.indexOf(m);
+  if (i >= 0) configForm.selected.splice(i, 1);
+  else configForm.selected.push(m);
+}
+
+function removeModel(m: string) {
+  const i = configForm.selected.indexOf(m);
+  if (i >= 0) configForm.selected.splice(i, 1);
+}
+
+/** 手动输入一个模型名（回车/添加按钮） */
+function addManualModel() {
+  const m = configForm.manualInput.trim();
+  if (m && !configForm.selected.includes(m)) configForm.selected.push(m);
+  configForm.manualInput = '';
 }
 
 async function fetchModels() {
@@ -74,20 +90,17 @@ async function fetchModels() {
         ? { configId: props.editing.id }
         : { baseURL: configForm.baseURL.trim(), apiKey: configForm.apiKey.trim() },
     );
-    // 探测结果与当前值合并：编辑时当前模型不在探测列表里也保留（不悄悄改掉用户选的模型）
+    // 探测结果与当前选中合并：编辑时已选模型不在探测列表里也保留（不悄悄改掉用户选的模型）
     const fetched = res.models;
-    const merged =
-      fetched.includes(configForm.model) || !configForm.model
-        ? fetched
-        : [configForm.model, ...fetched];
+    const merged = [...new Set([...configForm.selected, ...fetched])];
     modelOptions.value = merged;
     if (merged.length === 0) {
-      modelFetchError.value = '该接口没有返回可用模型，可切换「手动输入」';
+      modelFetchError.value = '该接口没有返回可用模型，可在下方手动输入模型名';
       return;
     }
-    // 新建且未选模型 → 默认选第一个
-    if (!configForm.model) {
-      configForm.model = merged[0];
+    // 新建且还没勾选任何模型 → 默认选第一个，保证"打开就能用"
+    if (configForm.selected.length === 0 && merged.length > 0) {
+      configForm.selected.push(merged[0]);
     }
   } catch (e) {
     modelFetchError.value = (e as Error).message;
@@ -98,8 +111,9 @@ async function fetchModels() {
 }
 
 async function saveConfig() {
-  if (!configForm.name.trim() || !configForm.model.trim()) {
-    configError.value = '请填写名称和模型名';
+  const modelList = configForm.selected.map((m) => m.trim()).filter((m) => m.length > 0);
+  if (!configForm.name.trim() || modelList.length === 0) {
+    configError.value = '请填写名称，并在模型列表中至少勾选一个模型';
     return;
   }
   if (!props.editing && !configForm.apiKey.trim()) {
@@ -108,20 +122,15 @@ async function saveConfig() {
   }
   savingConfig.value = true;
   configError.value = '';
-  // 多模型：主模型 + 其他模型（每行一个）→ 去重后存 models
-  const models = [
-    configForm.model.trim(),
-    ...configForm.extraModels
-      .split('\n')
-      .map((m) => m.trim())
-      .filter((m) => m && m !== configForm.model.trim()),
-  ];
+  // 默认模型 = 第一个选中的；models = 全部选中（去重保序）
+  const model = modelList[0];
+  const models = [...new Set(modelList)];
   try {
     if (props.editing) {
       await updateModelConfig(props.editing.id, {
         name: configForm.name.trim(),
         baseURL: configForm.baseURL.trim(),
-        model: configForm.model.trim(),
+        model,
         models,
         ...(configForm.apiKey.trim() ? { apiKey: configForm.apiKey.trim() } : {}),
       });
@@ -131,7 +140,7 @@ async function saveConfig() {
         name: configForm.name.trim(),
         baseURL: configForm.baseURL.trim(),
         apiKey: configForm.apiKey.trim(),
-        model: configForm.model.trim(),
+        model,
         models,
       });
       toast.success('配置已保存');
@@ -161,16 +170,22 @@ async function saveConfig() {
         <Input v-model="configForm.name" placeholder="如：我的 DeepSeek" />
       </div>
       <div class="space-y-1.5">
-        <Label>模型名</Label>
-        <!-- 下拉选择：点开自动加载该接口的模型列表 -->
-        <div v-if="!manualModel" class="relative">
+        <Label>模型（可多选，第一个为默认；同一 Key 可挂多个模型）</Label>
+        <!-- 下拉多选：点开自动加载该接口的模型列表，勾选即选中 -->
+        <div class="relative">
           <button
             type="button"
             class="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             @click="toggleModelPicker"
           >
             <span class="min-w-0 truncate text-left">
-              {{ configForm.model || (loadingModels ? '加载模型列表…' : '点击选择模型') }}
+              {{
+                configForm.selected.length
+                  ? `${configForm.selected.length} 个模型（默认 ${configForm.selected[0]}）`
+                  : loadingModels
+                    ? '加载模型列表…'
+                    : '点击选择模型'
+              }}
             </span>
             <ChevronDown
               class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform"
@@ -196,11 +211,11 @@ async function saveConfig() {
                 :key="m"
                 type="button"
                 class="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-                :class="m === configForm.model ? 'text-primary' : ''"
-                @click="pickModel(m)"
+                :class="configForm.selected.includes(m) ? 'text-primary' : ''"
+                @click="toggleModel(m)"
               >
                 <span class="min-w-0 truncate">{{ m }}</span>
-                <Check v-if="m === configForm.model" class="h-3 w-3 shrink-0" />
+                <Check v-if="configForm.selected.includes(m)" class="h-3 w-3 shrink-0" />
               </button>
               <p
                 v-if="modelFetchError && !modelOptions.length"
@@ -208,16 +223,6 @@ async function saveConfig() {
               >
                 {{ modelFetchError }}
               </p>
-              <button
-                type="button"
-                class="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent"
-                @click="
-                  manualModel = true;
-                  modelPickerOpen = false;
-                "
-              >
-                手动输入模型名…
-              </button>
               <button
                 type="button"
                 class="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-primary transition-colors hover:bg-accent"
@@ -229,32 +234,45 @@ async function saveConfig() {
             </template>
           </div>
         </div>
-        <!-- 手动输入兜底（个别网关不开放 /models） -->
-        <div v-else class="flex gap-2">
-          <Input
-            v-model="configForm.model"
-            placeholder="如：deepseek-chat（需与该接口支持的模型名完全一致）"
-            class="flex-1"
-          />
-          <button
-            type="button"
-            class="shrink-0 text-xs text-muted-foreground hover:text-primary hover:underline"
-            @click="manualModel = false"
+        <!-- 已选模型 chips（可移除） -->
+        <div v-if="configForm.selected.length" class="mt-1.5 flex flex-wrap gap-1.5">
+          <span
+            v-for="m in configForm.selected"
+            :key="m"
+            class="inline-flex items-center gap-1 rounded-full border bg-muted/60 px-2 py-0.5 font-mono text-xs"
+            :title="m === configForm.selected[0] ? '默认模型' : ''"
           >
-            用列表选择
-          </button>
+            {{ m }}
+            <button
+              type="button"
+              class="text-muted-foreground hover:text-destructive"
+              @click="removeModel(m)"
+            >
+              ✕
+            </button>
+          </span>
         </div>
-        <p v-if="modelFetchError" class="text-xs text-destructive">{{ modelFetchError }}</p>
-        <!-- 同一 Key 多模型：额外模型名（每行一个） -->
-        <textarea
-          v-model="configForm.extraModels"
-          rows="3"
-          placeholder="其他模型名（同一 Key 可挂多个模型，每行一个）&#10;如：deepseek-reasoner&#10;deepseek-v4-flash-vision-exp"
-          class="mt-1 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
-        />
+        <!-- 手动补充（探测不到的模型） -->
+        <div class="mt-1.5 flex gap-2">
+          <Input
+            v-model="configForm.manualInput"
+            placeholder="手动添加模型名（回车）"
+            class="flex-1 font-mono text-xs"
+            @keyup.enter="addManualModel"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            @click="addManualModel"
+          >
+            添加
+          </Button>
+        </div>
         <p class="text-[11px] text-muted-foreground">
-          同一 Key 想切换多个模型就在这里各写一行（对话页模型下拉会列出全部）；视觉模型名需含
-          <code class="font-mono">vision</code>。
+          对话页模型下拉会列出这里勾选的全部模型，直接切换；视觉模型名需含
+          <code class="font-mono">vision</code>（发图片自动路由识别）。
         </p>
       </div>
       <div class="space-y-1.5">
@@ -264,14 +282,6 @@ async function saveConfig() {
       <div class="space-y-1.5">
         <Label>API Key（{{ editing ? '留空则保留原 Key' : '加密存储，不返回明文' }}）</Label>
         <Input v-model="configForm.apiKey" type="password" placeholder="sk-..." />
-      </div>
-      <div
-        class="rounded-md bg-muted/50 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground"
-      >
-        💡 同一个 Key 想用多个模型（如对话 + 视觉）→
-        分别建几条配置即可，对话页模型下拉会自动列出全部； 发图片需要一条「模型名」含
-        <code class="font-mono">vision</code> 的配置（如
-        <code class="font-mono">deepseek-v4-flash-vision-exp</code>），系统会自动路由识别图片。
       </div>
     </div>
     <p v-if="configError" class="mt-3 text-sm text-destructive">{{ configError }}</p>
