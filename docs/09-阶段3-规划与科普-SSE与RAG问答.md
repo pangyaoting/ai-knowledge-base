@@ -2,7 +2,10 @@
 
 > 这是项目最核心的阶段，也是面试官最看重、最会深挖的部分。
 > 做完这一阶段：用户能在知识库上提问，系统**检索最相关的资料 → 组装 Prompt → DeepSeek 流式回答（逐字显示）→ 标注引用来源**。
-> 预计 3-4 周。本阶段不需要你再申请任何东西（DeepSeek key 已就绪）。
+> 预计 3-4 周。AI 功能强制用户自带 Key（BYO），未绑定则 SSE 发 error 提示；DEEPSEEK_API_KEY 无代码引用。
+
+> **状态标注**：本规划已于 2026-08 阶段 3 全部落地，随后演进出混合检索/重排/联网/BYO 等，
+> 现状以 docs/10、11、12、16、20、27 及代码为准。
 
 ---
 
@@ -83,7 +86,7 @@ LIMIT 5
 
 - `<=>` 是余弦距离算子（阶段 2 建 HNSW 索引时用的就是它）
 - 如果会话指定了知识库，加 `AND knowledge_base_id = ?` 过滤
-- **只取 Top-5**：答案质量由"检索准不准"决定，不是"资料塞得多不多"
+- **已演进（2026-08）**：检索不再是"只取 Top-5 余弦"——现为向量 + pg_trgm 关键词 + RRF 融合 + bge-reranker 两阶段精排 + 相关性门控 + 多轮查询改写
 
 ### 2.2 Prompt 组装（面试官必问"你怎么拼的"）
 
@@ -109,12 +112,13 @@ Vue3 响应式原理是什么？
 1. **系统提示词**："仅根据资料回答 + 不知道就说不知道" → 抑制幻觉
 2. **引用编号**：资料带 [1][2] 编号，模型回答时标注 → 前端显示"来源"（引用溯源）
 3. **历史对话滑动窗口**：只带最近 3 轮，控制 token 成本（这是面试点："多轮对话我用滑动窗口管理上下文，避免无限增长烧 token"）
+4. **已演进（2026-08）**：参考资料为知识库 + 联网双来源；无资料时不再要求"明说没有"，改为允许模型自身知识但必须披露"（未检索到知识库资料，以下为模型自身知识）"
 
 ### 2.3 DeepSeek 流式调用（openai SDK）
 
 ```ts
 const stream = await this.client.chat.completions.create({
-  model: 'deepseek-chat',
+  model: 'deepseek-chat', // 注：现为 BYO——deepseek-chat 仅是默认示例名，实际模型由用户自带 Key 路由
   messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: question }],
   stream: true,
 });
@@ -149,6 +153,9 @@ model ChatMessage {
 }
 ```
 
+**已演进（2026-08）**：`knowledgeBaseId` 单字段 → 多对多 `SessionKnowledgeBase` + `useKnowledgeBase` 开关
+（迁移 `20260817160000_session_multi_kb`、`20260818110000_add_use_knowledge_base`），另加 `modelConfigId`、`reasoningEffort`。
+
 **为什么消息流式结束后才落库**：流式中间态不写库（每写一次都是一次 IO），等回答完整后一次性存。刷新页面能从库里恢复历史。
 
 ## 4. API 设计
@@ -156,7 +163,11 @@ model ChatMessage {
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/chat/sessions | 我的会话列表 |
-| POST | /api/chat/sessions | 新建会话 { title?, knowledgeBaseId? } |
+| POST | /api/chat/sessions | 新建会话 { title?, knowledgeBaseIds[], useKnowledgeBase?, modelConfigId?, seedMessages? } |
+| PATCH | /api/chat/sessions/:id/knowledge-bases | 更新会话绑定的知识库 |
+| PATCH | /api/chat/sessions/:id/model | 切换会话模型配置 |
+| GET | /api/chat/sessions/:id/export | 导出会话（Markdown） |
+| POST | /api/extract-file | 提取文件内容（不建库） |
 | GET | /api/chat/sessions/:id/messages | 会话历史 |
 | DELETE | /api/chat/sessions/:id | 删除会话 |
 | POST | /api/chat/sessions/:id/messages | **提问 → SSE 流式回答** |

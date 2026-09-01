@@ -4,6 +4,11 @@
 > 上传文档自动完成"解析→分块→向量化→入库"，并用真实问题验证了语义检索。
 > 配套代码：`apps/server/src/modules/knowledge/embedding.service.ts` + `documents.service.ts`
 
+> **后续演进（2026-08 阶段 4 后）**：本笔记对应同步版实现。此后上传已改为 BullMQ 异步队列
+> （`document-queue.service.ts` + `document-processor.service.ts`，concurrency 2、失败重试 3 次指数退避）；
+> 失败清理逻辑迁移：保留 failed 行展示原因、恢复被标 replacing 的旧文档、不再删磁盘文件。
+> 正文其余（bge-m3、BATCH_SIZE=10、HNSW、.env 路径、根目录跑 prisma）保持。
+
 ---
 
 ## 1. 这一阶段解决了什么

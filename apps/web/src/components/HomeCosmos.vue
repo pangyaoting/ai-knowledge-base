@@ -8,7 +8,7 @@
  *  - 浅色模式 → 白洞：黑洞的时间反演 —— 同样的倾斜盘面几何、同尺寸核心，样式相反：
  *    白核（= 视界半径 R）+ 反光子环（= 1.42R，黑环而非橙环），物质从核心向外喷射、
  *    减速并淡出；背景为以白洞为圆心的径向渐变（核心周围深蓝 → 向外渐变到白色），
- *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、全程饱满不渐隐、飞出屏幕才循环，
+ *    漂浮光尘 + 点缀星；粒子核心淡入、全程饱满不渐隐、飞出屏幕才循环，
  *    外圈渐变深蓝紫。
  *  - 核心位于页面下方（0.74h），避开欢迎区/卡片/引导文字；鼠标互动：核心跟随鼠标缓动，
  *    白洞核心附近粒子被鼠标"能量斥力"偏转，鼠标悬停白洞上时全部粒子加速爆发（默认缓速喷射）；
@@ -174,8 +174,8 @@ function makeDiskParticle(vr: number): DiskParticle {
 }
 
 function buildWhiteHole() {
-  // 白洞核心比黑洞视界小：0.72R 减小 5/8（剩 3/8 = 0.27R，用户反馈核心仍偏大）
-  wh.coreR = (bh.R * 0.72 * 3) / 8;
+  // 白洞核心改成一个点（半径再缩小：0.27R → 0.12R，用户反馈核心仍偏大）
+  wh.coreR = bh.R * 0.12;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
   // 默认缓速喷射（约 4.5 秒一轮）；鼠标悬停白洞核心时全部粒子加速爆发（见 updateWhiteHole）
@@ -585,13 +585,6 @@ function drawWhiteHole(now: number, alpha: number) {
   g.addColorStop(1, '#ffffff');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // 核心冷白光晕（柔和，避免刺眼；半径缩小 1/3，超白范围收窄）
-  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.333);
-  halo.addColorStop(0, 'rgba(255, 255, 255, 0.62)');
-  halo.addColorStop(0.4, 'rgba(215, 230, 255, 0.28)');
-  halo.addColorStop(1, 'rgba(160, 190, 255, 0)');
-  ctx.fillStyle = halo;
-  ctx.fillRect(0, 0, w, h);
 
   // 深空点缀星（浅色顶部区域因浅底自动不可见）
   ctx.globalCompositeOperation = 'source-over';
@@ -658,62 +651,6 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.arc(p.sx, p.sy, p.size * 0.42, 0, Math.PI * 2);
     ctx!.fill();
   }
-
-  // 星环：环绕白核的黑色环带（渐变填充的圆环，非离散粒子；白核+黑环带，黑白相反观感）
-  ctx.globalCompositeOperation = 'source-over';
-  const beltPulse = 0.85 + 0.15 * Math.sin(now / 2200);
-  // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），内侧最深、向外渐隐 → 连续平滑
-  const drawBelt = (r0: number, r1: number, peak: number) => {
-    const g = ctx!.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
-    g.addColorStop(0, `rgba(216, 230, 255, ${peak * beltPulse * alpha})`);
-    g.addColorStop(0.4, `rgba(216, 230, 255, ${peak * 0.9 * beltPulse * alpha})`);
-    g.addColorStop(1, 'rgba(216, 230, 255, 0)');
-    ctx!.fillStyle = g;
-    ctx!.beginPath();
-    ctx!.arc(holeX, holeY, r1 * wh.coreR, 0, Math.PI * 2);
-    ctx!.arc(holeX, holeY, r0 * wh.coreR, 0, Math.PI * 2, true);
-    ctx!.fill();
-  };
-  // 主环带（更亮更宽）+ 内环留卡西尼缝 + 最外一道渐隐的散带；不描边，避免明显线条
-  drawBelt(1.5, 3.2, 0.95);
-  drawBelt(1.72, 1.94, 0.5);
-  drawBelt(3.2, 4.0, 0.25);
-
-  // 高能核心（脉动 + 鼠标靠近增亮）——白核比黑洞视界小：白核 = 0.72R，反光子环 = 1.42×白核
-  const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
-  const pulse = 1 + 0.06 * Math.sin(now / 380);
-  ctx.globalCompositeOperation = 'lighter';
-  // 反光子环：与黑洞光子环同位置同粗细，颜色相反（黑环 + 深蓝外缘）——白核外一圈黑环
-  // 半径轻微脉动"摆动"（呼吸感）
-  const pr2 = wh.coreR * 1.42 * (1 + 0.05 * Math.sin(now / 650));
-  const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
-  prGrad.addColorStop(0, 'rgba(0, 2, 10, 0)');
-  prGrad.addColorStop(0.5, 'rgba(0, 2, 10, 0.92)');
-  prGrad.addColorStop(0.8, 'rgba(0, 2, 10, 1)');
-  prGrad.addColorStop(1, 'rgba(0, 2, 10, 0)');
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = prGrad;
-  ctx.beginPath();
-  ctx.arc(holeX, holeY, pr2 * 1.15, 0, Math.PI * 2);
-  ctx.fill();
-  // 外晕（半径缩小 1/3 至 ~1.33R，紧贴白核，超白范围收窄）
-  const r1 = wh.coreR * 1.33 * pulse;
-  const glow = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, r1);
-  glow.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-  glow.addColorStop(0.3, `rgba(255, 255, 255, ${0.85 + prox * 0.05})`);
-  glow.addColorStop(0.7, 'rgba(150, 190, 255, 0.4)');
-  glow.addColorStop(1, 'rgba(120, 160, 240, 0)');
-  ctx.globalAlpha = alpha * (0.62 + prox * 0.25);
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(holeX, holeY, r1, 0, Math.PI * 2);
-  ctx.fill();
-  // 白核：与黑洞视界同半径的微蓝白圆（深空底上轮廓清晰，柔和不刺眼）
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = '#f4f8ff';
-  ctx.beginPath();
-  ctx.arc(holeX, holeY, wh.coreR * pulse, 0, Math.PI * 2);
-  ctx.fill();
 
   ctx.restore();
 }

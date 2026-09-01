@@ -134,20 +134,6 @@ onMounted(async () => {
           <ArrowRight class="h-4 w-4" />
         </RouterLink>
       </div>
-
-      <!-- 使用引导（纯文字，功能入口都在顶部导航） -->
-      <div class="mt-12 max-w-xl animate-fade-up-slow">
-        <p class="text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">
-          从顶部导航开始：<span :class="isDark ? 'text-slate-200' : 'text-slate-700'">知识库</span>
-          上传资料 →
-          <span :class="isDark ? 'text-slate-200' : 'text-slate-700'">对话</span>
-          问答与溯源 →
-          <span :class="isDark ? 'text-slate-200' : 'text-slate-700'">研究报告 / 自主研究</span>
-          让 AI 替你调研 →
-          <span :class="isDark ? 'text-slate-200' : 'text-slate-700'">数据看板</span>
-          查看用量
-        </p>
-      </div>
     </div>
   </div>
 </template>

@@ -4,6 +4,8 @@
 > Agent 在窗口内自主"联网搜索 → 摘要预筛 → 精读正文 → 提炼笔记 → 成稿"，
 > 预算用尽 / 时间到 / 手动停止都保留阶段成果，**续时或加预算后从断点继续，绝不从头再来**。
 > 所有 LLM 消耗走用户自己的 Key（BYO），平台零成本。
+>
+> 🔁 **体验升级见 docs/26-自主研究Agent体验升级.md**：方向拆解后先待确认（`awaiting_confirm`，用户选 1~5 个才开跑）、报告先摘要后展开、精读缓存提速——本文保留初版设计记录。
 
 ---
 
@@ -21,7 +23,7 @@
 
 | 维度 | A 串行单源 | **B 并行多源（选定）** |
 |---|---|---|
-| 搜索方式 | 一个搜索词接一个搜索词，串行推进 | 目标拆成 3~5 个方向，**多方向并行**搜索 |
+| 搜索方式 | 一个搜索词接一个搜索词，串行推进 | 目标拆成 3~5 个方向，**多方向并行**搜索（已演进：拆 8~10 候选 → 待确认 → 选 1~5 才开跑，见 docs/26） |
 | 精读 | 一篇读完再读下一篇 | 多篇候选**同时预筛**，挑 2 篇精读 |
 | 效率 | 慢，40 分钟只够 1~2 个角度 | 同一时间窗覆盖 4~6 个角度 |
 | 报告结构 | 单线叙述 | 多章节（每方向一章），结构完整 |
@@ -57,11 +59,12 @@ model AgentTask {
   tokensUsed   Int       @default(0) @map("tokens_used") // 已消耗（续跑累加）
   searchRounds Int       @default(0) @map("search_rounds") // 联网搜索轮数
   pagesRead    Int       @default(0) @map("pages_read")    // 精读页数
-  status       String    @default("pending") // pending/running/stopped/done/failed
-  stopReason   String?   @map("stop_reason") // budget_exhausted/time_exhausted/user_stopped/completed/error
+  status       String    @default("pending") // pending/awaiting_confirm/running/stopped/done/failed/cancelled
+  stopReason   String?   @map("stop_reason") // budget_exhausted/time_exhausted/user_stopped/cancelled/completed/error
   directions   Json?     // [{ title, question, status, rounds }] 进度展示
   progress     Json?     // 断点：每方向的 notes/readUrls/searchTerms/sectionContent
   report       String?   // 最终（或阶段）Markdown 报告
+  summary      String?   // 执行摘要（迁移 20260831100000_add_agent_summary，体验升级后新增）
   sources      Json?     // [{ number, title, url }] 网页来源
   error        String?
   finishedAt   DateTime? @map("finished_at")
@@ -81,7 +84,7 @@ POST /research-agent/tasks (创建)
   → 落库 pending + BullMQ agent-task 队列（startAt 在未来则 delay 到点再执行）
   → AgentRunner.processTask()（worker 并发 1，同研究报告队列）
       ① 解析用户默认模型配置（BYO，无配置直接 failed 提示去绑定）
-      ② 初始化方向：定向=拆目标成 3~5 个方向 / 开放=从用户知识库挖方向
+      ② 初始化方向：拆 8~10 个候选 → awaiting_confirm 待确认 → 用户选 1~5 个 → confirm 才开跑（详见 docs/26）
       ③ 各方向并行推进（共享预算盒 + 停止标记）
       ④ 收尾：按停止原因落终态 + 组装（阶段或完整）报告
 ```
@@ -116,7 +119,7 @@ POST /research-agent/tasks (创建)
 - **时间到**：方向循环 while 条件检查 `Date.now() < endAt`，收尾前再补一次判定
   （防止"时间刚好在循环条件处耗尽"导致误判成完成）；
 - **手动停止**：stop 接口把 status 置 stopped → runner 每轮/每步前查状态，发现非 running 立即收尾；
-- **独立"报告组装预算"（8k token，与用户预算分开）**：任何停止（预算/时间/手动）后，
+- **独立"报告组装预算"（12k token / ASSEMBLY_BUDGET，与用户预算分开）**：任何停止（预算/时间/手动）后，
   先花这笔预留的钱把研究笔记整理成**正式报告**——引言（短调用）→ 按笔记量从多到少逐方向
   润色小节（组装预算耗尽即停，未润色方向正文用笔记原文）→ 结论。
   **用户不需要追加 token 就能拿到正式报告**；组装预算不占研究预算，研究停止规则不变。
@@ -129,6 +132,8 @@ POST /research-agent/tasks (创建)
 - 每个方向一节，正文用 LLM 写（max_tokens 2000，引用带 [来源](URL) 链接）；
 - 引言/结论是独立的短调用（300/400 token），正文代码拼接——**绝不让模型复述全文**，
   杜绝研究报告曾经踩过的"输出上限截断"坑；
+- 报告组装顺序（体验升级后）：**摘要 → 结论 → 引言 → 逐方向**，预算不足先保摘要与结论
+  （详见 docs/26）；
 - 组装调用走独立的组装预算（见 2.5），任何停止都交付有主题/引言/正文/结论的正式报告。
 
 ---
@@ -143,9 +148,12 @@ POST /research-agent/tasks (创建)
 | POST | `/research-agent/tasks/:id/stop` | 手动停止（先整理成正式报告再停） |
 | PATCH | `/research-agent/tasks/:id/extend` | 续时/加预算（仅 stopped，从断点续跑） |
 | DELETE | `/research-agent/tasks/:id` | 删除 |
+| POST | `/research-agent/tasks/:id/confirm` | 确认方向（选 1~5 个）→ 开始研究 |
+| POST | `/research-agent/tasks/:id/redecompose` | 重新拆解方向（待确认态） |
 
 校验要点：定向必须有目标；endAt > startAt；预算 1万~50万；
-extend 只允许 stopped 且 stopReason 不是 completed/error；至少追加一项。
+extend 只允许 stopped 且 stopReason 不是 completed/error；至少追加一项；
+confirm / redecompose 仅 awaiting_confirm 态可用（confirm 选 1~5 个方向、校验结束时间未过）。
 
 ---
 
@@ -154,7 +162,7 @@ extend 只允许 stopped 且 stopReason 不是 completed/error；至少追加一
 - **创建表单**：研究模式（定向/自主探索）→ 目标 textarea → 时间窗（datetime-local，默认
   立即开始 + 40 分钟）→ 预算四档卡片（快速/标准/深度/自定义，选档自动预填结束时间）；
   底部展示"预计 X 分钟 · 可随时停止/续时"，以及换算成本（¥1/万 token）——让用户对"花多少钱"有数。
-- **进度面板**：token 进度条（上限 = 研究预算 + 8k 整理预算，90% 变红）、剩余时间（每秒刷新）、
+- **进度面板**：token 进度条（上限 = 研究预算 + 12k 整理预算，90% 变红）、剩余时间（每秒刷新）、
   搜索轮数/精读页数、方向列表（待研究/研究中转圈/已完成打勾）、手动停止按钮。
 - **停止态**：黄色横幅说明停止原因 + "继续研究"按钮 → 弹窗追加 token（+5万/+10万/+20万/自定义）
   和分钟数（+30/+60/+120/自定义）。
@@ -195,7 +203,7 @@ extend 只允许 stopped 且 stopReason 不是 completed/error；至少追加一
    所以手动停止的收敛速度 = 状态检查频率（每轮/每步查一次，比只查每轮快 4 倍）。
 3. **停止后必须能交出点什么**：第一版停止后报告为空（组装被停止标记挡住），
    用户花了钱什么也拿不到。先改成"零成本拼原始笔记"，再升级为**独立组装预算**
-   （8k token 专门用于成稿）——任何停止都交付有引言/结论的正式报告，不用追加 token。
+   （12k token 专门用于成稿）——任何停止都交付有引言/结论的正式报告，不用追加 token。
 4. **"停止"要区分研究和收尾**：研究预算用尽必须停（成本红线），但"把手头笔记整理成
    成品"是收尾动作，不该被同一根红线卡死——所以拆了两个预算盒，研究规则不变，
    收尾永远能完成。

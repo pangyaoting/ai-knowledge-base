@@ -1,6 +1,6 @@
 # 阶段 4+：用户模型配置（BYO 大模型 API，强制自带 Key）
 
-> 一句话：**所有 AI 功能（对话 / 研究报告 / 知识图谱抽取）都必须用用户自己绑定的 API Key**，平台不提供任何兜底模型——用户带粮，平台只出厨房。
+> 一句话：**所有 AI 功能（对话 / 研究报告）都必须用用户自己绑定的 API Key**，平台不提供任何兜底模型——用户带粮，平台只出厨房。
 > 对标：Cherry Studio / LobeChat 的"自带 Key"模式（它们是桌面端本地存 Key，我们是 Web 端加密存储）。
 > 迭代记录：最初是"未绑定回退系统默认模型"，用户明确要求"所有 token 消耗都是我自己的，不用我的 key"→ 改为**强制 BYO，零系统兜底**。
 
@@ -14,7 +14,7 @@
 
 所以规则变成：
 
-- 用户**必须先绑定**自己的大模型 Key，才能用对话 / 研究报告 / 知识图谱（图谱抽取在未绑定时自动跳过，文档入库不受影响）；
+- 用户**必须先绑定**自己的大模型 Key，才能用对话 / 研究报告；
 - 未绑定就去用 → 对话返回明确引导错误、研究报告直接标记失败并提示，**绝不静默走系统 Key**；
 - 绑定入口从"个人中心"挪到**导航栏独立「模型配置」页** + 首页/对话/研究报告的前置引导横幅（用户要求"要明显告知指引用户首先要引入用户自己的模型"）；
 - 平台仍承担的部分：Embedding（bge-m3 免费额度）、重排（bge-reranker 免费额度）、向量检索/Web 搜索——这些是系统级基础设施，与用户推理成本无关。
@@ -40,7 +40,7 @@ model ModelConfig {
   baseURL   String  // OpenAI 兼容地址
   apiKey    String  // AES-GCM 密文
   model     String  // 模型名
-  isDefault Boolean // 默认配置（研究报告/图谱抽取用它；新建会话优先用它）
+  isDefault Boolean // 默认配置（研究报告/自主研究 Agent 用它；新建会话优先用它）
 }
 ```
 `ChatSession.modelConfigId?` 外键（ON DELETE SET NULL）——会话级绑定。
@@ -53,11 +53,11 @@ resolveDefaultForUser(userId)       → 用户的默认配置（isDefault=true�
 
 对话 askAndStream:   会话绑定 → 默认配置 → 都没有 → writer('error', 引导绑定文案) 直接返回
 研究报告 processReport: 默认配置 → 没有 → 报告标记 failed（原因含"模型配置"）
-图谱抽取 extractFromDocument: 默认配置 → 没有 → 跳过抽取（日志记录，文档入库不受影响）
 查询改写 rewriteQuery: 与回答用同一个用户目标（同一 Key 计费）
 ```
 
-- 所有 LLM 调用（回答 / 查询改写 / 报告拆分-撰写-汇总 / 图谱抽取）都走**用户自己的 OpenAI 客户端**；
+- 视觉模型自动路由 `resolveVisionForUser`：发图时自动改用用户配置里的视觉模型（vision-exp / Qwen3-VL 等），文字对话仍用当前模型（详见 docs/27）；
+- 所有 LLM 调用（回答 / 查询改写 / 报告拆分-撰写-汇总 / 自主研究 Agent）都走**用户自己的 OpenAI 客户端**；
 - 服务端不再持有 `DEEPSEEK_API_KEY` 直连的聊天客户端（env 里的系统 Key 仅保留给运维/演示场景参考，业务链路不再读取）。
 
 ### 3. 接口
@@ -69,7 +69,7 @@ PATCH  /model-configs/:id       更新（不传 apiKey 保留原 key）
 DELETE /model-configs/:id       删除
 POST   /model-configs/models    探测提供商模型列表（GET /models；创建传 baseURL+key / 编辑传 configId）
 POST   /model-configs/:id/test  测试连接（最小补全请求，只返回 ok/错误信息）
-PATCH  /chat/sessions/:id/model 切换会话模型（null = 跟随默认配置）
+PATCH  /chat/sessions/:id/model 切换会话模型（null = 跟随默认配置；已扩展为「模型配置 + 推理等级」，详见 docs/30）
 ```
 
 ### 4. 前端入口（按用户要求做"明显告知"）
@@ -95,7 +95,6 @@ PATCH  /chat/sessions/:id/model 切换会话模型（null = 跟随默认配置�
 - [x] 测试连接：真实 key ✅ / 错误 key 返回上游 401 信息（路由生效证明）
 - [x] **未绑定 → 对话 SSE 直接 error（引导文案含「模型配置」），零 token 消耗**
 - [x] **未绑定 → 研究报告 failed，原因含「模型配置」**
-- [x] **未绑定 → 图谱抽取跳过（文档入库正常）**
 - [x] 绑定假 key 后对话不再提示"绑定"，而是报上游认证错误（证明真的用了用户 key）
 - [x] 会话绑定用户配置 → 正常流式回答（用户 key 计费）
 - [x] 他人访问配置 → 404
