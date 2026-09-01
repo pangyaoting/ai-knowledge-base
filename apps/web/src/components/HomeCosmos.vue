@@ -140,13 +140,14 @@ function buildBlackHole() {
   }
   bh.disk = [];
   // 粒子铺满整页：核心吸积盘（r<1）+ 外围旋转碎屑云（r 至 1.9，独立倾角）
-  const n = Math.min(1100, Math.round((w * h) / 1500));
+  // 高密度（用户反馈：粒子偏少）
+  const n = Math.min(1800, Math.round((w * h) / 1000));
   for (let i = 0; i < n; i++) {
     bh.disk.push(makeDiskParticle(-rand(0.0001, 0.00034)));
   }
   // 被吸入粒子：数量少但径向速度大，肉眼可见"从四周被吸进黑洞"（默认缓慢盘旋入内）
   bh.infall = [];
-  const inf = Math.min(160, Math.round((w * h) / 6000));
+  const inf = Math.min(240, Math.round((w * h) / 4800));
   for (let i = 0; i < inf; i++) {
     bh.infall.push(makeDiskParticle(-rand(0.0007, 0.0015)));
   }
@@ -165,7 +166,8 @@ function makeDiskParticle(vr: number): DiskParticle {
   };
   // 盘内保持薄盘倾角；外围云粒子独立倾角（0.15~1），使粒子云铺满页面
   p.tilt = p.r > 1.05 ? rand(0.15, 1) : rand(bh.inc * 0.75, bh.inc * 1.3);
-  p.size = p.r > 1.05 ? rand(0.5, 1.5) : rand(0.8, 2.4);
+  // 粒子加大（用户反馈：光亮孱弱）
+  p.size = p.r > 1.05 ? rand(0.8, 2.2) : rand(1.2, 3.0);
   p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
   p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
   return p;
@@ -257,11 +259,11 @@ function updateBlackHole() {
       p.theta = rand(0, Math.PI * 2);
       p.vr = -rand(0.0001, 0.00034);
       p.tilt = p.r > 1.05 ? rand(0.15, 1) : rand(bh.inc * 0.75, bh.inc * 1.3);
-      p.size = p.r > 1.05 ? rand(0.5, 1.5) : rand(0.8, 2.4);
+      p.size = p.r > 1.05 ? rand(0.8, 2.2) : rand(1.2, 3.0);
     } else if (p.r <= 1.05 && prevR > 1.05) {
       // 外围云粒子落入盘面 → 收拢到薄盘倾角
       p.tilt = rand(bh.inc * 0.75, bh.inc * 1.3);
-      p.size = rand(0.8, 2.4);
+      p.size = rand(1.2, 3.0);
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
@@ -280,7 +282,7 @@ function updateBlackHole() {
       p.theta = rand(0, Math.PI * 2);
       p.vr = -rand(0.0007, 0.0015);
       p.tilt = rand(0.25, 0.9);
-      p.size = rand(0.8, 2);
+      p.size = rand(1.0, 2.4);
     }
     p.sx = holeX + p.r * bh.diskR * Math.cos(p.theta);
     p.sy = holeY + p.r * bh.diskR * Math.sin(p.theta) * p.tilt;
@@ -365,14 +367,15 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：纯白 → 冷白 → 淡蓝 → 蓝紫 → 深蓝紫（全程冷色调，无暖红橙） */
+/** 白洞喷流粒子颜色：冷白 → 赤橙 → 滚红 → 淡蓝 → 蓝紫 → 深蓝紫（炽热喷流，颜色丰富） */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
-    [0, [255, 255, 255]],
-    [0.3, [226, 234, 255]],
-    [0.6, [172, 188, 246]],
-    [0.85, [110, 100, 220]],
-    [1, [70, 58, 200]],
+    [0, [226, 234, 255]],
+    [0.16, [255, 156, 96]],
+    [0.34, [255, 84, 66]],
+    [0.58, [200, 208, 248]],
+    [0.82, [112, 102, 222]],
+    [1, [72, 60, 202]],
   ];
   const t = clamp(rn, 0, 1);
   for (let i = 1; i < stops.length; i++) {
@@ -394,16 +397,16 @@ function drawDiskDot(p: DiskParticle, now: number, alpha: number) {
   // 屏幕空间速度（含径向内落）
   const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
   const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
-  // 多普勒聚束：盘面前侧（朝观察者运动）更亮；外围云粒子减亮，突出吸积盘主体
+  // 多普勒聚束：盘面前侧（朝观察者运动）更亮；外围云粒子略减亮，突出吸积盘主体
   const dopp = 1 + 0.5 * Math.sin(p.theta);
   const flick = 0.85 + 0.15 * Math.sin(now / 900 + p.phase);
-  const a = alpha * (0.32 + 0.55 * rn) * dopp * flick * (p.r > 1.05 ? 0.55 : 1);
+  const a = alpha * (0.42 + 0.58 * rn) * dopp * flick * (p.r > 1.05 ? 0.7 : 1);
   const col = diskColor(rn);
   const tail = 8;
-  // 速度拖尾
+  // 速度拖尾（加粗提亮）
   ctx!.globalAlpha = Math.min(1, a);
   ctx!.strokeStyle = col;
-  ctx!.lineWidth = p.size;
+  ctx!.lineWidth = p.size * 1.1;
   ctx!.beginPath();
   ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
   ctx!.lineTo(p.sx, p.sy);
@@ -411,13 +414,13 @@ function drawDiskDot(p: DiskParticle, now: number, alpha: number) {
   // 亮点
   ctx!.fillStyle = col;
   ctx!.beginPath();
-  ctx!.arc(p.sx, p.sy, p.size * 0.75, 0, Math.PI * 2);
+  ctx!.arc(p.sx, p.sy, p.size * 0.85, 0, Math.PI * 2);
   ctx!.fill();
-  // 内盘炽热光晕
+  // 内盘炽热光晕（更亮更大）
   if (rn < 0.3) {
-    ctx!.globalAlpha = Math.min(1, a * 0.5);
+    ctx!.globalAlpha = Math.min(1, a * 0.6);
     ctx!.beginPath();
-    ctx!.arc(p.sx, p.sy, p.size * 3.2, 0, Math.PI * 2);
+    ctx!.arc(p.sx, p.sy, p.size * 3.6, 0, Math.PI * 2);
     ctx!.fill();
   }
 }
@@ -524,28 +527,28 @@ function drawBlackHole(now: number, alpha: number) {
     // 屏幕空间速度（几乎纯径向向内）
     const vx = Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
-    // 与吸积盘同款：多普勒聚束 + 闪烁 + 随半径透明度
+    // 与吸积盘同款：多普勒聚束 + 闪烁 + 随半径透明度（提亮）
     const dopp = 1 + 0.5 * Math.sin(p.theta);
     const flick = 0.85 + 0.15 * Math.sin(now / 900 + p.phase);
-    const a = alpha * (0.32 + 0.55 * rn) * dopp * flick;
+    const a = alpha * (0.42 + 0.58 * rn) * dopp * flick;
     const col = diskColor(rn);
     const tail = 10;
     ctx!.globalAlpha = Math.min(1, a);
     ctx!.strokeStyle = col;
-    ctx!.lineWidth = p.size;
+    ctx!.lineWidth = p.size * 1.1;
     ctx!.beginPath();
     ctx!.moveTo(p.sx - vx * tail, p.sy - vy * tail);
     ctx!.lineTo(p.sx, p.sy);
     ctx!.stroke();
     ctx!.fillStyle = col;
     ctx!.beginPath();
-    ctx!.arc(p.sx, p.sy, p.size * 0.75, 0, Math.PI * 2);
+    ctx!.arc(p.sx, p.sy, p.size * 0.85, 0, Math.PI * 2);
     ctx!.fill();
     if (rn < 0.3) {
-      // 近视界：炽热光晕（同吸积盘内盘）
-      ctx!.globalAlpha = Math.min(1, a * 0.5);
+      // 近视界：炽热光晕（同吸积盘内盘，提亮）
+      ctx!.globalAlpha = Math.min(1, a * 0.6);
       ctx!.beginPath();
-      ctx!.arc(p.sx, p.sy, p.size * 3.2, 0, Math.PI * 2);
+      ctx!.arc(p.sx, p.sy, p.size * 3.6, 0, Math.PI * 2);
       ctx!.fill();
     }
   }
