@@ -6,7 +6,7 @@
  *  - 暗黑模式 → 黑洞：开普勒吸积盘（内缘白热、外缘蓝紫）、多普勒聚束（迎面一侧更亮）、
  *    光子环、事件视界遮挡（先画盘背侧 → 视界 → 盘前侧）、背景星引力透镜畸变。
  *  - 浅色模式 → 白洞：黑洞的时间反演 —— 同样的倾斜盘面几何、同尺寸核心，样式相反：
- *    白核（= 视界半径 R）+ 反光子环（= 1.42R，白环而非橙环），物质从核心向外喷射、
+ *    白核（= 视界半径 R）+ 反光子环（= 1.42R，黑环而非橙环），物质从核心向外喷射、
  *    减速并淡出；背景为以白洞为圆心的径向渐变（核心周围深蓝 → 向外渐变到白色），
  *    发光星环 + 漂浮光尘 + 点缀星；粒子核心淡入、全程饱满不渐隐、飞出屏幕才循环，
  *    外圈渐变深蓝紫。
@@ -665,9 +665,9 @@ function drawWhiteHole(now: number, alpha: number) {
   // 用径向渐变画一个"环带"（外圆 - 内圆挖空 = annulus），内侧最深、向外渐隐 → 连续平滑
   const drawBelt = (r0: number, r1: number, peak: number) => {
     const g = ctx!.createRadialGradient(holeX, holeY, r0 * wh.coreR, holeX, holeY, r1 * wh.coreR);
-    g.addColorStop(0, `rgba(8, 10, 26, ${peak * beltPulse * alpha})`);
-    g.addColorStop(0.4, `rgba(8, 10, 26, ${peak * 0.9 * beltPulse * alpha})`);
-    g.addColorStop(1, 'rgba(8, 10, 26, 0)');
+    g.addColorStop(0, `rgba(216, 230, 255, ${peak * beltPulse * alpha})`);
+    g.addColorStop(0.4, `rgba(216, 230, 255, ${peak * 0.9 * beltPulse * alpha})`);
+    g.addColorStop(1, 'rgba(216, 230, 255, 0)');
     ctx!.fillStyle = g;
     ctx!.beginPath();
     ctx!.arc(holeX, holeY, r1 * wh.coreR, 0, Math.PI * 2);
@@ -683,13 +683,13 @@ function drawWhiteHole(now: number, alpha: number) {
   const prox = clamp(1 - Math.hypot(mouse.x - 0.5, mouse.y - 0.5) * 2.2, 0, 1);
   const pulse = 1 + 0.06 * Math.sin(now / 380);
   ctx.globalCompositeOperation = 'lighter';
-  // 反光子环：与黑洞光子环同位置同粗细，颜色相反（白环 + 深蓝外缘，浅色天空上可见）
+  // 反光子环：与黑洞光子环同位置同粗细，颜色相反（黑环 + 深蓝外缘）——白核外一圈黑环
   const pr2 = wh.coreR * 1.42;
   const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
-  prGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-  prGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.75)');
-  prGrad.addColorStop(0.8, 'rgba(255, 255, 255, 0.85)');
-  prGrad.addColorStop(1, 'rgba(120, 160, 235, 0)');
+  prGrad.addColorStop(0, 'rgba(8, 10, 26, 0)');
+  prGrad.addColorStop(0.5, 'rgba(8, 10, 26, 0.75)');
+  prGrad.addColorStop(0.8, 'rgba(8, 10, 26, 0.85)');
+  prGrad.addColorStop(1, 'rgba(8, 10, 26, 0)');
   ctx.globalAlpha = alpha;
   ctx.fillStyle = prGrad;
   ctx.beginPath();
