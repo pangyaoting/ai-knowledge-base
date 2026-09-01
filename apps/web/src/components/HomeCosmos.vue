@@ -585,8 +585,8 @@ function drawWhiteHole(now: number, alpha: number) {
   g.addColorStop(1, '#ffffff');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // 核心冷白光晕（柔和，避免刺眼）
-  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.5);
+  // 核心冷白光晕（柔和，避免刺眼；半径缩小 1/3，超白范围收窄）
+  const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.333);
   halo.addColorStop(0, 'rgba(255, 255, 255, 0.62)');
   halo.addColorStop(0.4, 'rgba(215, 230, 255, 0.28)');
   halo.addColorStop(1, 'rgba(160, 190, 255, 0)');
@@ -695,8 +695,8 @@ function drawWhiteHole(now: number, alpha: number) {
   ctx.beginPath();
   ctx.arc(holeX, holeY, pr2 * 1.15, 0, Math.PI * 2);
   ctx.fill();
-  // 外晕（收窄到 ~2R，柔和降亮）
-  const r1 = wh.coreR * 2.0 * pulse;
+  // 外晕（半径缩小 1/3 至 ~1.33R，紧贴白核，超白范围收窄）
+  const r1 = wh.coreR * 1.33 * pulse;
   const glow = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, r1);
   glow.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
   glow.addColorStop(0.3, `rgba(255, 255, 255, ${0.85 + prox * 0.05})`);
