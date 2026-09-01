@@ -174,8 +174,8 @@ function makeDiskParticle(vr: number): DiskParticle {
 }
 
 function buildWhiteHole() {
-  // 白洞核心比黑洞视界小一圈（视觉：白洞小巧 + 周围黑带环绕）；样式相反：黑↔白
-  wh.coreR = bh.R * 0.72;
+  // 白洞核心比黑洞视界小：0.72R 减小 5/8（剩 3/8 = 0.27R，用户反馈核心仍偏大）
+  wh.coreR = (bh.R * 0.72 * 3) / 8;
   wh.particles = [];
   // 粒子铺满整页：内区喷流（r<1）+ 外围喷发云（r 至 1.9，独立倾角）
   // 默认缓速喷射（约 4.5 秒一轮）；鼠标悬停白洞核心时全部粒子加速爆发（见 updateWhiteHole）
