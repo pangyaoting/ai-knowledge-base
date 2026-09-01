@@ -44,6 +44,8 @@
     --border: 220 25% 18%;
     --input: 220 25% 18%;
     --ring: 221 83% 58%;
+    /* 暗色下原生控件（datetime-local 日历/时钟图标等）用浅色渲染，否则看不见 */
+    color-scheme: dark;
   }
 }
 

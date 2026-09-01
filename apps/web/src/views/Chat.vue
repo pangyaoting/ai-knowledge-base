@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatView' });
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
   Menu,
   BookOpen,
@@ -565,6 +565,20 @@ async function handleSend() {
 
 function handleStop() {
   abortController.value?.abort();
+  // 保留已生成的部分回答：停止后把流式累积的内容落成一条 assistant 消息
+  // （否则中止时 onDone 不触发，回答到一半的内容就丢了）
+  if (streamContent.value.trim()) {
+    messages.value.push({
+      id: `local-${Date.now()}`,
+      sessionId: currentSessionId.value!,
+      role: 'assistant',
+      content: streamContent.value,
+      sources: streamSources.value,
+      createdAt: new Date().toISOString(),
+    });
+    streamContent.value = '';
+    streamSources.value = { kb: [], web: [] };
+  }
   streaming.value = false;
   stopThinkingTimer();
 }
@@ -634,6 +648,12 @@ onMounted(async () => {
   } else {
     await handleNewSession();
   }
+});
+
+// KeepAlive 缓存：从「模型配置」页新增/修改模型后返回本页时，刷新模型列表，
+// 否则新绑定的模型要刷新页面才出现在模型下拉里
+onActivated(() => {
+  loadModelConfigs();
 });
 
 onBeforeUnmount(() => {
