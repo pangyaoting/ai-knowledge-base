@@ -109,6 +109,8 @@ const hasAnySources = (s: ChatMessage['sources']) => sourcesKb(s).length > 0 || 
             v-for="(u, i) in props.msg.imageDataUrls"
             :key="i"
             :src="u"
+            loading="lazy"
+            decoding="async"
             class="max-h-48 w-full rounded-md object-cover"
             :class="props.msg.imageDataUrls.length === 1 ? 'max-w-[280px]' : ''"
             alt="图片"
@@ -117,6 +119,8 @@ const hasAnySources = (s: ChatMessage['sources']) => sourcesKb(s).length > 0 || 
         <img
           v-else-if="props.msg.imageDataUrl"
           :src="props.msg.imageDataUrl"
+          loading="lazy"
+          decoding="async"
           class="mb-1.5 max-h-48 rounded-md object-cover"
           alt="粘贴图片"
         />

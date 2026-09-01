@@ -42,6 +42,8 @@ const currentSessionId = ref<string | null>(null);
 const messages = ref<ChatMessage[]>([]);
 
 const input = ref('');
+/** 会话切换请求序号：竞态防护用（快速切换时只采用最后一次请求） */
+let sessionReqNo = 0;
 /** 每个会话独立的输入草稿：切换会话时保存/恢复，不串台也不丢失 */
 const inputDrafts = ref<Record<string, string>>({});
 const imageDrafts = ref<Record<string, string[]>>({});
@@ -361,10 +363,13 @@ async function selectSession(id: string) {
   currentSessionId.value = id;
   error.value = '';
   messages.value = [];
+  // 竞态防护：快速连续切换会话时，只采用最后一次请求的结果（避免旧会话消息覆盖当前会话）
+  const reqNo = ++sessionReqNo;
   try {
-    messages.value = await getChatMessages(id);
+    const list = await getChatMessages(id);
+    if (reqNo === sessionReqNo) messages.value = list;
   } catch (e) {
-    error.value = (e as Error).message;
+    if (reqNo === sessionReqNo) error.value = (e as Error).message;
   }
 }
 
@@ -766,7 +771,7 @@ onBeforeUnmount(() => {
           <!-- 历史消息 -->
           <ChatMessageItem
             v-for="(msg, i) in messages"
-            :key="i"
+            :key="msg.id"
             :msg="msg"
             :index="i"
             :use-knowledge-base="useKnowledgeBase"
