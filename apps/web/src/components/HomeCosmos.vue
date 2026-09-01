@@ -684,7 +684,8 @@ function drawWhiteHole(now: number, alpha: number) {
   const pulse = 1 + 0.06 * Math.sin(now / 380);
   ctx.globalCompositeOperation = 'lighter';
   // 反光子环：与黑洞光子环同位置同粗细，颜色相反（黑环 + 深蓝外缘）——白核外一圈黑环
-  const pr2 = wh.coreR * 1.42;
+  // 半径轻微脉动"摆动"（呼吸感）
+  const pr2 = wh.coreR * 1.42 * (1 + 0.05 * Math.sin(now / 650));
   const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
   prGrad.addColorStop(0, 'rgba(0, 2, 10, 0)');
   prGrad.addColorStop(0.5, 'rgba(0, 2, 10, 0.92)');
