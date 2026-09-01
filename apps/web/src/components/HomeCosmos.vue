@@ -367,11 +367,11 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：冷白 → 赤橙 → 淡蓝 → 蓝紫 → 深蓝紫（炽热喷流，不要滚红） */
+/** 白洞喷流粒子颜色：冷白 → 暖白 → 淡蓝 → 蓝紫 → 深蓝紫 */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
     [0, [226, 234, 255]],
-    [0.2, [255, 156, 96]],
+    [0.25, [255, 243, 196]],
     [0.6, [200, 208, 248]],
     [0.82, [112, 102, 222]],
     [1, [72, 60, 202]],
