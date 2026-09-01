@@ -44,6 +44,8 @@ const messages = ref<ChatMessage[]>([]);
 const input = ref('');
 /** 会话切换请求序号：竞态防护用（快速切换时只采用最后一次请求） */
 let sessionReqNo = 0;
+/** 乐观渲染消息自增序号：保证 local- 消息 id 唯一（消息列表 key 用 id，id 相同会复用 DOM 导致图片堆叠） */
+let localMsgSeq = 0;
 /** 每个会话独立的输入草稿：切换会话时保存/恢复，不串台也不丢失 */
 const inputDrafts = ref<Record<string, string>>({});
 const imageDrafts = ref<Record<string, string[]>>({});
@@ -517,9 +519,9 @@ async function handleSend() {
   streamSources.value = { kb: [], web: [] };
   startThinkingTimer();
 
-  // 乐观渲染：用户消息立即上屏
+  // 乐观渲染：用户消息立即上屏（id 唯一，防止与历史消息 key 撞车导致图片 DOM 复用堆叠）
   messages.value.push({
-    id: `local-${Date.now()}`,
+    id: `local-${Date.now()}-${++localMsgSeq}`,
     sessionId: currentSessionId.value,
     role: 'user',
     content,
@@ -565,7 +567,7 @@ async function handleSend() {
             streamContent.value = pendingStream;
           }
           messages.value.push({
-            id: `local-${Date.now()}`,
+            id: `local-${Date.now()}-${++localMsgSeq}`,
             sessionId: currentSessionId.value!,
             role: 'assistant',
             content: streamContent.value,
@@ -595,7 +597,7 @@ function handleStop() {
   // （否则中止时 onDone 不触发，回答到一半的内容就丢了）
   if (streamContent.value.trim()) {
     messages.value.push({
-      id: `local-${Date.now()}`,
+      id: `local-${Date.now()}-${++localMsgSeq}`,
       sessionId: currentSessionId.value!,
       role: 'assistant',
       content: streamContent.value,
