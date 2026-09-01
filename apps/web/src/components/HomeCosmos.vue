@@ -367,12 +367,12 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：冷白 → 暖白 → 淡蓝 → 蓝紫 → 深蓝紫 */
+/** 白洞喷流粒子颜色：奶油暖白（温和）→ 淡蓝 → 蓝紫 → 深蓝紫 */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
-    [0, [226, 234, 255]],
-    [0.25, [255, 243, 196]],
-    [0.6, [200, 208, 248]],
+    [0, [255, 246, 224]],
+    [0.28, [224, 226, 242]],
+    [0.6, [192, 202, 246]],
     [0.82, [112, 102, 222]],
     [1, [72, 60, 202]],
   ];
@@ -651,9 +651,9 @@ function drawWhiteHole(now: number, alpha: number) {
     ctx!.beginPath();
     ctx!.arc(p.sx, p.sy, p.size * 1.05, 0, Math.PI * 2);
     ctx!.fill();
-    // 高光芯：白色小圆（点睛，发光球质感）
+    // 高光芯：柔和白点（点睛，发光球质感；不刺眼）
     ctx!.globalAlpha = Math.min(1, a);
-    ctx!.fillStyle = 'rgba(255, 255, 255, 0.92)';
+    ctx!.fillStyle = 'rgba(255, 255, 255, 0.85)';
     ctx!.beginPath();
     ctx!.arc(p.sx, p.sy, p.size * 0.42, 0, Math.PI * 2);
     ctx!.fill();
@@ -686,10 +686,10 @@ function drawWhiteHole(now: number, alpha: number) {
   // 反光子环：与黑洞光子环同位置同粗细，颜色相反（黑环 + 深蓝外缘）——白核外一圈黑环
   const pr2 = wh.coreR * 1.42;
   const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
-  prGrad.addColorStop(0, 'rgba(8, 10, 26, 0)');
-  prGrad.addColorStop(0.5, 'rgba(8, 10, 26, 0.75)');
-  prGrad.addColorStop(0.8, 'rgba(8, 10, 26, 0.85)');
-  prGrad.addColorStop(1, 'rgba(8, 10, 26, 0)');
+  prGrad.addColorStop(0, 'rgba(0, 2, 10, 0)');
+  prGrad.addColorStop(0.5, 'rgba(0, 2, 10, 0.92)');
+  prGrad.addColorStop(0.8, 'rgba(0, 2, 10, 1)');
+  prGrad.addColorStop(1, 'rgba(0, 2, 10, 0)');
   ctx.globalAlpha = alpha;
   ctx.fillStyle = prGrad;
   ctx.beginPath();
