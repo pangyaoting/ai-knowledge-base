@@ -578,17 +578,17 @@ function drawWhiteHole(now: number, alpha: number) {
   // 背景：以白洞为圆心的径向渐变 —— 深蓝只围绕核心一小圈（衬白色粒子），
   // 快速过渡到浅色，保证页面文字可读
   const g = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.max(w, h));
-  g.addColorStop(0, '#2c4a80');
-  g.addColorStop(0.18, '#6d8cc2');
+  g.addColorStop(0, '#3a548f');
+  g.addColorStop(0.18, '#7693c6');
   g.addColorStop(0.45, '#c0d4ef');
   g.addColorStop(0.8, '#eef4ff');
   g.addColorStop(1, '#ffffff');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
-  // 核心冷白光晕（白核的底色，深蓝核心上更亮）
+  // 核心冷白光晕（柔和，避免刺眼）
   const halo = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, Math.min(w, h) * 0.5);
-  halo.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-  halo.addColorStop(0.4, 'rgba(215, 230, 255, 0.4)');
+  halo.addColorStop(0, 'rgba(255, 255, 255, 0.62)');
+  halo.addColorStop(0.4, 'rgba(215, 230, 255, 0.28)');
   halo.addColorStop(1, 'rgba(160, 190, 255, 0)');
   ctx.fillStyle = halo;
   ctx.fillRect(0, 0, w, h);
@@ -627,9 +627,9 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    // 核心涌现（age 淡入）；全程保持饱满不渐隐，外圈粒子渐变深蓝紫
+    // 核心涌现（age 淡入）；alpha 整体降低（用户反馈：刺眼）
     const fadeIn = Math.min(1, p.age * 6);
-    const a = alpha * (0.62 + 0.38 * (1 - rn)) * (0.7 + 0.3 * flick) * fadeIn;
+    const a = alpha * (0.5 + 0.32 * (1 - rn)) * (0.62 + 0.28 * flick) * fadeIn;
     const col = whJetColor(rn);
     const tail = 12;
     // 拖尾：细线，略淡，尾部渐隐感（高速 → 拉出壮观的放射状喷流尾迹）
@@ -687,29 +687,29 @@ function drawWhiteHole(now: number, alpha: number) {
   const pr2 = wh.coreR * 1.42;
   const prGrad = ctx.createRadialGradient(holeX, holeY, pr2 * 0.94, holeX, holeY, pr2 * 1.12);
   prGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-  prGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
-  prGrad.addColorStop(0.8, 'rgba(255, 255, 255, 1)');
+  prGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.75)');
+  prGrad.addColorStop(0.8, 'rgba(255, 255, 255, 0.85)');
   prGrad.addColorStop(1, 'rgba(120, 160, 235, 0)');
   ctx.globalAlpha = alpha;
   ctx.fillStyle = prGrad;
   ctx.beginPath();
   ctx.arc(holeX, holeY, pr2 * 1.15, 0, Math.PI * 2);
   ctx.fill();
-  // 外晕（收窄到 ~2R，与黑洞视界+光子环同视觉尺度，不再一大团）
+  // 外晕（收窄到 ~2R，柔和降亮）
   const r1 = wh.coreR * 2.0 * pulse;
   const glow = ctx.createRadialGradient(holeX, holeY, 0, holeX, holeY, r1);
-  glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
-  glow.addColorStop(0.3, `rgba(255, 255, 255, ${0.95 + prox * 0.05})`);
-  glow.addColorStop(0.7, 'rgba(150, 190, 255, 0.5)');
+  glow.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+  glow.addColorStop(0.3, `rgba(255, 255, 255, ${0.85 + prox * 0.05})`);
+  glow.addColorStop(0.7, 'rgba(150, 190, 255, 0.4)');
   glow.addColorStop(1, 'rgba(120, 160, 240, 0)');
-  ctx.globalAlpha = alpha * (0.85 + prox * 0.3);
+  ctx.globalAlpha = alpha * (0.62 + prox * 0.25);
   ctx.fillStyle = glow;
   ctx.beginPath();
   ctx.arc(holeX, holeY, r1, 0, Math.PI * 2);
   ctx.fill();
-  // 白核：与黑洞视界同半径的纯白圆（深空底上轮廓天然清晰，无需描边）
+  // 白核：与黑洞视界同半径的微蓝白圆（深空底上轮廓清晰，柔和不刺眼）
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#f4f8ff';
   ctx.beginPath();
   ctx.arc(holeX, holeY, wh.coreR * pulse, 0, Math.PI * 2);
   ctx.fill();
