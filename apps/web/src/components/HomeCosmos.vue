@@ -367,14 +367,14 @@ function diskColor(rn: number): string {
   return 'rgb(136,122,232)';
 }
 
-/** 白洞喷流粒子颜色：冷白 → 暖白 → 淡蓝 → 蓝紫 → 深蓝紫 */
+/** 白洞喷流粒子颜色：冷白 → 暖白 → 淡蓝 → 蓝紫 → 近黑深蓝紫（末端渐变黑色） */
 function whJetColor(rn: number): string {
   const stops: Array<[number, [number, number, number]]> = [
     [0, [226, 234, 255]],
     [0.25, [255, 243, 196]],
     [0.6, [200, 208, 248]],
-    [0.82, [112, 102, 222]],
-    [1, [72, 60, 202]],
+    [0.85, [112, 102, 222]],
+    [1, [12, 12, 45]],
   ];
   const t = clamp(rn, 0, 1);
   for (let i = 1; i < stops.length; i++) {
@@ -627,9 +627,9 @@ function drawWhiteHole(now: number, alpha: number) {
     const vx = -Math.sin(p.theta) * tv + Math.cos(p.theta) * p.vr * bh.diskR;
     const vy = Math.cos(p.theta) * tv * p.tilt + Math.sin(p.theta) * p.vr * bh.diskR * p.tilt;
     const flick = 0.8 + 0.2 * Math.sin(now / 700 + p.phase);
-    // 核心涌现（age 淡入）；alpha 整体降低（用户反馈：刺眼）
+    // 核心涌现（age 淡入）；粒子保持饱满亮度（不降）
     const fadeIn = Math.min(1, p.age * 6);
-    const a = alpha * (0.5 + 0.32 * (1 - rn)) * (0.62 + 0.28 * flick) * fadeIn;
+    const a = alpha * (0.62 + 0.38 * (1 - rn)) * (0.7 + 0.3 * flick) * fadeIn;
     const col = whJetColor(rn);
     const tail = 12;
     // 拖尾：细线，略淡，尾部渐隐感（高速 → 拉出壮观的放射状喷流尾迹）
