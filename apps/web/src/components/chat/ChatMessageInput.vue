@@ -11,6 +11,8 @@ const props = defineProps<{
   currentModelName: string;
   currentReasoning: string | null;
   sessionModelConfigId: string | null;
+  /** 会话当前选中的模型名（同一配置多模型） */
+  sessionModel: string | null;
   streaming: boolean;
   canSend: boolean;
   currentSessionId: string | null;
@@ -28,7 +30,7 @@ const emit = defineEmits<{
   (e: 'send'): void;
   (e: 'stop'): void;
   (e: 'open-edit-scope'): void;
-  (e: 'select-model', id: string): void;
+  (e: 'select-model', id: string, model: string): void;
   (e: 'set-reasoning', effort: string): void;
   (e: 'remove-image', i: number): void;
   (e: 'remove-file', i: number): void;
@@ -148,17 +150,29 @@ defineExpose({ focusTextarea });
           </RouterLink>
           <template v-else>
             <p class="px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">选择模型</p>
-            <button
-              v-for="c in props.modelConfigs"
-              :key="c.id"
-              class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-              :class="props.sessionModelConfigId === c.id ? 'text-primary' : ''"
-              @click="emit('select-model', c.id)"
-            >
-              <span class="min-w-0 flex-1 truncate">{{ c.name }}</span>
-              <span class="shrink-0 text-xs text-muted-foreground">{{ c.model }}</span>
-              <span v-if="props.sessionModelConfigId === c.id" class="shrink-0 text-xs">✓</span>
-            </button>
+            <!-- 平铺：每个配置 × 该配置下的全部模型名（同一 Key 多模型直接切换） -->
+            <template v-for="c in props.modelConfigs" :key="c.id">
+              <button
+                v-for="m in c.models?.length ? c.models : [c.model]"
+                :key="m"
+                class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                :class="
+                  props.sessionModelConfigId === c.id && (props.sessionModel ?? c.model) === m
+                    ? 'text-primary'
+                    : ''
+                "
+                @click="emit('select-model', c.id, m)"
+              >
+                <span class="min-w-0 flex-1 truncate">{{ c.name }} / {{ m }}</span>
+                <span
+                  v-if="
+                    props.sessionModelConfigId === c.id && (props.sessionModel ?? c.model) === m
+                  "
+                  class="shrink-0 text-xs"
+                  >✓</span
+                >
+              </button>
+            </template>
             <p class="border-t px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">
               推理等级（思考越多越准也越贵）
             </p>

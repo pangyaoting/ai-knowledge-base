@@ -15,7 +15,7 @@
  *    黑洞相反——鼠标附近的粒子加速旋转并被吸入，鼠标悬停在黑洞上时整盘粒子加速旋转、
  *    加速坠入视界（"吞噬"）；主题切换时两套场景交叉淡入淡出。
  */
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue';
 import { useTheme } from '@/composables/useTheme';
 
 const { isDark } = useTheme();
@@ -722,6 +722,17 @@ onMounted(() => {
   window.addEventListener('resize', onResize);
   window.addEventListener('mousemove', onMouseMove);
   raf = requestAnimationFrame(loop);
+});
+
+// KeepAlive 缓存：页面不可见时暂停动画（省 CPU、避免切页卡顿），回来时恢复渲染
+// （不做 onResize：重建 5000+ 粒子是切入卡顿的来源，尺寸变化由 window resize 事件处理）
+onActivated(() => {
+  if (!raf) raf = requestAnimationFrame(loop);
+});
+
+onDeactivated(() => {
+  cancelAnimationFrame(raf);
+  raf = 0;
 });
 
 onBeforeUnmount(() => {

@@ -58,6 +58,16 @@ export class CreateSessionDto {
   modelConfigId?: string;
 
   @ApiProperty({
+    example: 'deepseek-chat',
+    description: '该配置下选中的模型名（同一配置多模型；不传 = 用配置默认 model）',
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: '模型名格式不正确' })
+  @MaxLength(100, { message: '模型名最多100个字符' })
+  model?: string;
+
+  @ApiProperty({
     example: [{ role: 'user', content: '…' }],
     description: '分支注入的历史消息（把之前的对话带进新会话，最多 20 条）',
     required: false,

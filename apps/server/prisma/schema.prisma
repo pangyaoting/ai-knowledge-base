@@ -102,6 +102,7 @@ model ChatSession {
   title            String        @default("新对话")
   useKnowledgeBase Boolean       @default(true) @map("use_knowledge_base") // false = 纯对话，不检索知识库
   modelConfigId    String?       @map("model_config_id") // 用户自带的模型配置（null = 系统默认）
+  model            String? // 会话选中的模型名（同一配置下可切换多个模型；null = 用配置默认 model）
   reasoningEffort  String?       @map("reasoning_effort") // 推理等级：low(关闭≈最低) / high / max；null=默认
   messages         ChatMessage[]
   createdAt        DateTime      @default(now()) @map("created_at")
@@ -163,7 +164,8 @@ model ModelConfig {
   name      String // 备注名，如"我的 DeepSeek"
   baseURL   String   @default("https://api.deepseek.com") @map("base_url") // OpenAI 兼容接口地址
   apiKey    String   @map("api_key") // AES-GCM 密文（iv:tag:data base64）
-  model     String // 模型名，如 deepseek-chat
+  model     String // 默认模型名，如 deepseek-chat
+  models    String[] @default([]) // 该配置下的全部模型名（同一 Key 多模型；空 = 只用 model）
   isDefault Boolean  @default(false) @map("is_default") // 新建会话默认使用
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

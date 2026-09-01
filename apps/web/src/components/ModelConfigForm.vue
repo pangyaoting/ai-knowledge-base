@@ -30,6 +30,10 @@ const configForm = reactive({
   baseURL: props.editing?.baseURL ?? 'https://api.deepseek.com',
   apiKey: '', // 编辑时留空 = 保留原 Key
   model: props.editing?.model ?? '',
+  // 其他模型名（同一 Key 多模型；每行一个，不含主模型名）
+  extraModels: props.editing?.models?.length
+    ? (props.editing.models as string[]).filter((m) => m !== props.editing?.model).join('\n')
+    : '',
 });
 
 // 编辑时：当前模型名直接显示（不依赖探测），一眼看到在改谁
@@ -104,12 +108,21 @@ async function saveConfig() {
   }
   savingConfig.value = true;
   configError.value = '';
+  // 多模型：主模型 + 其他模型（每行一个）→ 去重后存 models
+  const models = [
+    configForm.model.trim(),
+    ...configForm.extraModels
+      .split('\n')
+      .map((m) => m.trim())
+      .filter((m) => m && m !== configForm.model.trim()),
+  ];
   try {
     if (props.editing) {
       await updateModelConfig(props.editing.id, {
         name: configForm.name.trim(),
         baseURL: configForm.baseURL.trim(),
         model: configForm.model.trim(),
+        models,
         ...(configForm.apiKey.trim() ? { apiKey: configForm.apiKey.trim() } : {}),
       });
       toast.success('配置已更新');
@@ -119,6 +132,7 @@ async function saveConfig() {
         baseURL: configForm.baseURL.trim(),
         apiKey: configForm.apiKey.trim(),
         model: configForm.model.trim(),
+        models,
       });
       toast.success('配置已保存');
     }
@@ -231,6 +245,17 @@ async function saveConfig() {
           </button>
         </div>
         <p v-if="modelFetchError" class="text-xs text-destructive">{{ modelFetchError }}</p>
+        <!-- 同一 Key 多模型：额外模型名（每行一个） -->
+        <textarea
+          v-model="configForm.extraModels"
+          rows="3"
+          placeholder="其他模型名（同一 Key 可挂多个模型，每行一个）&#10;如：deepseek-reasoner&#10;deepseek-v4-flash-vision-exp"
+          class="mt-1 w-full resize-y rounded-md border bg-background px-2.5 py-1.5 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground focus:border-primary"
+        />
+        <p class="text-[11px] text-muted-foreground">
+          同一 Key 想切换多个模型就在这里各写一行（对话页模型下拉会列出全部）；视觉模型名需含
+          <code class="font-mono">vision</code>。
+        </p>
       </div>
       <div class="space-y-1.5">
         <Label>接口地址（OpenAI 兼容）</Label>

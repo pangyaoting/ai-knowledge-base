@@ -7,6 +7,8 @@ export interface ChatSession {
   useKnowledgeBase: boolean;
   /** 会话绑定的用户模型配置（null = 跟随用户默认配置；BYO key） */
   modelConfigId: string | null;
+  /** 会话选中的模型名（同一配置下切换多个模型；null = 用配置默认 model） */
+  model: string | null;
   modelConfig: { id: string; name: string; model: string } | null;
   /** 推理等级：low(关闭≈最低) / high / max；null = 默认（跟随模型） */
   reasoningEffort: string | null;

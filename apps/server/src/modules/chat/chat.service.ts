@@ -51,7 +51,11 @@ export class ChatService {
     // 模型配置归属校验（BYO key：只能用自己的配置）
     let modelConfigId: string | null = null;
     if (dto.modelConfigId) {
-      const target = await this.modelConfigService.resolveForChat(userId, dto.modelConfigId);
+      const target = await this.modelConfigService.resolveForChat(
+        userId,
+        dto.modelConfigId,
+        dto.model,
+      );
       if (!target) throw new NotFoundException('模型配置不存在');
       modelConfigId = dto.modelConfigId;
     }
@@ -61,6 +65,8 @@ export class ChatService {
         title: dto.title || '新对话',
         useKnowledgeBase,
         modelConfigId,
+        // 会话选中的模型名（同一配置多模型；null = 用配置默认 model）
+        ...(dto.model ? { model: dto.model } : {}),
         // 分支功能：把之前的对话作为历史消息注入新会话（LLM 回答时能读到前文）
         ...(dto.seedMessages?.length
           ? {
@@ -83,24 +89,30 @@ export class ChatService {
     });
   }
 
-  /** 修改会话绑定的模型配置（null = 回退系统默认） */
+  /** 修改会话绑定的模型配置与具体模型名（null = 回退系统默认） */
   async updateSessionModel(
     userId: string,
     sessionId: string,
     modelConfigId?: string | null,
+    model?: string | null,
     reasoningEffort?: string | null,
   ) {
     await this.getSession(userId, sessionId);
     let next: string | null = null;
-    if (modelConfigId) {
-      const target = await this.modelConfigService.resolveForChat(userId, modelConfigId);
+    let nextModel: string | null = null;
+    if (modelConfigId != null) {
+      // 绑定了配置：解析有效模型名（同一配置内切换模型；非法名回落默认 model）
+      const target = await this.modelConfigService.resolveForChat(userId, modelConfigId, model);
       if (!target) throw new NotFoundException('模型配置不存在');
       next = modelConfigId;
+      nextModel = target.model;
     }
     return this.prisma.chatSession.update({
       where: { id: sessionId },
       data: {
         modelConfigId: next,
+        // model 一并写：绑定配置时写解析后的模型名；清空配置时置 null（不留残留）
+        ...(modelConfigId !== undefined ? { model: nextModel } : {}),
         // reasoningEffort 传了才更新（null = 清空回默认；undefined = 不修改）
         ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       },
@@ -256,11 +268,14 @@ export class ChatService {
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
     const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
-    // 模型目标（BYO 强依赖）：会话绑定的配置 → 用户的默认配置 → 都没有则提示先绑定 Key。
+    // 模型目标（BYO 强依赖）：会话绑定的配置（含选中的模型名）→ 用户的默认配置 → 都没有则提示先绑定 Key。
     // 所有 token 消耗由用户自己的 Key 承担，系统不提供兜底模型。
     const target =
-      (await this.modelConfigService.resolveForChat(userId, session.modelConfigId)) ??
-      (await this.modelConfigService.resolveDefaultForUser(userId));
+      (await this.modelConfigService.resolveForChat(
+        userId,
+        session.modelConfigId,
+        session.model,
+      )) ?? (await this.modelConfigService.resolveDefaultForUser(userId));
     if (!target) {
       writer('error', {
         message:

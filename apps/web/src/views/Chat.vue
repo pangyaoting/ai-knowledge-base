@@ -158,17 +158,23 @@ const defaultModelConfigId = computed(
 /** 视觉模型名启发式（与后端一致）：vision / VL / 4V / Omni / GLM-4V 等 */
 const VISION_RE = /vision|[-/]vl\b|vl[-.\d]|4v|omni|glm-4v|internvl|minicpm/i;
 
-/** 当前会话实际使用的模型 ID（会话绑定 → 默认配置；用于发图时判断是否会自动路由） */
+/** 当前会话实际使用的模型名（会话绑定配置+模型 → 默认配置；用于发图时判断是否会自动路由） */
 const activeModelId = computed(() => {
   const sid = currentSession.value?.modelConfigId;
-  if (sid) return modelConfigs.value.find((c) => c.id === sid)?.model ?? null;
+  if (sid) return currentSession.value?.model ?? null;
   return modelConfigs.value.find((c) => c.isDefault)?.model ?? null;
 });
 
-/** 当前会话使用的模型名（未绑定 = 跟随默认配置，直接显示默认配置名） */
+/** 当前会话使用的模型显示名（配置名 / 模型名；未绑定 = 跟随默认配置） */
 const currentModelName = computed(() => {
-  const bound = currentSession.value?.modelConfig;
-  if (bound) return bound.name;
+  const sid = currentSession.value?.modelConfigId;
+  if (sid) {
+    const c = modelConfigs.value.find((x) => x.id === sid);
+    if (c)
+      return currentSession.value?.model && currentSession.value.model !== c.model
+        ? `${c.name} / ${currentSession.value.model}`
+        : c.name;
+  }
   return modelConfigs.value.find((c) => c.isDefault)?.name ?? '未绑定模型';
 });
 
@@ -180,11 +186,11 @@ async function loadModelConfigs() {
   }
 }
 
-/** 切换当前会话的模型配置（null = 跟随用户默认配置） */
-async function selectModel(id: string) {
+/** 切换当前会话的模型配置 + 具体模型名（null = 跟随用户默认配置） */
+async function selectModel(configId: string, model?: string | null) {
   if (!currentSessionId.value) return;
   try {
-    await updateSessionModel(currentSessionId.value, id);
+    await updateSessionModel(currentSessionId.value, configId, model ?? null);
     await loadSessions();
   } catch (e) {
     error.value = (e as Error).message;
@@ -199,6 +205,7 @@ async function setReasoningEffort(effort: string) {
     await updateSessionModel(
       currentSessionId.value,
       currentSession.value?.modelConfigId ?? null,
+      undefined, // 不改模型名
       effort,
     );
     await loadSessions();
@@ -524,6 +531,14 @@ async function handleSend() {
   if (el) el.scrollTop = el.scrollHeight;
 
   abortController.value = new AbortController();
+  // 流式渲染节流：SSE token 频率远高于屏幕刷新率，每帧最多刷一次 DOM，
+  // 避免每个 token 都全量跑 markdown-it + 代码高亮（长回答会卡）
+  let pendingStream = '';
+  let streamRaf = 0;
+  const flushStream = () => {
+    streamRaf = 0;
+    streamContent.value = pendingStream;
+  };
   try {
     await askQuestion(
       currentSessionId.value,
@@ -535,9 +550,15 @@ async function handleSend() {
           streamSources.value = sources;
         },
         onDelta: (delta) => {
-          streamContent.value += delta;
+          pendingStream += delta;
+          if (!streamRaf) streamRaf = requestAnimationFrame(flushStream);
         },
         onDone: () => {
+          if (streamRaf) {
+            cancelAnimationFrame(streamRaf);
+            streamRaf = 0;
+            streamContent.value = pendingStream;
+          }
           messages.value.push({
             id: `local-${Date.now()}`,
             sessionId: currentSessionId.value!,
@@ -790,6 +811,7 @@ onBeforeUnmount(() => {
         :current-model-name="currentModelName"
         :current-reasoning="currentReasoning"
         :session-model-config-id="currentSession?.modelConfigId ?? null"
+        :session-model="currentSession?.model ?? null"
         :streaming="streaming"
         :can-send="canSend"
         :current-session-id="currentSessionId"

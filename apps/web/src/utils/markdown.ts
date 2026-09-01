@@ -48,15 +48,25 @@ const md = new MarkdownIt({
   },
 });
 
+// 渲染结果缓存：AI 回答每条消息内容不变就不重复跑 markdown-it + 代码高亮
+// （消息组件用 computed 调用本函数，父组件任何状态更新都不会导致已渲染消息重新高亮）
+const renderCache = new Map<string, string>();
+const RENDER_CACHE_MAX = 200;
+
 export function renderMarkdown(text: string): string {
+  const hit = renderCache.get(text);
+  if (hit !== undefined) return hit;
+  if (renderCache.size >= RENDER_CACHE_MAX) renderCache.clear();
   const html = md.render(text);
   // 给每个代码块包容器 + 复制按钮
-  return html
+  const wrapped = html
     .replace(
       /<pre class="hljs">/g,
       '<div class="code-block"><button type="button" class="code-copy" title="复制代码">复制</button><pre class="hljs">',
     )
     .replace(/<\/pre>/g, '</pre></div>');
+  renderCache.set(text, wrapped);
+  return wrapped;
 }
 
 /** 点击复制按钮时获取对应代码文本（事件委托，由调用方绑定） */

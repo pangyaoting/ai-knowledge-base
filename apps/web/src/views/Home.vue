@@ -1,4 +1,6 @@
 <script setup lang="ts">
+defineOptions({ name: 'HomeView' });
+
 import { ref, computed, onMounted } from 'vue';
 import { Cpu, ArrowRight } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';

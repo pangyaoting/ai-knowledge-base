@@ -1,4 +1,13 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateModelConfigDto {
@@ -27,11 +36,22 @@ export class CreateModelConfigDto {
   @IsNotEmpty({ message: '请填写 API Key' })
   apiKey!: string;
 
-  @ApiProperty({ example: 'deepseek-chat', description: '模型名' })
+  @ApiProperty({ example: 'deepseek-chat', description: '默认模型名' })
   @IsString({ message: '模型名格式不正确' })
   @IsNotEmpty({ message: '请填写模型名' })
   @MaxLength(100, { message: '模型名最多100个字符' })
   model!: string;
+
+  @ApiProperty({
+    example: ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v4-flash-vision-exp'],
+    description: '该 Key 下的全部模型名（同一配置可挂多个模型，对话页下拉切换）',
+    required: false,
+  })
+  @IsOptional()
+  @IsArray({ message: 'models 格式不正确' })
+  @ArrayMaxSize(20, { message: '一个配置最多 20 个模型' })
+  @IsString({ each: true, message: '模型名格式不正确' })
+  models?: string[];
 
   @ApiProperty({ example: false, description: '是否设为默认（新建会话默认使用）', required: false })
   @IsOptional()

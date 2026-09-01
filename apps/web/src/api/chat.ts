@@ -15,6 +15,8 @@ export function createChatSession(data: {
   knowledgeBaseIds?: string[];
   useKnowledgeBase?: boolean;
   modelConfigId?: string;
+  /** 该配置下选中的模型名（同一配置多模型） */
+  model?: string;
   /** 分支：把之前的对话历史注入新会话 */
   seedMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }) {
@@ -41,14 +43,16 @@ export function updateSessionKnowledgeBases(
   });
 }
 
-/** 修改会话绑定的模型配置与推理等级（null = 跟随默认；reasoningEffort: low/high/max） */
+/** 修改会话绑定的模型配置/模型名与推理等级（null = 跟随默认；reasoningEffort: low/high/max） */
 export function updateSessionModel(
   sessionId: string,
   modelConfigId: string | null,
+  model?: string | null,
   reasoningEffort?: string | null,
 ) {
   return request.patch<unknown, ChatSession>(`/chat/sessions/${sessionId}/model`, {
     modelConfigId,
+    ...(model !== undefined ? { model } : {}),
     ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
   });
 }

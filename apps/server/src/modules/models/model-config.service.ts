@@ -12,6 +12,7 @@ export interface SafeModelConfig {
   name: string;
   baseURL: string;
   model: string;
+  models: string[];
   isDefault: boolean;
   apiKeyMasked: string;
   createdAt: Date;
@@ -81,6 +82,7 @@ export class ModelConfigService {
     baseURL: string;
     apiKey: string;
     model: string;
+    models: string[];
     isDefault: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -96,6 +98,7 @@ export class ModelConfigService {
       name: c.name,
       baseURL: c.baseURL,
       model: c.model,
+      models: c.models?.length ? c.models : [c.model],
       isDefault: c.isDefault,
       apiKeyMasked: this.mask(plain),
       createdAt: c.createdAt,
@@ -116,6 +119,8 @@ export class ModelConfigService {
     const hasAny = await this.prisma.modelConfig.count({ where: { ownerId: userId } });
     const isDefault = dto.isDefault ?? hasAny === 0;
     if (isDefault) await this.clearDefault(userId);
+    // 多模型：models 未传时默认只挂 model；传了则去重并保证默认 model 在列
+    const models = this.normalizeModels(dto.models, dto.model);
     const created = await this.prisma.modelConfig.create({
       data: {
         ownerId: userId,
@@ -123,6 +128,7 @@ export class ModelConfigService {
         baseURL: (dto.baseURL ?? 'https://api.deepseek.com').trim(),
         apiKey: this.encrypt(dto.apiKey),
         model: dto.model.trim(),
+        models,
         isDefault,
       },
     });
@@ -148,12 +154,17 @@ export class ModelConfigService {
   async update(userId: string, id: string, dto: UpdateModelConfigDto) {
     const config = await this.findOwned(userId, id);
     if (dto.isDefault && !config.isDefault) await this.clearDefault(userId);
+    // 多模型：传了 models 则去重（并保证当前默认 model 在列）；没传但传了 model 时同步维护
+    const nextModel = dto.model != null ? dto.model.trim() : config.model;
+    const nextModels =
+      dto.models != null ? this.normalizeModels(dto.models, nextModel) : config.models;
     const updated = await this.prisma.modelConfig.update({
       where: { id },
       data: {
         ...(dto.name != null ? { name: dto.name.trim() } : {}),
         ...(dto.baseURL != null ? { baseURL: dto.baseURL.trim() } : {}),
-        ...(dto.model != null ? { model: dto.model.trim() } : {}),
+        ...(dto.model != null ? { model: nextModel } : {}),
+        ...(dto.models != null ? { models: nextModels } : {}),
         ...(dto.isDefault != null ? { isDefault: dto.isDefault } : {}),
         // 传了新 key 才重加密（不传则保留原 key）
         ...(dto.apiKey ? { apiKey: this.encrypt(dto.apiKey) } : {}),
@@ -241,19 +252,41 @@ export class ModelConfigService {
   }
 
   /**
+   * 多模型归一化：去空、去重；确保默认 model 在列表中第一位（会话未选模型时用它）。
+   */
+  private normalizeModels(models: string[] | undefined, defaultModel: string): string[] {
+    const dm = defaultModel.trim();
+    const list: string[] = [];
+    if (dm) list.push(dm);
+    for (const m of models ?? []) {
+      const t = m.trim();
+      if (t && !list.includes(t)) list.push(t);
+    }
+    return list;
+  }
+
+  /**
    * 聊天用：解析会话绑定的配置 → 解密 key → 返回目标；未绑定/不存在返回 null（用系统默认）。
    * 归属校验：配置不属于该用户则视为不存在（数据隔离）。
+   * modelName：会话选中的具体模型名（同一配置多模型切换）；缺省用配置默认 model。
    */
-  async resolveForChat(userId: string, configId?: string | null): Promise<ChatTarget | null> {
+  async resolveForChat(
+    userId: string,
+    configId?: string | null,
+    modelName?: string | null,
+  ): Promise<ChatTarget | null> {
     if (!configId) return null;
     const config = await this.prisma.modelConfig.findFirst({
       where: { id: configId, ownerId: userId },
     });
     if (!config) return null;
+    // 校验 modelName 是否在该配置下（防注入乱传模型名）；不在则回落默认 model
+    const models = config.models?.length ? config.models : [config.model];
+    const model = modelName && models.includes(modelName) ? modelName : config.model;
     return {
       baseURL: config.baseURL,
       apiKey: this.decrypt(config.apiKey),
-      model: config.model,
+      model,
     };
   }
 
@@ -274,9 +307,10 @@ export class ModelConfigService {
   }
 
   /**
-   * 找用户的视觉模型配置（聊天发图片时自动路由用）：
-   * 遍历用户全部配置，模型名含 vision/VL/4V/Omni 等关键字即视为视觉模型；
-   * 默认配置优先。找不到 → null（调用方继续用原模型，报错时提示切换）。
+   * 找用户的视觉模型（聊天发图片时自动路由用）：
+   * 遍历用户全部配置 × 该配置的全部模型名（models + 默认 model），
+   * 模型名含 vision/VL/4V/Omni 等关键字即视为视觉模型；默认配置优先。
+   * 找不到 → null（调用方继续用原模型，报错时提示切换）。
    */
   async resolveVisionForUser(userId: string): Promise<ChatTarget | null> {
     const configs = await this.prisma.modelConfig.findMany({
@@ -284,11 +318,13 @@ export class ModelConfigService {
       orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
     });
     for (const c of configs) {
-      if (isVisionModelName(c.model)) {
+      const candidates = [c.model, ...(c.models ?? [])];
+      const hit = candidates.find((m) => isVisionModelName(m));
+      if (hit) {
         return {
           baseURL: c.baseURL,
           apiKey: this.decrypt(c.apiKey),
-          model: c.model,
+          model: hit,
         };
       }
     }

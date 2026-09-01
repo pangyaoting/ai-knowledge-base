@@ -2,6 +2,7 @@
 defineOptions({ name: 'ChatMessageItem' });
 
 import { FileText, Copy, GitBranch } from 'lucide-vue-next';
+import { computed } from 'vue';
 import ChatSourcePanel from './ChatSourcePanel.vue';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import { toast } from '@/composables/useToast';
@@ -12,6 +13,9 @@ const props = defineProps<{
   index: number;
   useKnowledgeBase: boolean;
 }>();
+
+// 渲染结果缓存：内容不变就不重跑 markdown-it + 代码高亮（父组件重渲染时不再全量重算）
+const msgHtml = computed(() => renderMarkdown(props.msg.content));
 
 const emit = defineEmits<{
   (e: 'copy', msg: ChatMessage): void;
@@ -136,12 +140,7 @@ const hasAnySources = (s: ChatMessage['sources']) => sourcesKb(s).length > 0 || 
         </div>
       </template>
       <!-- 助手消息：Markdown -->
-      <div
-        v-else
-        class="markdown-body px-1"
-        @click="handleMessageClick"
-        v-html="renderMarkdown(props.msg.content)"
-      />
+      <div v-else class="markdown-body px-1" @click="handleMessageClick" v-html="msgHtml" />
       <!-- 操作条：复制（提问/回答）+ 分支（回答）；一直显示，提问右对齐 -->
       <div
         class="mt-1.5 flex items-center gap-1"
