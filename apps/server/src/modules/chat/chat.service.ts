@@ -16,6 +16,17 @@ interface StreamWriter {
   (event: 'sources' | 'delta' | 'done' | 'error', data: unknown): void;
 }
 
+/** 把数据库里的图片 JSON 字符串安全解析成数组（坏数据回退空数组） */
+function parseImageUrls(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? (arr as string[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 const HISTORY_ROUNDS = 6; // 历史对话最多保留最近 3 轮（6 条）
 
 /**
@@ -163,10 +174,16 @@ export class ChatService {
 
   async getMessages(userId: string, sessionId: string) {
     await this.getSession(userId, sessionId);
-    return this.prisma.chatMessage.findMany({
+    const msgs = await this.prisma.chatMessage.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'asc' },
     });
+    // image_data_urls 是 JSON 字符串列，返回时解析成数组——
+    // 否则前端把字符串当数组遍历会按字符拆出无数张废图（图片叠满屏幕）
+    return msgs.map((m) => ({
+      ...m,
+      imageDataUrls: parseImageUrls(m.imageDataUrls),
+    }));
   }
 
   async removeSession(userId: string, sessionId: string) {

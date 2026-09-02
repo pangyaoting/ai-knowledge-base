@@ -17,6 +17,22 @@ const props = defineProps<{
 // 渲染结果缓存：内容不变就不重跑 markdown-it + 代码高亮（父组件重渲染时不再全量重算）
 const msgHtml = computed(() => renderMarkdown(props.msg.content));
 
+// 图片列表防御性解析：imageDataUrls 在旧数据/未更新后端时可能是 JSON 字符串，
+// 直接 v-for 字符串会按字符拆出无数张废图（图片叠满屏）——统一转成数组
+const imgList = computed<string[]>(() => {
+  const u = props.msg.imageDataUrls as unknown as string[] | string | null | undefined;
+  if (Array.isArray(u)) return u;
+  if (typeof u === 'string') {
+    try {
+      const arr = JSON.parse(u) as unknown;
+      return Array.isArray(arr) ? (arr as string[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+});
+
 const emit = defineEmits<{
   (e: 'copy', msg: ChatMessage): void;
   (e: 'branch', index: number): void;
@@ -101,18 +117,18 @@ const hasAnySources = (s: ChatMessage['sources']) => sourcesKb(s).length > 0 || 
       <!-- 用户消息：图片/文件独立展示在气泡外，文字用中性气泡 -->
       <template v-if="props.msg.role === 'user'">
         <div
-          v-if="props.msg.imageDataUrls?.length"
+          v-if="imgList.length"
           class="mb-1.5 grid max-w-[360px] gap-1.5"
-          :class="props.msg.imageDataUrls.length > 1 ? 'grid-cols-2' : ''"
+          :class="imgList.length > 1 ? 'grid-cols-2' : ''"
         >
           <img
-            v-for="(u, i) in props.msg.imageDataUrls"
+            v-for="(u, i) in imgList"
             :key="i"
             :src="u"
             loading="lazy"
             decoding="async"
             class="max-h-48 w-full rounded-md object-cover"
-            :class="props.msg.imageDataUrls.length === 1 ? 'max-w-[280px]' : ''"
+            :class="imgList.length === 1 ? 'max-w-[280px]' : ''"
             alt="图片"
           />
         </div>
