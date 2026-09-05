@@ -23,8 +23,6 @@ import {
   deleteDocument,
   downloadDocumentFile,
   updateDocument,
-  reprocessDocument,
-  reprocessAll,
 } from '@/api/knowledge';
 import {
   buildDocTree,
@@ -564,51 +562,6 @@ async function deleteSelected() {
   else toast.success(`已删除 ${docs.length} 个文档`);
 }
 
-/** 重新索引选中文档：处理规则升级（分块/符号/档案）后重跑，无需删除重传 */
-async function reprocessSelected() {
-  const docs = list.value.filter((d) => selectedIds.has(d.id));
-  if (!docs.length) return;
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`重新索引选中的 ${docs.length} 个文档？（处理规则升级后旧文档重新解析）`)) {
-    return;
-  }
-  const errors: string[] = [];
-  let next = 0;
-  const worker = async () => {
-    while (next < docs.length) {
-      const idx = next++;
-      if (idx >= docs.length) break;
-      const d = docs[idx];
-      try {
-        await reprocessDocument(knowledgeBaseId, d.id);
-      } catch {
-        errors.push(d.filename);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(6, docs.length) }, () => worker()));
-  selectedIds.clear();
-  toast.success(`已提交 ${docs.length - errors.length} 个文档重新索引（后台处理中）`);
-  if (errors.length) toast.error(`提交失败 ${errors.length} 个`);
-  // 延迟刷新：让列表显示 processing 状态
-  setTimeout(load, 800);
-}
-
-/** 整库重新索引 */
-async function handleReprocessAll() {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm('重新索引整个知识库的全部文档？（处理规则升级后重跑，文档多时较慢）')) {
-    return;
-  }
-  try {
-    const res = await reprocessAll(knowledgeBaseId);
-    toast.success(`已提交 ${res.reprocessed} 个文档重新索引（跳过 ${res.skipped} 个附件）`);
-    setTimeout(load, 800);
-  } catch {
-    toast.error('重新索引提交失败');
-  }
-}
-
 /** 勾选文件夹 = 勾选/取消其下全部文件（含子文件夹） */
 function toggleSelectFolder(node: DocTreeNode) {
   const docs = collectFolderFiles(node);
@@ -779,29 +732,16 @@ onBeforeUnmount(stopParsePoll);
             >
               全部折叠
             </button>
-            <button
-              class="font-medium text-primary transition-colors hover:underline"
-              title="处理规则升级后（分块/符号/档案），旧文档重新解析"
-              @click="handleReprocessAll"
-            >
-              ↻ 重新索引全部
-            </button>
           </div>
         </div>
 
-        <!-- 多选批量删除条（勾选若干文件后出现） -->
+        <!-- 多选批量操作条（勾选若干文件后出现） -->
         <div
           v-if="hasSelection"
           class="flex items-center justify-between border-b bg-primary/5 px-4 py-2 text-xs"
         >
           <span class="text-foreground">已选 {{ selectedIds.size }} 个文档</span>
           <div class="flex items-center gap-4">
-            <button
-              class="font-medium text-primary transition-colors hover:underline"
-              @click="reprocessSelected"
-            >
-              重新索引选中
-            </button>
             <button
               class="text-muted-foreground transition-colors hover:text-foreground hover:underline"
               @click="clearSelection"
