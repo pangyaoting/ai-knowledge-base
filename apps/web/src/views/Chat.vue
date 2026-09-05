@@ -371,7 +371,15 @@ async function selectSession(id: string) {
   const reqNo = ++sessionReqNo;
   try {
     const list = await getChatMessages(id);
-    if (reqNo === sessionReqNo) messages.value = list;
+    if (reqNo === sessionReqNo) {
+      messages.value = list;
+      // 切会话后强制滚到底：上面清空列表瞬间 scrollHeight→0 会把 scrollTop 压到顶部，
+      // 且若新旧会话消息条数相同，length watch 不会触发 → 必须在新内容渲染后主动拉回
+      autoScroll = true;
+      await nextTick();
+      const el = messageContainer.value;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
   } catch (e) {
     if (reqNo === sessionReqNo) error.value = (e as Error).message;
   }
