@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
+import { AVATAR_DIR } from './common/paths';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -19,7 +20,7 @@ async function bootstrap() {
 
   // 用户头像静态目录（与知识库附件分开：附件保持鉴权，头像公开可访问）。
   // 不直接 import express（pnpm 严格依赖会报错），用 app.use 挂一个简单静态处理器。
-  const avatarDir = join(process.cwd(), 'uploads', 'avatars');
+  const avatarDir = AVATAR_DIR;
   // Express 中间件签名（Nest 的 use 接收 any[]；因 pnpm 严格依赖不能 import express 类型）
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.use('/avatars', (req: any, res: any) => {

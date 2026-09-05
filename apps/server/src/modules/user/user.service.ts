@@ -3,10 +3,9 @@ import * as bcrypt from 'bcryptjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { AVATAR_DIR } from '../../common/paths';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
-
-const AVATAR_DIR = join(process.cwd(), 'uploads', 'avatars');
 
 @Injectable()
 export class UserService {

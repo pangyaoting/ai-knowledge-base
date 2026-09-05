@@ -13,11 +13,11 @@ import { splitCode, splitText } from './utils/text-splitter';
 import { splitStructuredMd } from './utils/structured-splitter';
 import { extractSymbols, type CodeSymbol } from './utils/code-indexer';
 import { buildFileProfile } from './utils/file-profile';
+import { storedPath, UPLOAD_DIR } from '../../common/paths';
 
 /** 参与符号索引的代码语言（TS Compiler API 可解析；html/css/py 等跳过） */
 const CODE_SYMBOL_EXTS = ['ts', 'tsx', 'js', 'jsx', 'vue', 'mjs', 'cjs'];
 
-const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
 const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
 const CHILD_CHUNK_SIZE = 500; // P2 父子分块：子块（检索片）目标字符数
@@ -152,7 +152,7 @@ export class DocumentProcessor {
       if (existing) {
         await this.prisma.document.delete({ where: { id: existing.id } });
         try {
-          unlinkSync(join(process.cwd(), existing.filepath));
+          unlinkSync(storedPath(existing.filepath));
         } catch {
           /* 文件可能已不存在，忽略 */
         }

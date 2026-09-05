@@ -10,11 +10,7 @@ import { DocumentProcessor } from './document-processor.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { cleanText, detectFileType, extractText, type DocType } from './utils/document-parser';
 import { splitStructuredMd } from './utils/structured-splitter';
-
-const UPLOAD_DIR = join(process.cwd(), 'uploads');
-
-// 供其他模块（如示例数据导入）复用
-export { UPLOAD_DIR };
+import { storedPath, UPLOAD_DIR } from '../../common/paths';
 
 /** 文件内容哈希：SHA-256（增量向量化去重依据，与文件名无关） */
 function hashFileContent(buffer: Buffer): string {
@@ -163,7 +159,7 @@ export class DocumentsService {
     for (const old of olds) {
       await this.prisma.document.delete({ where: { id: old.id } });
       try {
-        unlinkSync(join(process.cwd(), old.filepath));
+        unlinkSync(storedPath(old.filepath));
       } catch {
         /* 文件可能已不存在，忽略 */
       }
@@ -210,7 +206,7 @@ export class DocumentsService {
     if (!doc) {
       throw new NotFoundException('文档不存在');
     }
-    const absPath = join(process.cwd(), doc.filepath);
+    const absPath = storedPath(doc.filepath);
     if (!existsSync(absPath)) {
       throw new NotFoundException('文件已不存在（可能被清理）');
     }
@@ -229,7 +225,7 @@ export class DocumentsService {
     }
     await this.prisma.document.delete({ where: { id: documentId } });
     try {
-      unlinkSync(join(process.cwd(), doc.filepath));
+      unlinkSync(storedPath(doc.filepath));
     } catch {
       /* 文件可能已不存在，忽略 */
     }
@@ -245,7 +241,7 @@ export class DocumentsService {
     if (!doc) {
       throw new NotFoundException('文档不存在');
     }
-    const absPath = join(process.cwd(), doc.filepath);
+    const absPath = storedPath(doc.filepath);
     if (!existsSync(absPath)) {
       throw new NotFoundException('文件已不存在（可能被清理）');
     }

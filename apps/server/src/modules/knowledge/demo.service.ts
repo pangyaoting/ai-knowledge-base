@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { DocumentQueueService } from './document-queue.service';
-import { UPLOAD_DIR } from './documents.service';
+import { UPLOAD_DIR } from '../../common/paths';
 
 /** 示例文档内容（短而实用，覆盖平台本身与 RAG 概念） */
 const DEMO_DOCS: Array<{ name: string; content: string }> = [
