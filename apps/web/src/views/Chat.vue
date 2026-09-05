@@ -1,6 +1,15 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatView' });
-import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue';
+import {
+  ref,
+  computed,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  onBeforeUnmount,
+  watch,
+  nextTick,
+} from 'vue';
 import {
   Menu,
   BookOpen,
@@ -371,15 +380,7 @@ async function selectSession(id: string) {
   const reqNo = ++sessionReqNo;
   try {
     const list = await getChatMessages(id);
-    if (reqNo === sessionReqNo) {
-      messages.value = list;
-      // 切会话后强制滚到底：上面清空列表瞬间 scrollHeight→0 会把 scrollTop 压到顶部，
-      // 且若新旧会话消息条数相同，length watch 不会触发 → 必须在新内容渲染后主动拉回
-      autoScroll = true;
-      await nextTick();
-      const el = messageContainer.value;
-      if (el) el.scrollTop = el.scrollHeight;
-    }
+    if (reqNo === sessionReqNo) messages.value = list;
   } catch (e) {
     if (reqNo === sessionReqNo) error.value = (e as Error).message;
   }
@@ -690,8 +691,20 @@ onMounted(async () => {
 
 // KeepAlive 缓存：从「模型配置」页新增/修改模型后返回本页时，刷新模型列表，
 // 否则新绑定的模型要刷新页面才出现在模型下拉里
-onActivated(() => {
+onActivated(async () => {
   loadModelConfigs();
+  // 切回本页：恢复离开时的滚动位置——KeepAlive 缓存切走/切回时
+  // 消息容器 scrollTop 可能被布局压回 0（置顶），需等 DOM 稳定后手动恢复
+  await nextTick();
+  const el = messageContainer.value;
+  if (el && savedChatScrollTop > 0) el.scrollTop = savedChatScrollTop;
+});
+
+// 切走导航前记录消息滚动位置（切回时恢复，避免置顶/丢位置）
+let savedChatScrollTop = 0;
+onDeactivated(() => {
+  const el = messageContainer.value;
+  if (el) savedChatScrollTop = el.scrollTop;
 });
 
 onBeforeUnmount(() => {
