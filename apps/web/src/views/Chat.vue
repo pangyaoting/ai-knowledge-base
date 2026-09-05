@@ -146,7 +146,9 @@ const filePreview = ref<{ name: string; content: string } | null>(null);
 const streaming = ref(false);
 const error = ref('');
 const loadingSessions = ref(false);
-const useWebSearch = ref(false); // 联网检索开关
+// 联网检索开关（localStorage 持久化：刷新/重进页面保持勾选状态）
+const useWebSearch = ref(localStorage.getItem('kb-use-web-search') === '1');
+watch(useWebSearch, (v) => localStorage.setItem('kb-use-web-search', v ? '1' : '0'));
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
 const sidebarCollapsed = ref(false); // 桌面端：会话列表侧边栏收起/展开
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
