@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it';
 // 按需引入 highlight.js：核心 + 常用语言（全量引入会让打包体积增大 ~1MB）
-// 主题样式不走静态 import：亮/暗模式动态切换（utils/highlight-theme.ts，VSCode 风格配色）
+// 主题样式在 index.css 里固定为 One Dark Pro 深色（token 配色，见 .markdown-body .hljs-*）
 import hljs from 'highlight.js/lib/core';
 import javascript from 'highlight.js/lib/languages/javascript';
 import typescript from 'highlight.js/lib/languages/typescript';
