@@ -20,8 +20,10 @@ describe('renderMarkdown AI 回答渲染', () => {
 
   it('语言未知时转义 HTML，防注入', () => {
     const html = renderMarkdown('```\n<script>alert(1)</script>\n```');
-    expect(html).not.toContain('<script>alert(1)</script>');
-    expect(html).toContain('&lt;script&gt;');
+    // 绝不能出现可执行的 script 标签（自动检测高亮后同样必须转义）
+    expect(html).not.toMatch(/<script[\s>]/);
+    // 标签符号已转义为 &lt;（hljs 高亮会在 &lt; 后插入 span，不能断言连续字符串）
+    expect(html).toContain('&lt;');
   });
 
   it('禁用原始 HTML（html: false 防注入）', () => {
