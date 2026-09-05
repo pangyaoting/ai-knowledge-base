@@ -84,7 +84,8 @@ jobs:
             mkdir -p /opt/kb/uploads.bak && cp -r uploads/* /opt/kb/uploads.bak/ 2>/dev/null || true
             cd /opt/kb && rm -rf ai-knowledge-base && tar -xzf /tmp/kb.tar.gz -C /opt/kb && mv ai-knowledge-base-main ai-knowledge-base
             cp /opt/kb/.env.bak ai-knowledge-base/.env || true
-            cp -r /opt/kb/uploads.bak/* ai-knowledge-base/uploads/ 2>/dev/null || true
+            # 恢复上传文件：tar 解压的新目录没有 uploads/，必须先 mkdir 再 cp（否则 cp 静默失败、头像/文档每次部署都丢）
+            mkdir -p ai-knowledge-base/uploads && cp -r /opt/kb/uploads.bak/* ai-knowledge-base/uploads/ 2>/dev/null || true
             cd ai-knowledge-base
             pnpm install --no-frozen-lockfile
             # 应用数据库迁移（.env 是唯一配置源，从项目根目录读取）
