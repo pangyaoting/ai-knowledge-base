@@ -247,19 +247,32 @@ export class DocumentsService {
   }
 
   /**
-   * 自动重算索引版本落后的文档（indexVersion < INDEX_VERSION）：
-   * 查过期且状态为 done 的文档（processing/failed 不重复入队），逐个重新入队后台处理。
+   * 自动重算索引版本落后的文档（indexVersion < INDEX_VERSION）。
+   * 先原子抢占（updateMany done→pending）：列表轮询会反复触发本方法，
+   * 若不先抢占状态，排队中（尚未 processing）的文档每轮都会被重复入队 → 队列爆炸。
    * 只处理可解析类型（附件等 fileType 不在白名单的不动）。
    */
   private async autoReindexStale(userId: string, knowledgeBaseId: string): Promise<void> {
-    const stale = await this.prisma.document.findMany({
+    // 1. 原子抢占：把"已完成但版本落后"的文档置为 pending（同一行只能被抢一次）
+    const claimed = await this.prisma.document.updateMany({
       where: {
         knowledgeBaseId,
         status: 'done',
         indexVersion: { lt: INDEX_VERSION },
         fileType: { in: ['pdf', 'docx', 'md', 'markdown', 'txt', 'code'] },
       },
-      select: { id: true, filename: true, filepath: true, fileType: true },
+      data: { status: 'pending' },
+    });
+    if (claimed.count === 0) return;
+    // 2. 只入队刚抢到的这批
+    const stale = await this.prisma.document.findMany({
+      where: {
+        knowledgeBaseId,
+        status: 'pending',
+        indexVersion: { lt: INDEX_VERSION },
+        fileType: { in: ['pdf', 'docx', 'md', 'markdown', 'txt', 'code'] },
+      },
+      select: { id: true, filename: true, filepath: true },
     });
     if (stale.length === 0) return;
     this.logger.log(
