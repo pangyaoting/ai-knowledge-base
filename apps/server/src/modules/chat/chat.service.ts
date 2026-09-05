@@ -363,7 +363,8 @@ export class ChatService {
             `会话 ${sessionId} 全文模式：${ft.totalChars} 字符 ≤ 阈值 ${this.fulltextMaxChars}，注入 ${ft.sources.length} 个文档`,
           );
         } else {
-          kbSources = await this.ragService.retrieve(userId, searchQuery, kbScope, 5);
+          // 检索模式；首次被相关性门控全滤（0 条）时用 HyDE 假设文档兜底重检（P3）
+          kbSources = await this.retrieveWithHyde(userId, searchQuery, kbScope, target, sessionId);
           retrievalMode = 'retrieval';
           this.logger.log(
             `会话 ${sessionId} 检索模式：KB 总字符 ${ft.totalChars} > 阈值 ${this.fulltextMaxChars}，走混合检索`,
@@ -371,7 +372,7 @@ export class ChatService {
         }
       } else {
         // 未绑定知识库 = 检索该用户全部知识库（范围不可控，不做全文）
-        kbSources = await this.ragService.retrieve(userId, searchQuery, kbScope, 5);
+        kbSources = await this.retrieveWithHyde(userId, searchQuery, kbScope, target, sessionId);
         retrievalMode = 'retrieval';
       }
     }
@@ -584,6 +585,70 @@ export class ChatService {
         : { role: 'user', content: userPrompt },
     ];
     return { system, messages };
+  }
+
+  /**
+   * 检索 + HyDE 兜底（P3）：
+   * 先正常混合检索；若被相关性门控全滤（0 条）→ 用 LLM 生成一段"假设的知识库文档内容"
+   * （HyDE: Hypothetical Document Embeddings）再检索一次——假设文档与真实文档的语义重合度
+   * 远高于口语问题，问法不同（"第一周第一天学什么" vs 文档里"W1 周一"）也能命中。
+   * 成本可控：只在 0 结果时触发一次 LLM 调用；LLM 失败/仍 0 条都静默回退，不阻塞。
+   */
+  private async retrieveWithHyde(
+    userId: string,
+    query: string,
+    kbScope: string[] | undefined,
+    target: ChatTarget,
+    sessionId: string,
+  ): Promise<RetrievalSource[]> {
+    const sources = await this.ragService.retrieve(userId, query, kbScope, 5);
+    if (sources.length > 0 || !this.hydeEnabled) {
+      return sources;
+    }
+    const hydeQuery = await this.hydeExpand(query, target);
+    if (hydeQuery === query) {
+      return sources;
+    }
+    const retry = await this.ragService.retrieve(userId, hydeQuery, kbScope, 5);
+    if (retry.length > 0) {
+      this.logger.log(
+        `会话 ${sessionId} HyDE 兜底命中 ${retry.length} 条（原检索 0 条，扩写后命中）`,
+      );
+    }
+    return retry;
+  }
+
+  /** HyDE 开关（.env 可配 HYDE_ENABLED，默认开启） */
+  private get hydeEnabled(): boolean {
+    return this.configService.get<string>('HYDE_ENABLED', 'true') !== 'false';
+  }
+
+  /**
+   * HyDE 假设文档生成：把问题扩写成一段"知识库里如果存着答案，内容大概长什么样"的陈述文本。
+   * 用这段文本做向量检索（而非原问题），语义重合度更高。失败回退原问题。
+   */
+  private async hydeExpand(question: string, target: ChatTarget): Promise<string> {
+    try {
+      const client = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
+      const res = await client.chat.completions.create({
+        model: target.model,
+        messages: [
+          {
+            role: 'system',
+            content:
+              '你是检索增强助手。用户给一个问题，请写一段 150 字以内的"假设的知识库文档内容"：用陈述句直接描述，如果知识库里存有该问题的答案，内容大概会怎么写（包含关键名词、概念、步骤）。只输出这段内容本身，不要任何解释、不要以"根据""假设"开头、不要提问句式。',
+          },
+          { role: 'user', content: question },
+        ],
+        max_tokens: 250,
+        temperature: 0.3,
+      });
+      const text = res.choices[0]?.message?.content?.trim();
+      return text && text.length >= 20 && text.length <= 500 ? text : question;
+    } catch (err) {
+      this.logger.warn(`HyDE 扩写失败，回退原问题: ${(err as Error).message}`);
+      return question;
+    }
   }
 
   /**
