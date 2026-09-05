@@ -9,6 +9,7 @@ import { DocumentQueueService } from './document-queue.service';
 import { DocumentProcessor } from './document-processor.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { cleanText, detectFileType, extractText, type DocType } from './utils/document-parser';
+import { splitStructuredMd } from './utils/structured-splitter';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 
@@ -290,7 +291,14 @@ export class DocumentsService {
       }
       // 只更新知识库内部（重新分块 + 向量化），不改写磁盘文件——
       // 知识库与本地文件分离：编辑内容/改名都不影响上传的原文件（下载拿到的始终是原始文件）
-      const chunkCount = await this.processor.indexText(documentId, cleaned);
+      // md 文档走结构化分块（按标题分节、表格保表头，块带章节路径——P1）
+      const structuredChunks = doc.fileType === 'md' ? splitStructuredMd(cleaned) : undefined;
+      const chunkCount = await this.processor.indexText(
+        documentId,
+        cleaned,
+        undefined,
+        structuredChunks,
+      );
       data.status = 'done';
       this.logger.log(`文档内容已编辑并重新向量化: ${doc.filename} → ${chunkCount} 个 chunk`);
     }

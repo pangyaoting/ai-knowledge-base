@@ -10,6 +10,7 @@ import {
   type DocType,
 } from './utils/document-parser';
 import { splitCode, splitText } from './utils/text-splitter';
+import { splitStructuredMd } from './utils/structured-splitter';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
@@ -80,11 +81,17 @@ export class DocumentProcessor {
         data: { status: 'processing', error: null },
       });
 
-      // 分块 + 向量化（代码用代码分块器，并在每块开头标注来源文件）
+      // 分块 + 向量化：
+      // - code：代码分块器（块首标注来源文件）
+      // - md：结构化分块（按标题分节、表格保表头，块带章节路径——P1 提升检索上下文）
+      // - 其他：字符分块
+      const structuredChunks =
+        fileType === 'md' && !isCode ? splitStructuredMd(cleaned) : undefined;
       const chunkCount = await this.indexText(
         documentId,
         cleaned,
         isCode ? `文件: ${originalName}` : undefined,
+        structuredChunks,
       );
 
       // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
@@ -131,12 +138,19 @@ export class DocumentProcessor {
   /**
    * 把清洗后的文本分块并向量化（上传队列与在线编辑共用）：
    * 删旧 chunk → 建新 chunk → 批量调 bge-m3 写回 embedding → 返回 chunk 数
-   * prefix 存在时按代码分块器切（并给每块加来源文件标注）
+   * 分块策略：externalChunks（结构化分块器等外部已切好）→ prefix（代码分块器）→ 字符分块
    */
-  async indexText(documentId: string, cleaned: string, prefix?: string): Promise<number> {
-    const chunks = prefix
-      ? splitCode(cleaned, prefix, { chunkSize: 900 })
-      : splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
+  async indexText(
+    documentId: string,
+    cleaned: string,
+    prefix?: string,
+    externalChunks?: string[],
+  ): Promise<number> {
+    const chunks =
+      externalChunks ??
+      (prefix
+        ? splitCode(cleaned, prefix, { chunkSize: 900 })
+        : splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP }));
     await this.prisma.chunk.deleteMany({ where: { documentId } });
     await this.prisma.chunk.createMany({
       data: chunks.map((content, index) => ({
