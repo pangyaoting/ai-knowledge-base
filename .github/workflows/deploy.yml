@@ -73,8 +73,12 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
+            # 确认 CI 实际登录用户（排查权限问题）
+            echo "deploy as: $(whoami)"
             # 服务器代码目录为 tar 部署（无 .git），每次从 GitHub 下载替换，避免直连 GitHub 不稳定
             cd /opt/kb
+            # 先删旧 tar 再下载：旧文件可能是其他用户创建，直接 -O 覆盖会 Permission denied
+            rm -f /tmp/kb.tar.gz
             wget -q -O /tmp/kb.tar.gz "https://ghfast.top/https://github.com/pangyaoting/ai-knowledge-base/archive/refs/heads/main.tar.gz"
             cd /opt/kb/ai-knowledge-base && cp .env /opt/kb/.env.bak || true
             mkdir -p /opt/kb/uploads.bak && cp -r uploads/* /opt/kb/uploads.bak/ 2>/dev/null || true
