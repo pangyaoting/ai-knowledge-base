@@ -4,6 +4,7 @@ defineOptions({ name: 'AgentReportView' });
 import { computed, ref } from 'vue';
 import { ChevronRight, ExternalLink } from 'lucide-vue-next';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
+import { copyText } from '@/utils/clipboard';
 import type { AgentTask } from '@/types/research-agent';
 
 const props = defineProps<{
@@ -14,8 +15,7 @@ async function handleReportClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (target.classList.contains('code-copy')) {
     const code = getCopyCode(target);
-    if (code) {
-      await navigator.clipboard.writeText(code);
+    if (code && (await copyText(code))) {
       target.textContent = '已复制';
       setTimeout(() => (target.textContent = '复制'), 1500);
     }

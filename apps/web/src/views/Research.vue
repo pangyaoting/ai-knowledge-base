@@ -11,6 +11,7 @@ import { getReports, getReport, createReport, deleteReport } from '@/api/researc
 import { getKnowledgeBases } from '@/api/knowledge';
 import { getModelConfigs } from '@/api/model-configs';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
+import { copyText } from '@/utils/clipboard';
 import type { Report, ReportSource } from '@/types/research';
 import type { KnowledgeBase } from '@/types/knowledge';
 import type { ModelConfig } from '@/types/model-config';
@@ -202,13 +203,12 @@ async function handleDelete(id: string) {
 
 // ==================== 报告渲染 ====================
 
-/** 点击复制代码按钮（事件委托，同对话页） */
+/** 点击复制代码按钮（事件委托，同对话页）；http 下 clipboard API 不可用 → copyText 自动降级 */
 async function handleReportClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (target.classList.contains('code-copy')) {
     const code = getCopyCode(target);
-    if (code) {
-      await navigator.clipboard.writeText(code);
+    if (code && (await copyText(code))) {
       target.textContent = '已复制';
       setTimeout(() => (target.textContent = '复制'), 1500);
     }

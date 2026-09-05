@@ -5,6 +5,7 @@ import { FileText, Copy, GitBranch } from 'lucide-vue-next';
 import { computed } from 'vue';
 import ChatSourcePanel from './ChatSourcePanel.vue';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
+import { copyText } from '@/utils/clipboard';
 import { toast } from '@/composables/useToast';
 import type { ChatMessage, RetrievalSource } from '@/types/chat';
 
@@ -68,14 +69,11 @@ function msgFiles(msg: ChatMessage): Array<{ name: string; content: string }> {
     .filter((f) => f.name);
 }
 
-/** 复制整条消息（回答或提问） */
+/** 复制整条消息（回答或提问）；http 环境 clipboard API 不可用 → copyText 内部自动降级 */
 async function copyMessage(msg: ChatMessage) {
-  try {
-    await navigator.clipboard.writeText(msg.content);
-    toast.success('已复制');
-  } catch {
-    toast.error('复制失败');
-  }
+  const ok = await copyText(msg.content);
+  if (ok) toast.success('已复制');
+  else toast.error('复制失败');
 }
 
 /** 点击复制代码按钮（事件委托） */
@@ -83,8 +81,7 @@ async function handleMessageClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (target.classList.contains('code-copy')) {
     const code = getCopyCode(target);
-    if (code) {
-      await navigator.clipboard.writeText(code);
+    if (code && (await copyText(code))) {
       target.textContent = '已复制';
       setTimeout(() => (target.textContent = '复制'), 1500);
     }
