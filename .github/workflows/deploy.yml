@@ -59,9 +59,9 @@ jobs:
         run: |
           if [ -z "$SERVER_HOST" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
             echo "未配置服务器密钥，跳过部署（CI 仍算通过）"
-            echo "deploy_enabled=false"
+            echo "deploy_enabled=false" >> "$GITHUB_OUTPUT"
           else
-            echo "deploy_enabled=true"
+            echo "deploy_enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Deploy to server
