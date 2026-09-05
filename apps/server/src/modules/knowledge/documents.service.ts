@@ -166,6 +166,73 @@ export class DocumentsService {
     }
   }
 
+  /**
+   * 重新解析文档（"重新索引"）：分块/符号/档案等处理逻辑升级后，
+   * 旧文档重新跑全流程（解析→分块→符号→档案→向量化），无需删除重传。
+   * 直接对已有文档入队，绕过 contentHash 去重（那是上传时的优化）。
+   */
+  async reprocess(userId: string, knowledgeBaseId: string, documentId: string) {
+    await this.knowledgeService.findOne(userId, knowledgeBaseId);
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, knowledgeBaseId },
+    });
+    if (!doc) {
+      throw new NotFoundException('文档不存在');
+    }
+    const fileType = detectFileType(doc.filename);
+    if (!fileType) {
+      throw new BadRequestException('该文件是附件（无法解析的类型），不能重新索引');
+    }
+    const absPath = storedPath(doc.filepath);
+    if (!existsSync(absPath)) {
+      throw new BadRequestException('磁盘文件不存在（可能已被清理），请删除后重新上传');
+    }
+    await this.queueService.addDocumentJob({
+      userId,
+      documentId: doc.id,
+      knowledgeBaseId,
+      storedName: doc.filepath.split(/[\\/]/).pop() ?? '',
+      fileType,
+      originalName: doc.filename,
+    });
+    this.logger.log(`文档重新索引入队: ${doc.filename} (${doc.id})`);
+    return { reprocessed: true, filename: doc.filename };
+  }
+
+  /** 整库重新索引：遍历知识库全部可解析文档入队重处理（跳过附件） */
+  async reprocessAll(userId: string, knowledgeBaseId: string) {
+    await this.knowledgeService.findOne(userId, knowledgeBaseId);
+    const docs = await this.prisma.document.findMany({
+      where: { knowledgeBaseId },
+      select: { id: true, filename: true, filepath: true },
+    });
+    let queued = 0;
+    let skipped = 0;
+    for (const doc of docs) {
+      const fileType = detectFileType(doc.filename);
+      if (!fileType) {
+        skipped++;
+        continue;
+      }
+      const absPath = storedPath(doc.filepath);
+      if (!existsSync(absPath)) {
+        skipped++;
+        continue;
+      }
+      await this.queueService.addDocumentJob({
+        userId,
+        documentId: doc.id,
+        knowledgeBaseId,
+        storedName: doc.filepath.split(/[\\/]/).pop() ?? '',
+        fileType,
+        originalName: doc.filename,
+      });
+      queued++;
+    }
+    this.logger.log(`知识库整库重新索引入队: ${queued} 个文档（跳过 ${skipped} 个）`);
+    return { reprocessed: queued, skipped };
+  }
+
   /** 文档列表（带 chunk 数量；前端据此轮询处理状态） */
   async findAll(userId: string, knowledgeBaseId: string) {
     await this.knowledgeService.findOne(userId, knowledgeBaseId);

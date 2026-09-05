@@ -71,6 +71,20 @@ export function deleteDocument(knowledgeBaseId: string, documentId: string) {
   );
 }
 
+/** 重新索引单个文档（分块/符号/档案/向量化规则升级后重跑，无需删除重传） */
+export function reprocessDocument(knowledgeBaseId: string, documentId: string) {
+  return request.post<unknown, { reprocessed: boolean; filename: string }>(
+    `/knowledge/${knowledgeBaseId}/documents/${documentId}/reprocess`,
+  );
+}
+
+/** 整库重新索引（遍历全部可解析文档） */
+export function reprocessAll(knowledgeBaseId: string) {
+  return request.post<unknown, { reprocessed: number; skipped: number }>(
+    `/knowledge/${knowledgeBaseId}/documents/reprocess-all`,
+  );
+}
+
 /** 获取文档可编辑文本内容（重新解析原文件） */
 export function getDocumentContent(knowledgeBaseId: string, documentId: string) {
   return request.get<unknown, { id: string; filename: string; fileType: string; content: string }>(

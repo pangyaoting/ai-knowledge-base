@@ -137,4 +137,26 @@ export class DocumentsController {
   ) {
     return this.documentsService.remove(userId, knowledgeBaseId, documentId);
   }
+
+  @Post(':id/documents/:documentId/reprocess')
+  // 整目录批量重索引也可能并发大量请求，豁免限流
+  @SkipThrottle()
+  @ApiOperation({ summary: '重新索引文档（处理逻辑升级后重跑分块/符号/档案/向量化）' })
+  reprocess(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) knowledgeBaseId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ) {
+    return this.documentsService.reprocess(userId, knowledgeBaseId, documentId);
+  }
+
+  @Post(':id/documents/reprocess-all')
+  @SkipThrottle()
+  @ApiOperation({ summary: '整库重新索引（遍历全部可解析文档重跑处理）' })
+  reprocessAll(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) knowledgeBaseId: string,
+  ) {
+    return this.documentsService.reprocessAll(userId, knowledgeBaseId);
+  }
 }
