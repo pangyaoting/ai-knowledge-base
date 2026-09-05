@@ -3,7 +3,12 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { EmbeddingService } from './embedding.service';
-import { cleanText, extractText, type DocType } from './utils/document-parser';
+import {
+  cleanText,
+  extractText,
+  sanitizeControlChars,
+  type DocType,
+} from './utils/document-parser';
 import { splitCode, splitText } from './utils/text-splitter';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
@@ -61,7 +66,11 @@ export class DocumentProcessor {
         }
       }
 
-      const cleaned = isCode ? rawText.replace(/\r\n/g, '\n').trim() : cleanText(rawText);
+      // 代码文件不折叠空白/缩进（否则代码语义被破坏），但仍要删控制字符（\u0000 等）——
+      // 否则含 NUL 的代码/HTML 入库后，检索命中再落库会触发 PG 22P05 崩溃
+      const cleaned = isCode
+        ? sanitizeControlChars(rawText).replace(/\r\n/g, '\n').trim()
+        : cleanText(rawText);
       if (!cleaned) {
         throw new Error('未能从文档中提取到文本（可能是扫描件或不含文字的 PDF）');
       }

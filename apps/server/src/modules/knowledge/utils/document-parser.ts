@@ -95,12 +95,22 @@ export async function extractText(buffer: Buffer, fileType: DocType): Promise<st
   }
 }
 
+/**
+ * 删除文本中的 C0 控制字符（保留 \t \n）。
+ * 为什么必要：PostgreSQL 的 text 类型明文禁止 \u0000（NUL），含 NUL 的字符串落库会报
+ * 22P05 "unsupported Unicode escape sequence"；二进制/损坏文件解出来的文本常夹带这类不可见字符。
+ * 所有要进数据库的文本（知识库入库、对话上传、消息落库）都应先过这一层。
+ */
+export function sanitizeControlChars(raw: string): string {
+  return raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
+}
+
 /** 文本清洗：去多余空行/空格/控制字符，统一换行 */
 export function cleanText(raw: string): string {
-  return raw
-    .replace(/\r\n/g, '\n') // Windows 换行 → Unix 换行
-    .replace(/[ \t]+/g, ' ') // 连续空格/制表符 → 单个空格
-    .replace(/\n{3,}/g, '\n\n') // 多余空行 → 最多一个空行
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '') // 控制字符
-    .trim();
+  return sanitizeControlChars(
+    raw
+      .replace(/\r\n/g, '\n') // Windows 换行 → Unix 换行
+      .replace(/[ \t]+/g, ' ') // 连续空格/制表符 → 单个空格
+      .replace(/\n{3,}/g, '\n\n'), // 多余空行 → 最多一个空行
+  ).trim();
 }

@@ -8,6 +8,7 @@ import {
   cleanText,
   detectFileType,
   extractText,
+  sanitizeControlChars,
   type DocType,
 } from '../knowledge/utils/document-parser';
 import { CreateSessionDto } from './dto/create-session.dto';
@@ -349,11 +350,12 @@ export class ChatService {
     writer('sources', { kb: kbSources, web: webSources });
 
     // ④ 保存用户消息（含图片 data URL 数组；单图兼容字段存第一张）
+    // content 可能来自粘贴/外部文本而夹带 \u0000 → 落库前清洗（PG text 禁止 NUL）
     await this.prisma.chatMessage.create({
       data: {
         sessionId,
         role: 'user',
-        content: question,
+        content: sanitizeControlChars(question),
         imageDataUrl: images[0] ?? null,
         imageDataUrls: images.length ? JSON.stringify(images) : null,
       },
@@ -418,13 +420,17 @@ export class ChatService {
     }
 
     // ⑥ 流式结束：落库助手消息 + 引用来源（知识库 + 网络）+ Token 用量
+    // 兜底清洗：模型输出或检索片段偶发夹带 \u0000 时，防止 PG 22P05 崩溃（源头已清洗，这是最后防线）
+    const sourcesJson = JSON.parse(
+      sanitizeControlChars(JSON.stringify({ kb: kbSources, web: webSources })),
+    );
     await this.prisma.chatMessage.create({
       data: {
         sessionId,
         role: 'assistant',
-        content: answer,
+        content: sanitizeControlChars(answer),
         // JSON.parse(JSON.stringify()) 转成纯 JSON，兼容各版本 Prisma 客户端类型
-        sources: JSON.parse(JSON.stringify({ kb: kbSources, web: webSources })),
+        sources: sourcesJson,
         promptTokens: usage?.prompt_tokens ?? null,
         completionTokens: usage?.completion_tokens ?? null,
       },
