@@ -616,6 +616,25 @@ export class ChatService {
       );
     }
 
+    // A+C 联动：档案命中文件 → 拉该文件真实符号实现（函数体），
+    // 避免大文件里 script 实现区被模板片段挤掉 topK 导致模型脑补
+    if (docIds.length > 0) {
+      const symbolSources = await this.ragService.symbolsForDocs(userId, docIds, 8);
+      if (symbolSources.length > 0) {
+        // 文件内语义检索补齐（符号优先，片段补充，总量 cap 到 8）
+        const fileSources = await this.ragService.retrieve(userId, query, kbScope, 5, docIds);
+        const seen = new Set(symbolSources.map((s) => s.chunkId));
+        for (const s of fileSources) {
+          if (symbolSources.length >= 8) break;
+          if (!seen.has(s.chunkId)) symbolSources.push(s);
+        }
+        this.logger.log(
+          `会话 ${sessionId} A+C 联动：符号注入 ${symbolSources.length} 条（含文件内片段补充）`,
+        );
+        return symbolSources;
+      }
+    }
+
     // 文件内检索（锁定文档范围内）
     const sources = await this.ragService.retrieve(
       userId,

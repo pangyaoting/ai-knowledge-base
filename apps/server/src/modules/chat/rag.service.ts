@@ -290,6 +290,51 @@ export class RagService {
   }
 
   /**
+   * A+C 联动：档案命中文档后，拉取这些文档的真实符号实现（函数/类 body）。
+   * 中文问"设置头像的代码"时，仅靠文件内语义片段可能漏掉 script 实现区（被模板区抢 topK），
+   * 直接把该文件的符号实现注入，让模型基于真实源码回答（想编都编不了）。
+   * 优先取 function/component（实现类），超长 body 截断控制 token。
+   */
+  async symbolsForDocs(userId: string, docIds: string[], limit = 8): Promise<RetrievalSource[]> {
+    if (docIds.length === 0) return [];
+    // 归属校验：文档必须属于该用户（防越权拉取他人文件符号）
+    const owned = await this.prisma.document.findMany({
+      where: { id: { in: docIds }, knowledgeBase: { ownerId: userId } },
+      select: { id: true },
+    });
+    if (owned.length === 0) return [];
+    const ids = owned.map((d) => d.id);
+    const docLiteral = `{${ids.map((id) => `"${id}"`).join(',')}}`;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        document_id: string;
+        filename: string;
+        symbol_name: string;
+        kind: string;
+        body: string;
+        start_line: number;
+      }>
+    >`
+      SELECT s.document_id, s.filename, s.symbol_name, s.kind, s.body, s.start_line
+      FROM code_symbols s
+      WHERE s.document_id = ANY(${docLiteral}::text[])
+        AND s.body <> ''
+      ORDER BY
+        CASE s.kind WHEN 'function' THEN 0 WHEN 'component' THEN 1 WHEN 'class' THEN 2 ELSE 3 END,
+        s.start_line ASC
+      LIMIT ${limit}
+    `;
+    return rows.map((r) => ({
+      chunkId: `${r.document_id}:${r.symbol_name}`,
+      content: r.body.slice(0, 2000), // 防超长函数撑爆上下文
+      chunkIndex: r.start_line - 1,
+      documentId: r.document_id,
+      filename: r.filename,
+      similarity: null,
+    }));
+  }
+
+  /**
    * P0 全文模式：把绑定知识库的全部文本按文档分组取回（不走检索）。
    * 用于"需要看完整文档"的任务（逐行解析、全文总结、代码讲解）——检索只给片段，
    * 模型看不到全文必然答不全；文档总量小于阈值时全文喂模型更完整。
