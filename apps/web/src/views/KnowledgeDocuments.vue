@@ -406,10 +406,8 @@ async function handleDownload(doc: Document) {
 
 const updatingId = ref<string | null>(null);
 
-function onReplaceFileChange(e: Event, docId: string) {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = '';
+/** 行内"更新/替换"：子组件已解析文件并 emit (docId, file) */
+function onReplaceFileChange(docId: string, file: File) {
   if (!file) return;
   // eslint-disable-next-line no-alert
   if (!window.confirm(`用「${file.name}」替换当前文档？旧文档及其向量数据将被删除。`)) return;
