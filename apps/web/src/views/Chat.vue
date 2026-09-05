@@ -663,10 +663,13 @@ async function handleBranch(idx: number) {
 
 // 自动滚动到底部：监听消息条数与流式内容变化；用户手动上滚时暂停，避免被拉回
 let autoScroll = true;
+/** KeepAlive 切走/切回时消息容器的滚动位置（滚动即记录，最可靠；deactivated 时 DOM 可能已被移动读不到） */
+let savedChatScrollTop = 0;
 function onMessageScroll() {
   const el = messageContainer.value;
   if (!el) return;
   autoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  savedChatScrollTop = el.scrollTop; // 持续记录最新位置
 }
 watch([() => messages.value.length, streamContent], async () => {
   if (!autoScroll) return;
@@ -691,17 +694,19 @@ onMounted(async () => {
 
 // KeepAlive 缓存：从「模型配置」页新增/修改模型后返回本页时，刷新模型列表，
 // 否则新绑定的模型要刷新页面才出现在模型下拉里
-onActivated(async () => {
+onActivated(() => {
   loadModelConfigs();
-  // 切回本页：恢复离开时的滚动位置——KeepAlive 缓存切走/切回时
-  // 消息容器 scrollTop 可能被布局压回 0（置顶），需等 DOM 稳定后手动恢复
-  await nextTick();
-  const el = messageContainer.value;
-  if (el && savedChatScrollTop > 0) el.scrollTop = savedChatScrollTop;
+  // 切回本页：恢复离开时的滚动位置——KeepAlive 缓存切走/切回时 DOM 被移除再插入，
+  // scrollTop 被浏览器重置为 0（置顶）。等两帧（布局/图片稳定）后再恢复，避免被打回。
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const el = messageContainer.value;
+      if (el && savedChatScrollTop > 0) el.scrollTop = savedChatScrollTop;
+    });
+  });
 });
 
-// 切走导航前记录消息滚动位置（切回时恢复，避免置顶/丢位置）
-let savedChatScrollTop = 0;
+// 兜底：deactivated 时若能读到滚动位置也记录一次（滚动监听已在 onMessageScroll 持续记录）
 onDeactivated(() => {
   const el = messageContainer.value;
   if (el) savedChatScrollTop = el.scrollTop;
