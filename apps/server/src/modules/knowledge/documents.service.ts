@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { KnowledgeService } from './knowledge.service';
 import { DocumentQueueService } from './document-queue.service';
-import { DocumentProcessor } from './document-processor.service';
+import { DocumentProcessor, INDEX_VERSION } from './document-processor.service';
 import { UpdateDocumentDto } from './dto/update-document.dto';
 import { cleanText, detectFileType, extractText, type DocType } from './utils/document-parser';
 import { splitStructuredMd } from './utils/structured-splitter';
@@ -236,11 +236,49 @@ export class DocumentsService {
   /** 文档列表（带 chunk 数量；前端据此轮询处理状态） */
   async findAll(userId: string, knowledgeBaseId: string) {
     await this.knowledgeService.findOne(userId, knowledgeBaseId);
+    // 索引版本自动失效：处理规则升级后（INDEX_VERSION +1），旧文档在访问知识库时
+    // 自动后台重算（用户无感，无需手动重新索引/删除重传）
+    void this.autoReindexStale(userId, knowledgeBaseId).catch(() => undefined);
     return this.prisma.document.findMany({
       where: { knowledgeBaseId },
       include: { _count: { select: { chunks: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * 自动重算索引版本落后的文档（indexVersion < INDEX_VERSION）：
+   * 查过期且状态为 done 的文档（processing/failed 不重复入队），逐个重新入队后台处理。
+   * 只处理可解析类型（附件等 fileType 不在白名单的不动）。
+   */
+  private async autoReindexStale(userId: string, knowledgeBaseId: string): Promise<void> {
+    const stale = await this.prisma.document.findMany({
+      where: {
+        knowledgeBaseId,
+        status: 'done',
+        indexVersion: { lt: INDEX_VERSION },
+        fileType: { in: ['pdf', 'docx', 'md', 'markdown', 'txt', 'code'] },
+      },
+      select: { id: true, filename: true, filepath: true, fileType: true },
+    });
+    if (stale.length === 0) return;
+    this.logger.log(
+      `检测到 ${stale.length} 个文档索引版本落后（当前 v${INDEX_VERSION}），自动重新索引…`,
+    );
+    for (const doc of stale) {
+      const fileType = detectFileType(doc.filename);
+      if (!fileType) continue; // 附件等不可解析类型不动
+      const absPath = storedPath(doc.filepath);
+      if (!existsSync(absPath)) continue; // 磁盘文件缺失：跳过（保留旧索引）
+      await this.queueService.addDocumentJob({
+        userId,
+        documentId: doc.id,
+        knowledgeBaseId,
+        storedName: doc.filepath.split(/[\\/]/).pop() ?? '',
+        fileType,
+        originalName: doc.filename,
+      });
+    }
   }
 
   /**

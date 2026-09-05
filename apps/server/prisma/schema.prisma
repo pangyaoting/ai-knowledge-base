@@ -63,6 +63,7 @@ model Document {
   status          String   @default("pending") // pending / processing / done / failed
   error           String? // 失败原因
   contentHash     String?  @map("content_hash") // 文件内容 SHA-256（增量向量化：同名同哈希跳过）
+  indexVersion    Int      @default(1) @map("index_version") // 处理规则版本（自动重算依据）
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

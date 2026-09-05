@@ -18,6 +18,14 @@ import { storedPath, UPLOAD_DIR } from '../../common/paths';
 /** 参与符号索引的代码语言（TS Compiler API 可解析；html/css/py 等跳过） */
 const CODE_SYMBOL_EXTS = ['ts', 'tsx', 'js', 'jsx', 'vue', 'mjs', 'cjs'];
 
+/**
+ * 文档处理规则版本：分块/符号/档案/向量化规则变化时 +1——
+ * indexVersion 落后的旧文档在下次访问知识库时自动后台重算（用户无感，无需手动重新索引）。
+ * v1 = 基础字符分块 + 向量化
+ * v2 = 结构化分块(P1) / 父子分块(P2) / 符号索引(C) / 文件档案(A) 全量规则
+ */
+export const INDEX_VERSION = 2;
+
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
 const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
 const CHILD_CHUNK_SIZE = 500; // P2 父子分块：子块（检索片）目标字符数
@@ -161,7 +169,7 @@ export class DocumentProcessor {
 
       await this.prisma.document.update({
         where: { id: documentId },
-        data: { status: 'done' },
+        data: { status: 'done', indexVersion: INDEX_VERSION },
       });
       this.logger.log(`文档处理完成: ${originalName} → ${chunkCount} 个 chunk`);
     } catch (err) {
