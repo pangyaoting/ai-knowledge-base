@@ -100,10 +100,14 @@ export class RagService {
     // 注意：未限定知识库（检索全部）时必须以 owner_id 过滤，否则会搜到其他用户的知识库（数据隔离）
     const vectorRows: RawRow[] = kbLiteral
       ? await this.prisma.$queryRaw<RawRow[]>`
-          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+          SELECT COALESCE(parent_chunk.id, c.id) AS chunk_id,
+                 COALESCE(parent_chunk.content, c.content) AS content,
+                 COALESCE(parent_chunk.chunk_index, c.chunk_index) AS chunk_index,
+                 d.id AS document_id, d.filename,
                  1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
+          LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
           WHERE c.embedding IS NOT NULL
             AND d.knowledge_base_id = ANY(${kbLiteral}::text[])
             AND 1 - (c.embedding <=> ${vectorStr}::vector) >= ${minSim}
@@ -111,10 +115,14 @@ export class RagService {
           LIMIT ${limit}
         `
       : await this.prisma.$queryRaw<RawRow[]>`
-          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+          SELECT COALESCE(parent_chunk.id, c.id) AS chunk_id,
+                 COALESCE(parent_chunk.content, c.content) AS content,
+                 COALESCE(parent_chunk.chunk_index, c.chunk_index) AS chunk_index,
+                 d.id AS document_id, d.filename,
                  1 - (c.embedding <=> ${vectorStr}::vector) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
+          LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
           JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
           WHERE c.embedding IS NOT NULL
             AND kb.owner_id = ${userId}
@@ -126,10 +134,14 @@ export class RagService {
     // 2b. 关键词检索（精确命中）：pg_trgm 三元组相似度，content % question 走 GIN 索引
     const keywordRows: RawRow[] = kbLiteral
       ? await this.prisma.$queryRaw<RawRow[]>`
-          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+          SELECT COALESCE(parent_chunk.id, c.id) AS chunk_id,
+                 COALESCE(parent_chunk.content, c.content) AS content,
+                 COALESCE(parent_chunk.chunk_index, c.chunk_index) AS chunk_index,
+                 d.id AS document_id, d.filename,
                  similarity(c.content, ${question}) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
+          LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
           WHERE c.embedding IS NOT NULL
             AND d.knowledge_base_id = ANY(${kbLiteral}::text[])
             AND c.content % ${question}
@@ -137,10 +149,14 @@ export class RagService {
           LIMIT ${limit}
         `
       : await this.prisma.$queryRaw<RawRow[]>`
-          SELECT c.id AS chunk_id, c.content, c.chunk_index, d.id AS document_id, d.filename,
+          SELECT COALESCE(parent_chunk.id, c.id) AS chunk_id,
+                 COALESCE(parent_chunk.content, c.content) AS content,
+                 COALESCE(parent_chunk.chunk_index, c.chunk_index) AS chunk_index,
+                 d.id AS document_id, d.filename,
                  similarity(c.content, ${question}) AS similarity
           FROM chunks c
           JOIN documents d ON d.id = c.document_id
+          LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
           JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
           WHERE c.embedding IS NOT NULL
             AND kb.owner_id = ${userId}
@@ -215,6 +231,7 @@ export class RagService {
       FROM chunks c
       JOIN documents d ON d.id = c.document_id
       WHERE d.knowledge_base_id = ANY(${kbLiteral}::text[])
+        AND c.parent_id IS NULL
     `;
     const totalChars = Number(agg?.total ?? 0);
     if (totalChars > maxChars) {
@@ -227,6 +244,7 @@ export class RagService {
       FROM chunks c
       JOIN documents d ON d.id = c.document_id
       WHERE d.knowledge_base_id = ANY(${kbLiteral}::text[])
+        AND c.parent_id IS NULL
       ORDER BY d.id, c.chunk_index
     `;
     return aggregateFulltext(rows);

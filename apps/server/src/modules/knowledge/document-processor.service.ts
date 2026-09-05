@@ -15,6 +15,35 @@ import { splitStructuredMd } from './utils/structured-splitter';
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
 const CHUNK_OVERLAP = 100; // 相邻块重叠字符数（已确认的决策）
+const CHILD_CHUNK_SIZE = 500; // P2 父子分块：子块（检索片）目标字符数
+const CHILD_OVERLAP = 100; // 子块重叠字符数
+
+/**
+ * P2 父子分块规划（纯函数，便于单测）：
+ * - 父块 ≤ 子块大小 → 父块自身就是叶子（直接向量化，命中返回自身）
+ * - 父块 > 子块大小 → 切成多个子块（带向量做检索），父块留作"命中后喂模型的全文容器"
+ * @returns embed 需要向量化的行（小父块自身 + 大父块切出的子块）；childRows 待插入的子块
+ */
+export function planParentChildren(
+  parents: Array<{ id: string; content: string }>,
+  childSize = CHILD_CHUNK_SIZE,
+): {
+  embed: Array<{ id: string; content: string }>;
+  childRows: Array<{ content: string; parentId: string }>;
+} {
+  const embed: Array<{ id: string; content: string }> = [];
+  const childRows: Array<{ content: string; parentId: string }> = [];
+  for (const p of parents) {
+    if (p.content.length <= childSize) {
+      embed.push({ id: p.id, content: p.content });
+    } else {
+      for (const piece of splitText(p.content, { chunkSize: childSize, overlap: CHILD_OVERLAP })) {
+        childRows.push({ content: piece, parentId: p.id });
+      }
+    }
+  }
+  return { embed, childRows };
+}
 
 /** 文档处理任务的数据载荷 */
 export interface DocumentJobData {
@@ -137,8 +166,11 @@ export class DocumentProcessor {
 
   /**
    * 把清洗后的文本分块并向量化（上传队列与在线编辑共用）：
-   * 删旧 chunk → 建新 chunk → 批量调 bge-m3 写回 embedding → 返回 chunk 数
-   * 分块策略：externalChunks（结构化分块器等外部已切好）→ prefix（代码分块器）→ 字符分块
+   * 删旧 chunk → 建新 chunk → 批量调 bge-m3 写回 embedding → 返回叶子块数
+   * 分块策略：
+   * - externalChunks（md 结构化父块）→ 父子分块：父块 ≤500 直接向量化；父块更大切成子块检索、
+   *   命中后取父块全文喂模型（P2）
+   * - prefix（代码）→ 代码分块器；其他 → 字符分块（均无父块，块自身即叶子）
    */
   async indexText(
     documentId: string,
@@ -146,12 +178,51 @@ export class DocumentProcessor {
     prefix?: string,
     externalChunks?: string[],
   ): Promise<number> {
-    const chunks =
-      externalChunks ??
-      (prefix
-        ? splitCode(cleaned, prefix, { chunkSize: 900 })
-        : splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP }));
     await this.prisma.chunk.deleteMany({ where: { documentId } });
+
+    // —— P2 父子分块路径（md 结构化父块）——
+    if (externalChunks?.length) {
+      // 1. 父块入库（不带向量：容器角色，检索只命中子块/小父块）
+      await this.prisma.chunk.createMany({
+        data: externalChunks.map((content, index) => ({
+          documentId,
+          content,
+          chunkIndex: index,
+          parentId: null,
+        })),
+      });
+      const parents = await this.prisma.chunk.findMany({
+        where: { documentId, parentId: null },
+        select: { id: true, content: true },
+        orderBy: { chunkIndex: 'asc' },
+      });
+      // 2. 规划：小父块自身做叶子；大父块切成子块
+      const { embed, childRows } = planParentChildren(parents);
+      let childIndex = 0;
+      await this.prisma.chunk.createMany({
+        data: childRows.map((r) => ({
+          documentId,
+          content: r.content,
+          chunkIndex: childIndex++,
+          parentId: r.parentId,
+        })),
+      });
+      // 3. 子块也纳入向量化（从库读回真实 id）
+      if (childRows.length > 0) {
+        const children = await this.prisma.chunk.findMany({
+          where: { documentId, parentId: { not: null } },
+          select: { id: true, content: true },
+        });
+        embed.push(...children);
+      }
+      await this.embedRows(embed);
+      return embed.length;
+    }
+
+    // —— 普通路径：字符切 / 代码切，块自身即叶子（无父块）——
+    const chunks = prefix
+      ? splitCode(cleaned, prefix, { chunkSize: 900 })
+      : splitText(cleaned, { chunkSize: CHUNK_SIZE, overlap: CHUNK_OVERLAP });
     await this.prisma.chunk.createMany({
       data: chunks.map((content, index) => ({
         documentId,
@@ -164,15 +235,21 @@ export class DocumentProcessor {
       select: { id: true, content: true },
       orderBy: { chunkIndex: 'asc' },
     });
-    const vectors = await this.embeddingService.embedTexts(created.map((c) => c.content));
+    await this.embedRows(created);
+    return created.length;
+  }
+
+  /** 批量向量化并写回 embedding（父块不在此列：不参与检索） */
+  private async embedRows(rows: Array<{ id: string; content: string }>): Promise<void> {
+    if (rows.length === 0) return;
+    const vectors = await this.embeddingService.embedTexts(rows.map((r) => r.content));
     await this.prisma.$transaction(async (tx) => {
-      for (let i = 0; i < created.length; i++) {
+      for (let i = 0; i < rows.length; i++) {
         await tx.$executeRaw`
-          UPDATE "chunks" SET "embedding" = ${toPgVector(vectors[i])}::vector WHERE "id" = ${created[i].id}
+          UPDATE "chunks" SET "embedding" = ${toPgVector(vectors[i])}::vector WHERE "id" = ${rows[i].id}
         `;
       }
     });
-    return chunks.length;
   }
 }
 

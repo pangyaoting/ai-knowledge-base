@@ -82,12 +82,14 @@ model Chunk {
   documentId String                    @map("document_id")
   content    String // 文本块原文
   chunkIndex Int                       @map("chunk_index") // 第几块（保证顺序）
-  embedding  Unsupported("vector(1024)")? // 向量（bge-m3 1024 维），Step 5 写入
+  parentId   String?                   @map("parent_id") // P2 父子分块：子块挂父块 id（命中子块取父块喂模型）
+  embedding  Unsupported("vector(1024)")? // 向量（bge-m3 1024 维），Step 5 写入；父块无向量（不参与检索）
   createdAt  DateTime                  @default(now()) @map("created_at")
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([documentId])
+  @@index([parentId])
   @@map("chunks")
 }
 
