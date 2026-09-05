@@ -11,7 +11,8 @@ import {
 } from './utils/document-parser';
 import { splitCode, splitText } from './utils/text-splitter';
 import { splitStructuredMd } from './utils/structured-splitter';
-import { extractSymbols } from './utils/code-indexer';
+import { extractSymbols, type CodeSymbol } from './utils/code-indexer';
+import { buildFileProfile } from './utils/file-profile';
 
 /** 参与符号索引的代码语言（TS Compiler API 可解析；html/css/py 等跳过） */
 const CODE_SYMBOL_EXTS = ['ts', 'tsx', 'js', 'jsx', 'vue', 'mjs', 'cjs'];
@@ -129,12 +130,16 @@ export class DocumentProcessor {
 
       // C 符号级索引：可解析的代码文件（ts/js/vue…）生成符号表，
       // 检索命中符号名时直接返回该符号的实现源码（不靠文本相似度碰运气）
+      let codeSymbols: CodeSymbol[] | undefined;
       if (
         isCode &&
         CODE_SYMBOL_EXTS.some((ext) => originalName.toLowerCase().endsWith(`.${ext}`))
       ) {
-        await this.indexSymbols(documentId, originalName, cleaned);
+        codeSymbols = await this.indexSymbols(documentId, originalName, cleaned);
       }
+
+      // A 文件档案：所有入库文档生成档案（md 章节地图 / 代码符号清单），单独向量化
+      await this.indexProfile(documentId, originalName, fileType, cleaned, codeSymbols);
 
       // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
       const existing = await this.prisma.document.findFirst({
@@ -267,12 +272,16 @@ export class DocumentProcessor {
 
   /**
    * C 符号级索引：解析代码文件符号表入库（AST 提取函数/类/组件等 + 行号范围 + 实现源码）。
-   * 同名文档重传/内容变更时全量替换（先删后建）。
+   * 同名文档重传/内容变更时全量替换（先删后建）。返回符号列表供档案复用。
    */
-  private async indexSymbols(documentId: string, filename: string, code: string): Promise<void> {
+  private async indexSymbols(
+    documentId: string,
+    filename: string,
+    code: string,
+  ): Promise<CodeSymbol[]> {
     await this.prisma.codeSymbol.deleteMany({ where: { documentId } });
     const symbols = extractSymbols(filename, code);
-    if (symbols.length === 0) return;
+    if (symbols.length === 0) return [];
     const lines = code.split('\n');
     await this.prisma.codeSymbol.createMany({
       data: symbols.map((s) => ({
@@ -290,6 +299,41 @@ export class DocumentProcessor {
       })),
     });
     this.logger.log(`符号索引: ${filename} → ${symbols.length} 个符号`);
+    return symbols;
+  }
+
+  /**
+   * A 文件档案：生成档案文本 + 向量化入库（upsert by documentId）。
+   * 档案是增强层：任何失败都不影响文档主流程（静默降级，只记日志）。
+   */
+  private async indexProfile(
+    documentId: string,
+    filename: string,
+    fileType: string,
+    source: string,
+    codeSymbols?: CodeSymbol[],
+  ): Promise<void> {
+    try {
+      const kind: 'md' | 'code' | 'text' =
+        fileType === 'md' ? 'md' : fileType === 'code' ? 'code' : 'text';
+      const profileText = buildFileProfile({
+        filename,
+        fileType: kind,
+        source,
+        symbols: codeSymbols,
+      });
+      await this.prisma.fileProfile.upsert({
+        where: { documentId },
+        create: { documentId, filename, profileText },
+        update: { filename, profileText },
+      });
+      const [vec] = await this.embeddingService.embedTexts([profileText]);
+      await this.prisma.$executeRaw`
+        UPDATE "file_profiles" SET "embedding" = ${toPgVector(vec)}::vector WHERE "document_id" = ${documentId}
+      `;
+    } catch (err) {
+      this.logger.warn(`文件档案生成失败（不影响主流程）: ${filename} → ${(err as Error).message}`);
+    }
   }
 }
 

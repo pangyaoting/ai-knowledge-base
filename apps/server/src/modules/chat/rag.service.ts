@@ -62,6 +62,7 @@ export class RagService {
     question: string,
     kbIds?: string[],
     topK = 5,
+    docIds?: string[], // A 档案锁定：限定只在命中的文档内检索
   ): Promise<RetrievalSource[]> {
     // 归属校验：绑定的知识库必须都属于当前用户（不存在或他人的 → 404）
     let kbLiteral: string | undefined;
@@ -77,6 +78,9 @@ export class RagService {
       // 注意：id 列是 text 类型（Prisma String → TEXT），数组也要转 text[]，转 uuid[] 会报 text = uuid 不匹配
       kbLiteral = `{${owned.map((k) => `"${k.id}"`).join(',')}}`;
     }
+    // 文档范围（A 档案锁定）；null = 不限（参数绑定，防注入）
+    const docLiteral =
+      docIds && docIds.length > 0 ? `{${docIds.map((id) => `"${id}"`).join(',')}}` : null;
 
     // 每路多取一些（RRF 合并后截断到 topK，多路候选重合时不会漏）
     const limit = Math.max(topK * 3, 15);
@@ -110,6 +114,7 @@ export class RagService {
           LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
           WHERE c.embedding IS NOT NULL
             AND d.knowledge_base_id = ANY(${kbLiteral}::text[])
+            AND (${docLiteral}::text[] IS NULL OR d.id = ANY(${docLiteral}::text[]))
             AND 1 - (c.embedding <=> ${vectorStr}::vector) >= ${minSim}
           ORDER BY c.embedding <=> ${vectorStr}::vector
           LIMIT ${limit}
@@ -126,6 +131,7 @@ export class RagService {
           JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
           WHERE c.embedding IS NOT NULL
             AND kb.owner_id = ${userId}
+            AND (${docLiteral}::text[] IS NULL OR d.id = ANY(${docLiteral}::text[]))
             AND 1 - (c.embedding <=> ${vectorStr}::vector) >= ${minSim}
           ORDER BY c.embedding <=> ${vectorStr}::vector
           LIMIT ${limit}
@@ -144,6 +150,7 @@ export class RagService {
           LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
           WHERE c.embedding IS NOT NULL
             AND d.knowledge_base_id = ANY(${kbLiteral}::text[])
+            AND (${docLiteral}::text[] IS NULL OR d.id = ANY(${docLiteral}::text[]))
             AND c.content % ${question}
           ORDER BY similarity(c.content, ${question}) DESC
           LIMIT ${limit}
@@ -160,6 +167,7 @@ export class RagService {
           JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
           WHERE c.embedding IS NOT NULL
             AND kb.owner_id = ${userId}
+            AND (${docLiteral}::text[] IS NULL OR d.id = ANY(${docLiteral}::text[]))
             AND c.content % ${question}
           ORDER BY similarity(c.content, ${question}) DESC
           LIMIT ${limit}
@@ -251,6 +259,34 @@ export class RagService {
       filename: h.filename,
       similarity: null,
     }));
+  }
+
+  /**
+   * A 档案命中：用问题向量检索"文件档案"（文件名 + 章节地图/符号清单），
+   * 锁定最相关的文档——中文泛化问题（"设置头像的代码"）也能先定位到 Settings.vue，
+   * 再交给 retrieve 在锁定的文档内检索（解决全库几万片段抢 topK 的问题）。
+   */
+  async profileLookup(
+    userId: string,
+    question: string,
+    kbIds?: string[],
+    topDocs = 3,
+  ): Promise<Array<{ documentId: string; filename: string }>> {
+    const [vec] = await this.embeddingService.embedTexts([question]);
+    const vecStr = `[${vec.join(',')}]`;
+    const kbLiteral = kbIds?.length ? `{${kbIds.map((id) => `"${id}"`).join(',')}}` : null;
+    const rows = await this.prisma.$queryRaw<Array<{ document_id: string; filename: string }>>`
+      SELECT p.document_id, d.filename
+      FROM file_profiles p
+      JOIN documents d ON d.id = p.document_id
+      JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
+      WHERE p.embedding IS NOT NULL
+        AND kb.owner_id = ${userId}
+        AND (${kbLiteral}::text[] IS NULL OR kb.id = ANY(${kbLiteral}::text[]))
+      ORDER BY p.embedding <=> ${vecStr}::vector
+      LIMIT ${topDocs}
+    `;
+    return rows.map((r) => ({ documentId: r.document_id, filename: r.filename }));
   }
 
   /**

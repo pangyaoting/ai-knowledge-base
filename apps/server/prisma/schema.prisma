@@ -69,9 +69,27 @@ model Document {
   knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
   chunks        Chunk[]
   codeSymbols   CodeSymbol[]
+  profile       FileProfile?
 
   @@index([knowledgeBaseId])
   @@map("documents")
+}
+
+// ==================== 文件档案（A 语义层） ====================
+// 每个文档的"档案"（文件名 + 用途摘要 + 符号清单），单独向量化；
+// 检索先档案命中锁定文件，再文件内检索（中文问题也能定位到具体文件）
+
+model FileProfile {
+  id          String   @id @default(uuid())
+  documentId  String   @unique @map("document_id")
+  filename    String
+  profileText String   @map("profile_text")
+  embedding   Unsupported("vector(1024)")?
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("file_profiles")
 }
 
 // ==================== 代码符号（C 符号级索引） ====================

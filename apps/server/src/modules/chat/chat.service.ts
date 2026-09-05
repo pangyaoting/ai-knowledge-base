@@ -606,8 +606,38 @@ export class ChatService {
       this.logger.log(`会话 ${sessionId} 符号命中 ${symbolHits.length} 条（问题包含符号名）`);
       return symbolHits;
     }
-    const sources = await this.ragService.retrieve(userId, query, kbScope, 5);
-    if (sources.length > 0 || !this.hydeEnabled) {
+
+    // A 档案锁定：中文问题先语义定位文件（最多 3 个），把检索范围从"全库"缩到"命中文件"
+    const locked = await this.ragService.profileLookup(userId, query, kbScope, 3);
+    const docIds = locked.map((d) => d.documentId);
+    if (locked.length > 0) {
+      this.logger.log(
+        `会话 ${sessionId} 档案锁定 ${locked.length} 个文档: ${locked.map((d) => d.filename).join(', ')}`,
+      );
+    }
+
+    // 文件内检索（锁定文档范围内）
+    const sources = await this.ragService.retrieve(
+      userId,
+      query,
+      kbScope,
+      5,
+      docIds.length > 0 ? docIds : undefined,
+    );
+    if (sources.length > 0) {
+      return sources;
+    }
+
+    // 档案锁定但文件内 0 条（如问的是跨文件的一般概念）→ 放宽到全库再检一次
+    if (locked.length > 0) {
+      const wide = await this.ragService.retrieve(userId, query, kbScope, 5);
+      if (wide.length > 0) {
+        return wide;
+      }
+    }
+
+    // P3 HyDE 兜底：仍 0 条 → 假设文档扩写后全库重检
+    if (!this.hydeEnabled) {
       return sources;
     }
     const hydeQuery = await this.hydeExpand(query, target);
