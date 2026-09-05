@@ -11,6 +11,10 @@ import {
 } from './utils/document-parser';
 import { splitCode, splitText } from './utils/text-splitter';
 import { splitStructuredMd } from './utils/structured-splitter';
+import { extractSymbols } from './utils/code-indexer';
+
+/** 参与符号索引的代码语言（TS Compiler API 可解析；html/css/py 等跳过） */
+const CODE_SYMBOL_EXTS = ['ts', 'tsx', 'js', 'jsx', 'vue', 'mjs', 'cjs'];
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads');
 const CHUNK_SIZE = 500; // 每块目标字符数（已确认的决策）
@@ -122,6 +126,15 @@ export class DocumentProcessor {
         isCode ? `文件: ${originalName}` : undefined,
         structuredChunks,
       );
+
+      // C 符号级索引：可解析的代码文件（ts/js/vue…）生成符号表，
+      // 检索命中符号名时直接返回该符号的实现源码（不靠文本相似度碰运气）
+      if (
+        isCode &&
+        CODE_SYMBOL_EXTS.some((ext) => originalName.toLowerCase().endsWith(`.${ext}`))
+      ) {
+        await this.indexSymbols(documentId, originalName, cleaned);
+      }
 
       // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
       const existing = await this.prisma.document.findFirst({
@@ -250,6 +263,33 @@ export class DocumentProcessor {
         `;
       }
     });
+  }
+
+  /**
+   * C 符号级索引：解析代码文件符号表入库（AST 提取函数/类/组件等 + 行号范围 + 实现源码）。
+   * 同名文档重传/内容变更时全量替换（先删后建）。
+   */
+  private async indexSymbols(documentId: string, filename: string, code: string): Promise<void> {
+    await this.prisma.codeSymbol.deleteMany({ where: { documentId } });
+    const symbols = extractSymbols(filename, code);
+    if (symbols.length === 0) return;
+    const lines = code.split('\n');
+    await this.prisma.codeSymbol.createMany({
+      data: symbols.map((s) => ({
+        documentId,
+        filename,
+        symbolName: s.name,
+        kind: s.kind,
+        signature: s.signature,
+        body: lines
+          .slice(s.startLine - 1, s.endLine)
+          .join('\n')
+          .trim(),
+        startLine: s.startLine,
+        endLine: s.endLine,
+      })),
+    });
+    this.logger.log(`符号索引: ${filename} → ${symbols.length} 个符号`);
   }
 }
 

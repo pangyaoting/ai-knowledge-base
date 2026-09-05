@@ -68,9 +68,31 @@ model Document {
 
   knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
   chunks        Chunk[]
+  codeSymbols   CodeSymbol[]
 
   @@index([knowledgeBaseId])
   @@map("documents")
+}
+
+// ==================== 代码符号（C 符号级索引） ====================
+// 代码文件入库时用 TS Compiler API 解析出的符号表：检索命中符号名 → 直接返回 body 实现源码
+
+model CodeSymbol {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  filename   String
+  symbolName String   @map("symbol_name")
+  kind       String // function / const / class / interface / type / enum / component
+  signature  String
+  body       String // 符号实现源码（命中后作为引用返回，无需再读盘）
+  startLine  Int      @map("start_line")
+  endLine    Int      @map("end_line")
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([symbolName])
+  @@map("code_symbols")
 }
 
 // ==================== 文本块（Chunk） ====================

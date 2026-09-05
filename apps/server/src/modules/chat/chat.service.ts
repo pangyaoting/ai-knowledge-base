@@ -588,11 +588,10 @@ export class ChatService {
   }
 
   /**
-   * 检索 + HyDE 兜底（P3）：
-   * 先正常混合检索；若被相关性门控全滤（0 条）→ 用 LLM 生成一段"假设的知识库文档内容"
-   * （HyDE: Hypothetical Document Embeddings）再检索一次——假设文档与真实文档的语义重合度
-   * 远高于口语问题，问法不同（"第一周第一天学什么" vs 文档里"W1 周一"）也能命中。
-   * 成本可控：只在 0 结果时触发一次 LLM 调用；LLM 失败/仍 0 条都静默回退，不阻塞。
+   * 检索（C 符号命中 → 混合检索 → HyDE 兜底）：
+   * 1. 问题点名符号（函数/类/组件名）→ 直接返回该符号实现源码（最精准）
+   * 2. 否则正常混合检索；若被相关性门控全滤（0 条）→ HyDE 假设文档再检一次
+   * 成本可控：符号查询零成本；HyDE 只在 0 结果时触发一次 LLM 调用，失败静默回退。
    */
   private async retrieveWithHyde(
     userId: string,
@@ -601,6 +600,12 @@ export class ChatService {
     target: ChatTarget,
     sessionId: string,
   ): Promise<RetrievalSource[]> {
+    // C 符号命中优先：问题点名符号 → 返回实现源码，跳过语义检索
+    const symbolHits = await this.ragService.symbolLookup(userId, query, kbScope);
+    if (symbolHits.length > 0) {
+      this.logger.log(`会话 ${sessionId} 符号命中 ${symbolHits.length} 条（问题包含符号名）`);
+      return symbolHits;
+    }
     const sources = await this.ragService.retrieve(userId, query, kbScope, 5);
     if (sources.length > 0 || !this.hydeEnabled) {
       return sources;

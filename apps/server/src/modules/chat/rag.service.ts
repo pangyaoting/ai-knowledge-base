@@ -207,6 +207,53 @@ export class RagService {
   }
 
   /**
+   * C 符号命中：问题里点名了已知符号（函数/类/组件/变量名）→ 直接返回该符号实现源码。
+   * 比语义检索精准：不看"像不像"，只看"问题里是否出现库里的符号名"（标识符精确匹配）。
+   * 命中结果 similarity 置 null（非语义分数），调用方作为高置信来源优先采用。
+   * 中文/无标识符问题返回空（fallback 语义检索）。
+   */
+  async symbolLookup(
+    userId: string,
+    question: string,
+    kbIds?: string[],
+  ): Promise<RetrievalSource[]> {
+    // 提取问题里的标识符（camelCase/snake 等符号名），排除 3 字符以下减少噪音
+    const tokens = question.match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
+    if (tokens.length === 0) return [];
+    const hits = await this.prisma.codeSymbol.findMany({
+      where: {
+        symbolName: { in: tokens },
+        document: {
+          knowledgeBase: {
+            ownerId: userId,
+            ...(kbIds && kbIds.length ? { id: { in: kbIds } } : {}),
+          },
+        },
+      },
+      select: {
+        documentId: true,
+        filename: true,
+        symbolName: true,
+        kind: true,
+        body: true,
+        signature: true,
+        startLine: true,
+      },
+      take: 10,
+    });
+    if (hits.length === 0) return [];
+    return hits.map((h) => ({
+      chunkId: `${h.documentId}:${h.symbolName}`,
+      // 实现源码优先；解析不到 body（如 interface）退签名
+      content: h.body || h.signature,
+      chunkIndex: h.startLine - 1,
+      documentId: h.documentId,
+      filename: h.filename,
+      similarity: null,
+    }));
+  }
+
+  /**
    * P0 全文模式：把绑定知识库的全部文本按文档分组取回（不走检索）。
    * 用于"需要看完整文档"的任务（逐行解析、全文总结、代码讲解）——检索只给片段，
    * 模型看不到全文必然答不全；文档总量小于阈值时全文喂模型更完整。
