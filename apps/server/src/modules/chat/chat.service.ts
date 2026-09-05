@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
@@ -43,7 +44,14 @@ export class ChatService {
     private ragService: RagService,
     private webSearchService: WebSearchService,
     private modelConfigService: ModelConfigService,
+    private configService: ConfigService,
   ) {}
+
+  /** 全文模式字符上限（.env 可配 FULLTEXT_MAX_CHARS，默认 40000 ≈ 安全落在模型上下文内） */
+  private get fulltextMaxChars(): number {
+    const v = Number(this.configService.get<string>('FULLTEXT_MAX_CHARS', '40000'));
+    return Number.isFinite(v) && v > 0 ? v : 40000;
+  }
 
   // ==================== 会话管理 ====================
 
@@ -336,18 +344,40 @@ export class ChatService {
         ? await this.rewriteQuery(question, history, target)
         : question;
 
-    // ③ 检索（并行）：知识库向量+关键词混合检索（纯对话模式跳过）+ 可选联网搜索（用改写后的查询）
+    // ③ 全文/检索自动分流（P0）：绑定了明确知识库且文档总量 ≤ 阈值 → 全文模式
+    //    （看完整文档类任务：逐行解析/全文总结，检索只给片段必然答不全）；
+    //    文档海量或未绑定知识库 → 检索模式（向量+关键词混合）。联网搜索并行。
     const kbScope = kbIds.length ? kbIds : undefined;
     // 只发图片（无文字）时不做知识库/联网检索（空查询没有意义，还会触发空嵌入报错）
     const canRetrieve = question.trim().length > 0;
-    const [retrieved, webSources] = await Promise.all([
-      useKnowledgeBase && canRetrieve
-        ? this.ragService.retrieve(userId, searchQuery, kbScope, 5)
-        : Promise.resolve([] as RetrievalSource[]),
-      useWebSearch && canRetrieve ? this.webSearchService.search(searchQuery) : Promise.resolve([]),
-    ]);
-    const kbSources: RetrievalSource[] = retrieved;
-    writer('sources', { kb: kbSources, web: webSources });
+    let kbSources: RetrievalSource[] = [];
+    let retrievalMode: 'fulltext' | 'retrieval' | 'none' = 'none';
+    if (useKnowledgeBase && canRetrieve) {
+      if (kbIds.length) {
+        // 绑定明确知识库：先试全文（总量小 = 全文喂模型比检索片段完整）
+        const ft = await this.ragService.loadFulltext(userId, kbIds, this.fulltextMaxChars);
+        if (ft.sources.length > 0) {
+          kbSources = ft.sources;
+          retrievalMode = 'fulltext';
+          this.logger.log(
+            `会话 ${sessionId} 全文模式：${ft.totalChars} 字符 ≤ 阈值 ${this.fulltextMaxChars}，注入 ${ft.sources.length} 个文档`,
+          );
+        } else {
+          kbSources = await this.ragService.retrieve(userId, searchQuery, kbScope, 5);
+          retrievalMode = 'retrieval';
+          this.logger.log(
+            `会话 ${sessionId} 检索模式：KB 总字符 ${ft.totalChars} > 阈值 ${this.fulltextMaxChars}，走混合检索`,
+          );
+        }
+      } else {
+        // 未绑定知识库 = 检索该用户全部知识库（范围不可控，不做全文）
+        kbSources = await this.ragService.retrieve(userId, searchQuery, kbScope, 5);
+        retrievalMode = 'retrieval';
+      }
+    }
+    const webSources =
+      useWebSearch && canRetrieve ? await this.webSearchService.search(searchQuery) : [];
+    writer('sources', { kb: kbSources, web: webSources, mode: retrievalMode });
 
     // ④ 保存用户消息（含图片 data URL 数组；单图兼容字段存第一张）
     // content 可能来自粘贴/外部文本而夹带 \u0000 → 落库前清洗（PG text 禁止 NUL）
@@ -493,12 +523,17 @@ export class ChatService {
 
     let number = 0;
     // 有资料才写【参考资料】；完全没检索到就不写这一节（避免"假装有资料"的观感）
+    // similarity === null 的块是全文模式注入的完整文档（显示"全文"）；检索命中的显示"第 N 段"
     const kbText =
       useKnowledgeBase && kbSources.length
         ? kbSources
             .map((s) => {
               number += 1;
-              return `[${number}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`;
+              const label =
+                s.similarity === null
+                  ? `[${number}]（文档《${s.filename}》全文）`
+                  : `[${number}]（来自文档《${s.filename}》第 ${s.chunkIndex + 1} 段）`;
+              return `${label}\n${s.content}`;
             })
             .join('\n\n')
         : '';

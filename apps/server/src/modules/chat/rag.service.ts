@@ -189,4 +189,82 @@ export class RagService {
     }
     return gated;
   }
+
+  /**
+   * P0 全文模式：把绑定知识库的全部文本按文档分组取回（不走检索）。
+   * 用于"需要看完整文档"的任务（逐行解析、全文总结、代码讲解）——检索只给片段，
+   * 模型看不到全文必然答不全；文档总量小于阈值时全文喂模型更完整。
+   * 调用方依据 totalChars 判断：超过阈值 → 放弃全文走检索模式。
+   */
+  async loadFulltext(
+    userId: string,
+    kbIds: string[],
+    maxChars: number,
+  ): Promise<{ sources: RetrievalSource[]; totalChars: number }> {
+    const owned = await this.prisma.knowledgeBase.findMany({
+      where: { id: { in: kbIds }, ownerId: userId },
+      select: { id: true },
+    });
+    if (owned.length !== new Set(kbIds).size) {
+      throw new NotFoundException('知识库不存在');
+    }
+    const kbLiteral = `{${owned.map((k) => `"${k.id}"`).join(',')}}`;
+    // 先算总量：超过阈值直接返回空（调用方走检索），避免白拉全量文本
+    const [agg] = await this.prisma.$queryRaw<Array<{ total: number }>>`
+      SELECT COALESCE(SUM(LENGTH(c.content)), 0)::int AS total
+      FROM chunks c
+      JOIN documents d ON d.id = c.document_id
+      WHERE d.knowledge_base_id = ANY(${kbLiteral}::text[])
+    `;
+    const totalChars = Number(agg?.total ?? 0);
+    if (totalChars > maxChars) {
+      return { sources: [], totalChars };
+    }
+    const rows = await this.prisma.$queryRaw<
+      Array<{ document_id: string; filename: string; content: string; chunk_index: number }>
+    >`
+      SELECT d.id AS document_id, d.filename, c.content, c.chunk_index
+      FROM chunks c
+      JOIN documents d ON d.id = c.document_id
+      WHERE d.knowledge_base_id = ANY(${kbLiteral}::text[])
+      ORDER BY d.id, c.chunk_index
+    `;
+    return aggregateFulltext(rows);
+  }
+}
+
+/**
+ * 把 (文档, 片段) 行按文档聚合成"每文档一条全文"（纯函数，便于单测）。
+ * chunkIndex 置 -1、similarity 置 null 标记"全文块"（buildPrompt 据此显示"全文"而非"第 N 段"）。
+ */
+export function aggregateFulltext(
+  rows: Array<{ document_id: string; filename: string; content: string; chunk_index: number }>,
+): { sources: RetrievalSource[]; totalChars: number } {
+  const byDoc = new Map<
+    string,
+    { filename: string; parts: Array<{ content: string; index: number }> }
+  >();
+  for (const r of rows) {
+    const doc = byDoc.get(r.document_id) ?? { filename: r.filename, parts: [] };
+    doc.parts.push({ content: r.content, index: r.chunk_index });
+    byDoc.set(r.document_id, doc);
+  }
+  let totalChars = 0;
+  const sources: RetrievalSource[] = [];
+  for (const [docId, doc] of byDoc) {
+    const content = doc.parts
+      .sort((a, b) => a.index - b.index)
+      .map((p) => p.content)
+      .join('\n');
+    totalChars += content.length;
+    sources.push({
+      chunkId: docId,
+      content,
+      chunkIndex: -1,
+      documentId: docId,
+      filename: doc.filename,
+      similarity: null,
+    });
+  }
+  return { sources, totalChars };
 }
