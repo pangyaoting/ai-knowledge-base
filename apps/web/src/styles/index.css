@@ -234,61 +234,62 @@
 }
 
 /* ==================== 代码高亮 token 配色：One Dark Pro ====================
-   固定深色代码块（ChatGPT 式）。语言识别正确时，各类 token 各归其位：
-   关键词紫 / 字符串绿 / 数字橙 / 函数蓝 / 类黄 / 注释灰蓝 / 变量红 等 */
+   固定深色代码块（ChatGPT 式）。色板对齐 One Dark Pro 自定义配置：
+   comments #5C6370 / strings #98C379 / numbers #D19A66 / keywords #C678DD
+   functions #61AFEF / variables #E06C75 / types #56B6C2 / text #abb2bf */
 .markdown-body .hljs {
   color: #abb2bf;
   background: transparent;
 }
 .markdown-body .hljs-comment,
-.markdown-body .hljs-quote {
+.markdown-body .hljs-quote,
+.markdown-body .hljs-code,
+.markdown-body .hljs-formula {
   color: #5c6370;
   font-style: italic;
 }
-.markdown-body .hljs-doctag,
 .markdown-body .hljs-keyword,
-.markdown-body .hljs-formula {
+.markdown-body .hljs-doctag {
   color: #c678dd;
 }
+.markdown-body .hljs-string,
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-addition,
+.markdown-body .hljs-meta .hljs-string {
+  color: #98c379;
+}
+.markdown-body .hljs-number,
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-selector-attr {
+  color: #d19a66;
+}
+.markdown-body .hljs-title,
+.markdown-body .hljs-title.function_,
 .markdown-body .hljs-section,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet,
+.markdown-body .hljs-link {
+  color: #61afef;
+}
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable,
 .markdown-body .hljs-name,
 .markdown-body .hljs-selector-tag,
 .markdown-body .hljs-deletion,
 .markdown-body .hljs-subst {
   color: #e06c75;
 }
-.markdown-body .hljs-literal {
-  color: #56b6c2;
-}
-.markdown-body .hljs-string,
-.markdown-body .hljs-regexp,
-.markdown-body .hljs-addition,
-.markdown-body .hljs-attribute,
-.markdown-body .hljs-meta .hljs-string {
-  color: #98c379;
-}
-.markdown-body .hljs-attr,
-.markdown-body .hljs-variable,
-.markdown-body .hljs-template-variable,
 .markdown-body .hljs-type,
-.markdown-body .hljs-selector-class,
-.markdown-body .hljs-selector-attr,
-.markdown-body .hljs-selector-pseudo,
-.markdown-body .hljs-number {
-  color: #d19a66;
-}
-.markdown-body .hljs-symbol,
-.markdown-body .hljs-bullet,
-.markdown-body .hljs-link,
-.markdown-body .hljs-meta,
-.markdown-body .hljs-selector-id,
-.markdown-body .hljs-title {
-  color: #61afef;
-}
 .markdown-body .hljs-built_in,
 .markdown-body .hljs-title.class_,
-.markdown-body .hljs-class .hljs-title {
-  color: #e5c07b;
+.markdown-body .hljs-class .hljs-title,
+.markdown-body .hljs-selector-class,
+.markdown-body .hljs-selector-id,
+.markdown-body .hljs-selector-pseudo,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-meta {
+  color: #56b6c2;
 }
 .markdown-body .hljs-emphasis {
   font-style: italic;

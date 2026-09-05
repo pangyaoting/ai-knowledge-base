@@ -56,6 +56,72 @@ export function fileColorOf(name: string): string {
   return EXT_COLORS[fileExtOf(name)] ?? '#8a94a6';
 }
 
+/**
+ * Material Icon Theme 风格徽标：品牌色实底 + 缩写/符号（TS/VUE/JSON→{}…）。
+ * 识别不到的扩展名返回 null（调用方回退 lucide 图标）。
+ */
+const EXT_BADGES: Record<string, string> = {
+  ts: 'TS',
+  tsx: 'TS',
+  js: 'JS',
+  jsx: 'JS',
+  vue: 'VUE',
+  html: 'H5',
+  htm: 'H5',
+  css: 'CSS',
+  scss: 'SCSS',
+  less: 'LESS',
+  json: '{}',
+  md: 'MD',
+  markdown: 'MD',
+  py: 'PY',
+  java: 'JAVA',
+  go: 'GO',
+  rs: 'RS',
+  c: 'C',
+  cpp: 'C++',
+  h: 'H',
+  hpp: 'H++',
+  sh: '>_',
+  bash: '>_',
+  yml: 'YML',
+  yaml: 'YML',
+  toml: 'TOML',
+  sql: 'SQL',
+  pdf: 'PDF',
+  txt: 'TXT',
+  zip: 'ZIP',
+  rar: 'RAR',
+  gz: 'GZ',
+};
+
+export interface FileBadge {
+  text: string;
+  color: string;
+  /** 底是浅色（如 JS 黄）时用深色字，否则白字 */
+  darkText: boolean;
+}
+
+export function fileBadgeOf(name: string): FileBadge | null {
+  const ext = fileExtOf(name);
+  const text = EXT_BADGES[ext];
+  if (!text) return null;
+  const color = EXT_COLORS[ext] ?? '#8a94a6';
+  return { text, color, darkText: isLightHex(color) };
+}
+
+/** hex 颜色亮度判断（>0.7 视为浅色，配深色文字） */
+function isLightHex(hex: string): boolean {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return false;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  // 相对亮度（sRGB 近似）
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62;
+}
+
 /** 按扩展名返回图标类别（代码/图片/压缩包/文档） */
 export function fileIconOf(name: string) {
   const t = fileExtOf(name);

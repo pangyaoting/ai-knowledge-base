@@ -10,7 +10,7 @@ import {
   ChevronRight,
   Folder,
 } from 'lucide-vue-next';
-import { fileIconOf, fileColorOf, fileExtOf } from '@/utils/file-icons';
+import { fileIconOf, fileBadgeOf } from '@/utils/file-icons';
 import type { DocTreeNode } from '@/utils/doc-tree';
 
 const props = defineProps<{
@@ -144,20 +144,21 @@ function onReplaceChange(e: Event, docId: string) {
             :checked="props.selectedIds.has(node.doc!.id)"
             @change="emit('toggle-select', node.doc!.id)"
           />
-          <component
-            :is="fileIconOf(node.doc!.filename)"
-            class="h-4 w-4 shrink-0"
-            :style="{ color: fileColorOf(node.doc!.filename) }"
-          />
+          <!-- Material 风格：品牌色实底字母徽标（TS/VUE/JSON→{}）；识别不到回退彩色 lucide 图标 -->
           <span
-            class="shrink-0 rounded px-1 text-[10px] font-semibold uppercase leading-4"
+            v-if="fileBadgeOf(node.doc!.filename)"
+            class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] text-[7px] font-bold leading-none"
             :style="{
-              color: fileColorOf(node.doc!.filename),
-              backgroundColor: fileColorOf(node.doc!.filename) + '1a',
+              background: fileBadgeOf(node.doc!.filename)!.color,
+              color: fileBadgeOf(node.doc!.filename)!.darkText ? '#1e1e1e' : '#ffffff',
             }"
+            >{{ fileBadgeOf(node.doc!.filename)!.text }}</span
           >
-            {{ fileExtOf(node.doc!.filename) }}
-          </span>
+          <component
+            v-else
+            :is="fileIconOf(node.doc!.filename)"
+            class="h-4 w-4 shrink-0 text-muted-foreground"
+          />
           <span class="truncate">{{ node.name }}</span>
         </div>
       </td>

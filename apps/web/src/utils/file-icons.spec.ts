@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fileExtOf, fileColorOf, fileIconOf } from './file-icons';
+import { fileExtOf, fileColorOf, fileIconOf, fileBadgeOf } from './file-icons';
 import { FileText, FileCode, FileImage, FileArchive, File as FileIcon } from 'lucide-vue-next';
 
 describe('fileExtOf 扩展名提取', () => {
@@ -38,5 +38,28 @@ describe('fileIconOf 图标类别', () => {
   });
   it('未知 → 通用 FileIcon', () => {
     expect(fileIconOf('a.bin')).toBe(FileIcon);
+  });
+});
+
+describe('fileBadgeOf Material 风格徽标', () => {
+  it('知名扩展名返回品牌缩写 + 品牌色', () => {
+    const ts = fileBadgeOf('a.ts')!;
+    expect(ts.text).toBe('TS');
+    expect(ts.color).toBe('#3178c6');
+    expect(ts.darkText).toBe(false); // 蓝底白字
+  });
+
+  it('浅色底（JS 黄）自动用深色文字', () => {
+    const js = fileBadgeOf('a.js')!;
+    expect(js.text).toBe('JS');
+    expect(js.darkText).toBe(true);
+  });
+
+  it('JSON 用花括号符号', () => {
+    expect(fileBadgeOf('a.json')!.text).toBe('{}');
+  });
+
+  it('未知扩展名返回 null（回退图标）', () => {
+    expect(fileBadgeOf('a.weird')).toBeNull();
   });
 });
