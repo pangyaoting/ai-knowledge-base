@@ -92,7 +92,10 @@ const md = new MarkdownIt({
     // 1. 有语言标注且已注册 → 按语言高亮（最准确）
     if (lang && hljs.getLanguage(lang)) {
       try {
-        return `<pre class="hljs"><code>${hljs.highlight(code, { language: lang }).value}</code></pre>`;
+        const langCls = lang.replace(/[^\w-]/g, '');
+        return `<pre class="hljs"><code class="language-${langCls}">${
+          hljs.highlight(code, { language: lang }).value
+        }</code></pre>`;
       } catch {
         /* fallthrough 到自动检测 */
       }
@@ -100,8 +103,10 @@ const md = new MarkdownIt({
     // 2. 未标注语言/未注册 → 自动检测（解决 AI 输出 ``` 不带语言时整块无色的痛点）
     if (code.trim()) {
       try {
-        const detected = hljs.highlightAuto(code, AUTO_SUBSET).value;
-        return `<pre class="hljs"><code>${detected}</code></pre>`;
+        const detected = hljs.highlightAuto(code, AUTO_SUBSET);
+        const langCls = (detected.language ?? '').replace(/[^\w-]/g, '');
+        const cls = langCls ? ` class="language-${langCls}"` : '';
+        return `<pre class="hljs"><code${cls}>${detected.value}</code></pre>`;
       } catch {
         /* fallthrough 到纯文本 */
       }

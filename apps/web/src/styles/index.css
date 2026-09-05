@@ -212,7 +212,12 @@
   padding: 0.9em 1em;
   font-size: 0.95em;
   line-height: 1.6;
-  /* One Dark Pro 底色：代码块恒定深色（ChatGPT 式，亮/暗 UI 下颜色都丰富可区分） */
+  /* 浅色模式：Light Modern 浅底 */
+  background: #f6f8fa;
+  color: #24292f;
+}
+/* 暗色模式：One Dark Pro 深底 */
+.dark .markdown-body .code-block pre {
   background: #282c34;
   color: #abb2bf;
 }
@@ -233,63 +238,77 @@
   border-color: var(--foreground);
 }
 
-/* ==================== 代码高亮 token 配色：One Dark Pro ====================
-   固定深色代码块（ChatGPT 式）。色板对齐 One Dark Pro 自定义配置：
-   comments #5C6370 / strings #98C379 / numbers #D19A66 / keywords #C678DD
-   functions #61AFEF / variables #E06C75 / types #56B6C2 / text #abb2bf */
+/* ==================== 代码高亮 token 配色 ====================
+   浅色模式 = VSCode Light Modern 色板；暗色模式 = One Dark Pro 色板。
+   颜色全部来自用户提供的 VSCode tokenColorCustomizations / textMateRules */
 .markdown-body .hljs {
-  color: #abb2bf;
   background: transparent;
+  color: #24292f;
 }
+/* —— 浅色：Light Modern —— */
 .markdown-body .hljs-comment,
-.markdown-body .hljs-quote,
-.markdown-body .hljs-code,
-.markdown-body .hljs-formula {
-  color: #5c6370;
-  font-style: italic;
+.markdown-body .hljs-quote {
+  color: #6e7781;
 }
 .markdown-body .hljs-keyword,
 .markdown-body .hljs-doctag {
-  color: #c678dd;
+  color: #0000ff; /* let const function if return */
 }
 .markdown-body .hljs-string,
 .markdown-body .hljs-regexp,
-.markdown-body .hljs-addition,
-.markdown-body .hljs-meta .hljs-string {
-  color: #98c379;
+.markdown-body .hljs-addition {
+  color: #a31515; /* 字符串 */
 }
 .markdown-body .hljs-number,
-.markdown-body .hljs-attr,
-.markdown-body .hljs-attribute,
-.markdown-body .hljs-selector-attr {
-  color: #d19a66;
+.markdown-body .hljs-literal {
+  color: #09885a; /* 数字 */
 }
 .markdown-body .hljs-title,
 .markdown-body .hljs-title.function_,
-.markdown-body .hljs-section,
-.markdown-body .hljs-symbol,
-.markdown-body .hljs-bullet,
-.markdown-body .hljs-link {
-  color: #61afef;
+.markdown-body .hljs-section {
+  color: #0066cc; /* 自定义函数名 */
 }
-.markdown-body .hljs-variable,
-.markdown-body .hljs-template-variable,
-.markdown-body .hljs-name,
-.markdown-body .hljs-selector-tag,
-.markdown-body .hljs-deletion,
-.markdown-body .hljs-subst {
-  color: #e06c75;
-}
-.markdown-body .hljs-type,
 .markdown-body .hljs-built_in,
 .markdown-body .hljs-title.class_,
 .markdown-body .hljs-class .hljs-title,
+.markdown-body .hljs-type,
+.markdown-body .hljs-meta {
+  color: #267f99; /* JS 原生 API / 类 / 类型 */
+}
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable {
+  color: #b34444; /* 用户自定义变量 */
+}
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-selector-attr {
+  color: #795da3; /* 对象属性 .xxx（js 中属性为紫色） */
+}
+/* CSS 属性 background/padding → 青（按语言细分：css/scss 代码块的属性名） */
+.markdown-body .language-css .hljs-attr,
+.markdown-body .language-css .hljs-selector-attr,
+.markdown-body .language-scss .hljs-attr,
+.markdown-body .language-less .hljs-attr {
+  color: #0086b3;
+}
+.markdown-body .hljs-name,
+.markdown-body .hljs-selector-tag,
 .markdown-body .hljs-selector-class,
 .markdown-body .hljs-selector-id,
-.markdown-body .hljs-selector-pseudo,
-.markdown-body .hljs-literal,
-.markdown-body .hljs-meta {
-  color: #56b6c2;
+.markdown-body .hljs-selector-pseudo {
+  color: #aa0d91; /* HTML 标签名 / CSS 选择器 */
+}
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet,
+.markdown-body .hljs-link,
+.markdown-body .hljs-code,
+.markdown-body .hljs-formula,
+.markdown-body .hljs-subst {
+  color: #24292f;
+}
+.markdown-body .hljs-deletion {
+  color: #b31d28;
+  background-color: #ffeef0;
 }
 .markdown-body .hljs-emphasis {
   font-style: italic;
@@ -298,5 +317,70 @@
   font-weight: 600;
 }
 .markdown-body .hljs-link {
+  text-decoration: underline;
+}
+
+/* —— 暗色：One Dark Pro（对齐 tokenColorCustomizations） —— */
+.dark .markdown-body .hljs {
+  background: transparent;
+  color: #abb2bf;
+}
+.dark .markdown-body .hljs-comment,
+.dark .markdown-body .hljs-quote,
+.dark .markdown-body .hljs-code,
+.dark .markdown-body .hljs-formula {
+  color: #5c6370;
+  font-style: italic;
+}
+.dark .markdown-body .hljs-keyword,
+.dark .markdown-body .hljs-doctag {
+  color: #c678dd;
+}
+.dark .markdown-body .hljs-string,
+.dark .markdown-body .hljs-regexp,
+.dark .markdown-body .hljs-addition,
+.dark .markdown-body .hljs-meta .hljs-string {
+  color: #98c379;
+}
+.dark .markdown-body .hljs-number,
+.dark .markdown-body .hljs-attr,
+.dark .markdown-body .hljs-attribute,
+.dark .markdown-body .hljs-selector-attr {
+  color: #d19a66;
+}
+.dark .markdown-body .hljs-title,
+.dark .markdown-body .hljs-title.function_,
+.dark .markdown-body .hljs-section,
+.dark .markdown-body .hljs-symbol,
+.dark .markdown-body .hljs-bullet,
+.dark .markdown-body .hljs-link {
+  color: #61afef;
+}
+.dark .markdown-body .hljs-variable,
+.dark .markdown-body .hljs-template-variable,
+.dark .markdown-body .hljs-name,
+.dark .markdown-body .hljs-selector-tag,
+.dark .markdown-body .hljs-deletion,
+.dark .markdown-body .hljs-subst {
+  color: #e06c75;
+}
+.dark .markdown-body .hljs-type,
+.dark .markdown-body .hljs-built_in,
+.dark .markdown-body .hljs-title.class_,
+.dark .markdown-body .hljs-class .hljs-title,
+.dark .markdown-body .hljs-selector-class,
+.dark .markdown-body .hljs-selector-id,
+.dark .markdown-body .hljs-selector-pseudo,
+.dark .markdown-body .hljs-literal,
+.dark .markdown-body .hljs-meta {
+  color: #56b6c2;
+}
+.dark .markdown-body .hljs-emphasis {
+  font-style: italic;
+}
+.dark .markdown-body .hljs-strong {
+  font-weight: 600;
+}
+.dark .markdown-body .hljs-link {
   text-decoration: underline;
 }
