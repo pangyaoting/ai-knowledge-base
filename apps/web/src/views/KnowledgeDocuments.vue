@@ -134,15 +134,25 @@ const ringLabel = computed(() => {
 });
 
 function onFileChange(e: Event) {
-  const input = e.target as HTMLInputElement;
-  addPendingFiles(Array.from(input.files ?? []));
-  input.value = '';
+  const input = e.target as HTMLInputElement | null;
+  const files = input?.files ? Array.from(input.files) : [];
+  if (files.length) {
+    addPendingFiles(files);
+  } else if (input) {
+    console.warn('未读取到所选文件（事件目标异常），请重试或强刷页面');
+  }
+  if (input) input.value = '';
 }
 
 function onDirChange(e: Event) {
-  const input = e.target as HTMLInputElement;
-  addPendingFiles(Array.from(input.files ?? []));
-  input.value = '';
+  const input = e.target as HTMLInputElement | null;
+  const files = input?.files ? Array.from(input.files) : [];
+  if (files.length) {
+    addPendingFiles(files);
+  } else if (input) {
+    console.warn('未读取到所选文件（事件目标异常），请重试或强刷页面');
+  }
+  if (input) input.value = '';
 }
 
 /** 过滤噪音/敏感/超限后立即上传（不展示待传列表） */
