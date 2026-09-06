@@ -668,23 +668,43 @@ export class ChatService {
 
     // A 档案锁定：中文问题先语义定位文件，把检索范围从"全库"缩到"命中文件"。
     // topDocs 取 6 而非 3：问"黑洞特效"时 docs/24、35（标题含黑洞）必然排前二，
-    // 若只锁 3 个，同主题代码文件（HomeCosmos.vue，档案含中文注释）可能被挤出锁定集，
-    // 导致检索只在笔记里找、永远拿不到真实源码。
+    // 若只锁 3 个，同主题代码文件（HomeCosmos.vue，档案含中文注释）可能被挤出锁定集。
+    // 双路召回：
+    //  1) 语义路：档案向量检索 top6（可能被教程文档占满——docs/03/36 语义超匹配"怎么实现"）；
+    //  2) 关键词路：问题含业务词（登录/上传/报告…）时按模块路径确定性补召真实代码文件
+    //     （auth.service.ts 这类无中文头注释的代码文件，语义路匹配不上"登录"，必须靠路径兜底）。
+    // 合并去重（按 documentId），code 文件优先排前，教程文档靠后——避免"问实现给教程"。
     const locked = await this.ragService.profileLookup(userId, query, kbScope, 6);
-    const docIds = locked.map((d) => d.documentId);
-    if (locked.length > 0) {
+    const keywordDocs = await this.ragService.profileLookupByKeyword(userId, query, kbScope, 4);
+    const isCode = (fn: string) => /\.(ts|js|vue|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql)$/i.test(fn);
+    const seen = new Set<string>();
+    const finalLocked: Array<{ documentId: string; filename: string }> = [];
+    const push = (d: { documentId: string; filename: string }) => {
+      if (!seen.has(d.documentId)) {
+        seen.add(d.documentId);
+        finalLocked.push(d);
+      }
+    };
+    // 顺序：语义路 code → 关键词路 code → 语义路 md（教程等）
+    for (const d of locked) if (isCode(d.filename)) push(d);
+    for (const d of keywordDocs) if (isCode(d.filename)) push(d);
+    for (const d of locked) if (!isCode(d.filename)) push(d);
+    for (const d of keywordDocs) if (!isCode(d.filename)) push(d);
+    const finalLockedTrim = finalLocked.slice(0, 8);
+    const finalDocIds = finalLockedTrim.map((d) => d.documentId);
+    if (finalLockedTrim.length > 0) {
       this.logger.log(
-        `会话 ${sessionId} 档案锁定 ${locked.length} 个文档: ${locked.map((d) => d.filename).join(', ')}`,
+        `会话 ${sessionId} 档案锁定 ${finalLockedTrim.length} 个文档: ${finalLockedTrim.map((d) => d.filename).join(', ')}`,
       );
     }
 
     // A+C 联动：档案命中文件 → 拉该文件真实符号实现（函数体），
     // 避免大文件里 script 实现区被模板片段挤掉 topK 导致模型脑补
-    if (docIds.length > 0) {
-      const symbolSources = await this.ragService.symbolsForDocs(userId, docIds, 8);
+    if (finalDocIds.length > 0) {
+      const symbolSources = await this.ragService.symbolsForDocs(userId, finalDocIds, 8);
       if (symbolSources.length > 0) {
         // 文件内语义检索补齐（符号优先，片段补充，总量 cap 到 8）
-        const fileSources = await this.ragService.retrieve(userId, query, kbScope, 5, docIds);
+        const fileSources = await this.ragService.retrieve(userId, query, kbScope, 5, finalDocIds);
         const seen = new Set(symbolSources.map((s) => s.chunkId));
         for (const s of fileSources) {
           if (symbolSources.length >= 8) break;
@@ -703,14 +723,14 @@ export class ChatService {
       query,
       kbScope,
       5,
-      docIds.length > 0 ? docIds : undefined,
+      finalDocIds.length > 0 ? finalDocIds : undefined,
     );
     if (sources.length > 0) {
       return sources;
     }
 
     // 档案锁定但文件内 0 条（如问的是跨文件的一般概念）→ 放宽到全库再检一次
-    if (locked.length > 0) {
+    if (finalLockedTrim.length > 0) {
       const wide = await this.ragService.retrieve(userId, query, kbScope, 5);
       if (wide.length > 0) {
         return wide;

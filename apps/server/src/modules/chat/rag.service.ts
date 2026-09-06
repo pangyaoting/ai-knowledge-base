@@ -262,6 +262,64 @@ export class RagService {
   }
 
   /**
+   * 业务关键词 → 模块文件路径片段映射。
+   * 代码文件档案是"符号清单+头注释"，对中文业务问题（登录/上传/报告怎么实现）
+   * 语义匹配不稳（auth.service.ts 无中文头注释就匹配不上"登录"）。
+   * 这是确定性补充：问题含业务词时，直接按文件名/路径召回对应模块的真实代码文件。
+   */
+  private static readonly MODULE_KEYWORDS: Array<{
+    words: string[];
+    pathPart: string;
+  }> = [
+    {
+      words: ['登录', '注册', '鉴权', '认证', 'token', '密码', '登录态', 'auth'],
+      pathPart: 'modules/auth',
+    },
+    {
+      words: ['上传', '文件', '文档', '解析', '分块', '向量', '入库', 'knowledge'],
+      pathPart: 'modules/knowledge',
+    },
+    {
+      words: ['ocr', '扫描', '识别图片', '图片文字', '文字识别'],
+      pathPart: 'modules/knowledge/utils/document-parser',
+    },
+    { words: ['报告', '研究报告', '生成报告'], pathPart: 'modules/research' },
+    {
+      words: ['研究任务', 'agent', '自主研究', '方向', '预算'],
+      pathPart: 'modules/research-agent',
+    },
+    { words: ['会话', '聊天', '消息', '对话', '提问'], pathPart: 'modules/chat' },
+    { words: ['头像', '资料', '用户', '个人'], pathPart: 'modules/user' },
+    { words: ['模型配置', '模型', 'key', '密钥', 'byo'], pathPart: 'modules/models' },
+  ];
+
+  /**
+   * 按业务关键词补召模块代码文件（确定性路径匹配，兜档案语义召回之不足）。
+   * 只召回"模块内主 service"（*service.ts / *controller.ts / 关键工具），避免拉整个目录。
+   */
+  async profileLookupByKeyword(
+    userId: string,
+    query: string,
+    kbIds: string[] | undefined,
+    limit = 4,
+  ): Promise<Array<{ documentId: string; filename: string }>> {
+    const lower = query.toLowerCase();
+    const matched = RagService.MODULE_KEYWORDS.find((m) => m.words.some((w) => lower.includes(w)));
+    if (!matched) return [];
+    const rows = await this.prisma.document.findMany({
+      where: {
+        ...(kbIds && kbIds.length ? { knowledgeBaseId: { in: kbIds } } : {}),
+        filename: { contains: matched.pathPart },
+        fileType: 'code',
+        status: 'done',
+      },
+      select: { id: true, filename: true },
+      take: limit,
+    });
+    return rows.map((r) => ({ documentId: r.id, filename: r.filename }));
+  }
+
+  /**
    * A 档案命中：用问题向量检索"文件档案"（文件名 + 章节地图/符号清单），
    * 锁定最相关的文档——中文泛化问题（"设置头像的代码"）也能先定位到 Settings.vue，
    * 再交给 retrieve 在锁定的文档内检索（解决全库几万片段抢 topK 的问题）。
