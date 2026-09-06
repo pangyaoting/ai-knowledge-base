@@ -347,7 +347,9 @@ export class RagService {
   ): Promise<{ sources: RetrievalSource[]; totalChars: number }> {
     const found = await this.prisma.document.findFirst({
       where: {
-        filename: { endsWith: filename.toLowerCase() },
+        // 大小写不敏感匹配：库里存的是原始大小写（HomeCosmos.vue），
+        // toLowerCase 后 endsWith 在 PG 里大小写敏感 → 匹配失败（线上 bug）
+        filename: { endsWith: filename, mode: 'insensitive' },
         ...(kbIds && kbIds.length ? { knowledgeBaseId: { in: kbIds } } : {}),
       },
       select: {
