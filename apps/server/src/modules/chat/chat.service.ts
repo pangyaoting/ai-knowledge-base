@@ -56,10 +56,11 @@ export class ChatService {
     return Number.isFinite(v) && v > 0 ? v : 40000;
   }
 
-  /** 解析类正文输出上限（.env 可配 PARSE_MAX_TOKENS，默认 6000） */
+  /** 解析类输出总上限（思考+正文共用预算；.env 可配 PARSE_MAX_TOKENS，默认 8000。
+   *  8000 = 思考预算 2048 + 正文约 5950 token，保证正文充足不被思考挤占） */
   private get parseMaxTokens(): number {
-    const v = Number(this.configService.get<string>('PARSE_MAX_TOKENS', '6000'));
-    return Number.isFinite(v) && v > 0 ? v : 6000;
+    const v = Number(this.configService.get<string>('PARSE_MAX_TOKENS', '8000'));
+    return Number.isFinite(v) && v > 0 ? v : 8000;
   }
 
   /** 官方 DeepSeek 思考预算（.env 可配 PARSE_THINK_BUDGET，默认 2048；0 = 不设 thinking 参数） */
@@ -488,16 +489,20 @@ export class ChatService {
       reasoning_effort?: string;
     };
     const extras: ExtraParams = {};
-    if (wantsCodeWalkthrough) {
-      if (session.reasoningEffort === 'high' || session.reasoningEffort === 'max') {
-        extras.reasoning_effort = session.reasoningEffort; // 用户显式深度思考：尊重，不封顶
-      } else if (session.reasoningEffort === 'low') {
+    // 解析/续写类：正文完整优先——实测教训：会话开 high/max 且不设思考预算时，
+    // 思考能烧掉 5700/6000 token，正文只剩 ~300 token（447 字）就被截断。
+    // 因此解析类一律走"思考预算化"（官方 API）或显式关闭；高档位仅在普通问答保留。
+    if (wantsCodeWalkthrough || isContinuation) {
+      if (session.reasoningEffort === 'low') {
         extras.reasoning_effort = 'low'; // 用户显式关闭思考
       } else if (isOfficialDeepSeek && this.thinkBudgetTokens > 0) {
-        // 默认档 + 官方 API：思考预算化（beta 参数：思考独立封顶，正文必有额度，防空输出）
+        // 官方 API：思考预算独立封顶（beta 参数），正文必有充足额度，防空输出与截断
         extras.thinking = { type: 'enabled', budget_tokens: this.thinkBudgetTokens };
+      } else if (session.reasoningEffort === 'high' || session.reasoningEffort === 'max') {
+        // 第三方网关无法预算化：只能尊重档位，正文靠空输出自动降级兜底
+        extras.reasoning_effort = session.reasoningEffort;
       }
-      // 默认档 + 第三方网关：不加参数（跟随模型默认思考），空输出由下方自动降级重试兜底
+      // 默认档 + 第三方网关：不加参数（跟随模型默认思考），兜底同上
     } else if (session.reasoningEffort) {
       extras.reasoning_effort = session.reasoningEffort;
     }
