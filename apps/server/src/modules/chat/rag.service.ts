@@ -335,6 +335,33 @@ export class RagService {
   }
 
   /**
+   * 按文件名取单文档全文（"解析 HomeCosmos.vue"类问题）：
+   * filename 以给定名字结尾匹配（容忍 "主项目/apps/.../HomeCosmos.vue" 前缀），
+   * 经 knowledgeBase.ownerId 归属校验防越权。
+   */
+  async loadDocumentByNameFulltext(
+    userId: string,
+    filename: string,
+    kbIds: string[] | undefined,
+    maxChars: number,
+  ): Promise<{ sources: RetrievalSource[]; totalChars: number }> {
+    const found = await this.prisma.document.findFirst({
+      where: {
+        filename: { endsWith: filename.toLowerCase() },
+        ...(kbIds && kbIds.length ? { knowledgeBaseId: { in: kbIds } } : {}),
+      },
+      select: {
+        id: true,
+        knowledgeBase: { select: { ownerId: true } },
+      },
+    });
+    if (!found || found.knowledgeBase.ownerId !== userId) {
+      return { sources: [], totalChars: 0 };
+    }
+    return this.loadDocumentFulltext(userId, found.id, maxChars);
+  }
+
+  /**
    * 单文档全文模式：解析/逐行讲解单个代码文件时，直接取该文件全部叶子块拼成全文。
    * 检索只给 topK 片段必然覆盖不全（大文件后半段永远进不来）；
    * 单文件通常 ≤ 阈值（HomeCosmos.vue 22k 字符），全文喂模型才能"逐行解析到底"。
