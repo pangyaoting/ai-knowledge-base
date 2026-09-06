@@ -169,14 +169,68 @@ function handleUploadDirIntoFolder(dirPath: string) {
 // ==================== 文件夹整体替换 ====================
 /** 待替换的目标文件夹（选完本地目录后走替换上传而非普通增量） */
 const pendingReplaceDir = ref<string | null>(null);
+/** 待替换成文件的目标文件夹（选完本地文件后，文件取代该文件夹位置） */
+const pendingReplaceFileDir = ref<string | null>(null);
 let replacingFolder = false;
 
-/** 文件夹行"替换此文件夹"：直接弹出目录选择（文件选择器必须由用户手势直接触发，
- *  不能先 confirm 再 click——浏览器会拦截）；选完目录后再确认执行 */
+/** 🔄 点击：先弹选择（替换成文件夹 / 替换成文件），保证文件选择器由用户手势直接触发 */
+const showReplacePicker = ref(false);
+const replacePickerDir = ref('');
 function handleReplaceFolder(dirPath: string) {
   if (replacingFolder) return;
-  pendingReplaceDir.value = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+  replacePickerDir.value = dirPath;
+  showReplacePicker.value = true;
+}
+/** 选择"替换成文件夹" → 打开目录选择器 */
+function pickReplaceAsDir() {
+  showReplacePicker.value = false;
+  pendingReplaceDir.value = replacePickerDir.value.endsWith('/')
+    ? replacePickerDir.value
+    : `${replacePickerDir.value}/`;
   dirInput?.value?.click();
+}
+/** 选择"替换成文件" → 打开文件选择器（取第一个文件，文件取代该文件夹位置） */
+function pickReplaceAsFile() {
+  showReplacePicker.value = false;
+  pendingReplaceFileDir.value = replacePickerDir.value.endsWith('/')
+    ? replacePickerDir.value
+    : `${replacePickerDir.value}/`;
+  fileInput?.value?.click();
+}
+
+/** 文件夹替换成文件：删除目标文件夹全部文档，文件放到其父目录（文件夹消失、由文件取代） */
+async function replaceFolderWithFile(file: File, dir: string) {
+  const dirTrim = dir.endsWith('/') ? dir.slice(0, -1) : dir;
+  const parent = dirTrim.slice(0, dirTrim.lastIndexOf('/') + 1); // 目标文件夹的父路径
+  const existing = list.value.filter((d) => d.filename.startsWith(dir));
+  // eslint-disable-next-line no-alert
+  if (
+    !window.confirm(
+      `用文件「${file.name}」替换文件夹「${dirTrim}」？\n\n文件夹内 ${existing.length} 个文档将被删除，文件放到 ${parent || '根目录'}（文件夹消失）。继续？`,
+    )
+  ) {
+    return;
+  }
+  replacingFolder = true;
+  try {
+    // 上传新文件（放父目录）→ 成功后再删文件夹全部文档
+    await uploadDocument(knowledgeBaseId, file, undefined, parent + file.name);
+    let deleted = 0;
+    for (const d of existing) {
+      try {
+        await deleteDocument(knowledgeBaseId, d.id);
+        deleted++;
+      } catch {
+        /* 忽略单个失败 */
+      }
+    }
+    await load();
+    toast.success(`文件夹已替换为文件「${file.name}」（删除 ${deleted} 个旧文档）`);
+  } catch (e) {
+    toast.error(`替换失败：${(e as Error).message}`);
+  } finally {
+    replacingFolder = false;
+  }
 }
 
 /** 替换上传：目标名 = 目标文件夹 + 本地相对路径（去所选目录名）；全部成功后删除本地已不存在的旧文件 */
@@ -255,7 +309,12 @@ async function replaceFolderUpload(files: File[], dir: string) {
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement | null;
   const files = input?.files ? Array.from(input.files) : [];
-  if (files.length) {
+  const replaceDir = pendingReplaceFileDir.value;
+  pendingReplaceFileDir.value = null;
+  if (files.length && replaceDir) {
+    // 文件夹"替换成文件"流程：取第一个文件，取代该文件夹位置
+    void replaceFolderWithFile(files[0], replaceDir);
+  } else if (files.length) {
     addPendingFiles(files);
   } else if (input) {
     console.warn('未读取到所选文件（事件目标异常），请重试或强刷页面');
@@ -750,6 +809,36 @@ onBeforeUnmount(stopParsePoll);
 
     <!-- 列表视图 -->
     <template v-else>
+      <!-- 文件夹"替换"选择弹层：替换成文件夹 或 替换成文件 -->
+      <div
+        v-if="showReplacePicker"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        @click.self="showReplacePicker = false"
+      >
+        <div class="w-80 rounded-xl border bg-card p-5 shadow-xl">
+          <h3 class="text-base font-semibold">替换「{{ replacePickerDir }}」</h3>
+          <p class="mt-1 text-xs text-muted-foreground">
+            选择用什么替换这个文件夹（现有文档将被更新/删除）
+          </p>
+          <div class="mt-4 grid gap-2">
+            <Button variant="outline" @click="pickReplaceAsDir">
+              <FolderTree class="h-4 w-4" />
+              用本地文件夹替换
+            </Button>
+            <Button variant="outline" @click="pickReplaceAsFile">
+              <FolderUp class="h-4 w-4" />
+              用本地文件替换（文件夹变为该文件）
+            </Button>
+            <Button
+              variant="ghost"
+              class="text-muted-foreground"
+              @click="showReplacePicker = false"
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      </div>
       <div class="mb-6 flex items-center gap-3">
         <Button variant="ghost" size="icon" @click="router.push('/knowledge')">
           <ArrowLeft class="h-4 w-4" />
