@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# 部署必须在同一分支上串行：两个 deploy 并发会在服务器上互相 rm -rf 代码目录
+# （A 在 build 时 B 把目录删了重建 → typescript 文件消失 / cwd 被删 / pm2 找不到）
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # 代码检查和构建（PR 和 push 都跑）
   check:
