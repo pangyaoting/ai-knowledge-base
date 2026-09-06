@@ -1,15 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatView' });
-import {
-  ref,
-  computed,
-  onMounted,
-  onActivated,
-  onDeactivated,
-  onBeforeUnmount,
-  watch,
-  nextTick,
-} from 'vue';
+import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue';
 import {
   Menu,
   BookOpen,
@@ -659,43 +650,44 @@ async function handleBranch(idx: number) {
   }
 }
 
-// ===== 临时诊断（KeepAlive 滚动置顶排查，定位后删除） =====
-let diagSavedTop = 0;
-function diagTop(el: HTMLElement | null) {
-  return el ? `${el.scrollTop}/${el.scrollHeight}` : 'no-el';
-}
-onDeactivated(() => {
-  const el = messageContainer.value;
-  diagSavedTop = el?.scrollTop ?? 0;
-  console.log('[scroll-diag] deactivated top=', diagTop(el));
-});
-onActivated(async () => {
-  await nextTick();
-  const el = messageContainer.value;
-  console.log(
-    '[scroll-diag] activated saved=',
-    diagSavedTop,
-    'now=',
-    diagTop(el),
-    'msgs=',
-    messages.value.length,
-  );
-});
-
 // ==================== 交互 ====================
 
 // 自动滚动到底部：监听消息条数与流式内容变化；用户手动上滚时暂停，避免被拉回
 let autoScroll = true;
+/** KeepAlive 切回时恢复用的滚动位置：只在滚动事件/程序滚底时更新。
+ *  注意：不要在 deactivated 里保存——此时 DOM 已脱管（scrollHeight=0），
+ *  读到 0 会覆盖掉正确值，导致切回永远恢复不了（实测根因）。 */
+let savedChatScrollTop = 0;
 function onMessageScroll() {
   const el = messageContainer.value;
   if (!el) return;
   autoScroll = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  savedChatScrollTop = el.scrollTop; // 用户滚动时记录位置（供翻历史后切回恢复）
 }
 watch([() => messages.value.length, streamContent], async () => {
   if (!autoScroll) return;
   await nextTick();
   const el = messageContainer.value;
-  if (el) el.scrollTop = el.scrollHeight;
+  if (el) {
+    el.scrollTop = el.scrollHeight;
+    savedChatScrollTop = el.scrollTop; // 程序滚底也记录（scrollTop 赋值不触发 scroll 事件）
+  }
+});
+
+// KeepAlive 缓存：从「模型配置」页新增/修改模型后返回本页时，刷新模型列表，
+// 否则新绑定的模型要刷新页面才出现在模型下拉里
+onActivated(async () => {
+  loadModelConfigs();
+  // 切回本页：KeepAlive 重插 DOM 后 scrollTop 被浏览器清 0（实测 activated 时内容完整但 top=0）。
+  // 此时容器可读可写：停在底部意图（autoScroll=true）→ 滚到底；翻过历史 → 恢复记录的位置
+  await nextTick();
+  const el = messageContainer.value;
+  if (!el) return;
+  if (autoScroll) {
+    el.scrollTop = el.scrollHeight;
+  } else if (savedChatScrollTop > 0) {
+    el.scrollTop = savedChatScrollTop;
+  }
 });
 
 // 初始化：加载会话，没有就新建
