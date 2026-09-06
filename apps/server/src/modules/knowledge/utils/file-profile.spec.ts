@@ -29,6 +29,25 @@ describe('buildFileProfile 文件档案生成（A 语义层）', () => {
     expect(profile).toContain('Vue 组件 MyCard');
   });
 
+  it('代码文件头注释：中文注释进档案（中文问题能锁定代码文件）', () => {
+    const profile = buildFileProfile({
+      filename: 'HomeCosmos.vue',
+      fileType: 'code',
+      source: `/**
+ * 首页宇宙背景：暗黑模式=黑洞（吸积盘/光子环/引力透镜），浅色=白洞
+ * 开普勒轨道粒子 + 多普勒聚束
+ */
+<script setup>
+const bh = { radius: 0.06 };
+</script>`,
+      symbols: [{ kind: 'component', name: 'HomeCosmos' }],
+    });
+    expect(profile).toContain('黑洞');
+    expect(profile).toContain('吸积盘');
+    expect(profile).toContain('光子环');
+    expect(profile).toContain('HomeCosmos');
+  });
+
   it('无结构内容：回退开头摘要', () => {
     const profile = buildFileProfile({
       filename: 'notes.txt',

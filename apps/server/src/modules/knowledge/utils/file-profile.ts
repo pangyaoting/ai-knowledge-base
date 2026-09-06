@@ -61,15 +61,36 @@ export function buildFileProfile(opts: BuildProfileOptions): string {
 
   if (fileType === 'code') {
     const symbols = (opts.symbols ?? []).slice(0, 60);
+    // 文件头注释摘要：代码文件顶部通常有"这个文件干什么"的中文注释块
+    // （如 HomeCosmos.vue 顶部注释：黑洞/白洞/吸积盘/光子环…）。
+    // 符号清单是英文函数名，中文问题（"黑洞特效怎么实现的"）在档案锁定阶段
+    // 匹配不上纯英文档案 → 代码文件被筛掉，永远轮不到文件内检索。
+    // 取前 30 行中的注释行（// /* * 及 .vue <script> 前的 <template> 注释）拼进档案。
+    const headComment = source
+      .split('\n')
+      .slice(0, 30)
+      .map((l) => l.trim())
+      .filter(
+        (l) => l.startsWith('//') || l.startsWith('/*') || l.startsWith('*') || l.includes('*/'),
+      )
+      .map((l) => l.replace(/^(\/\/|\/\*+|\*\/?|\*)\s*/, '').trim())
+      .filter((l) => l.length > 1)
+      .join('；')
+      .slice(0, 300);
+    const parts2: string[] = [`文件：${filename}`, `类型：${typeName}`];
+    if (headComment) {
+      parts2.push(`文件说明：${headComment}`);
+    }
     if (symbols.length > 0) {
-      parts.push(`包含 ${symbols.length} 个符号：`);
+      parts2.push(`包含 ${symbols.length} 个符号：`);
       for (const s of symbols) {
         const kind = KIND_CN[s.kind] ?? s.kind;
         const sig = s.signature ? `（${s.signature.slice(0, 80)}）` : '';
-        parts.push(`- ${kind} ${s.name}${sig}`);
+        parts2.push(`- ${kind} ${s.name}${sig}`);
       }
-      return parts.join('\n');
+      return parts2.join('\n');
     }
+    if (headComment) return parts2.join('\n');
   }
 
   // 兜底：开头摘要
