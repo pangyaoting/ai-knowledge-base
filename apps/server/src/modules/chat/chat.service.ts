@@ -406,61 +406,119 @@ export class ChatService {
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
     // 模型目标已在开头解析（会话绑定 → 用户默认配置），token 全部由用户自己的 Key 承担。
+    // 慢与"空输出"的根源常在默认思考：V4 系模型默认会先思考，解析类大请求会思考很久
+    // （页面无任何输出），且思考可能占满 max_tokens 额度导致正文为空。因此解析类问题
+    // 强制推理等级 low（关闭思考）——用户显式选 high/max 时尊重其深度思考意图，不覆盖。
     const answerClient = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
     signal.addEventListener('abort', onAbort, { once: true });
 
+    const codeEffort =
+      wantsCodeWalkthrough &&
+      session.reasoningEffort !== 'high' &&
+      session.reasoningEffort !== 'max'
+        ? 'low'
+        : (session.reasoningEffort ?? undefined);
+    // 部分模型/网关不支持 reasoning_effort 参数（400）→ 去掉该参数原样重试一次
+    const attempts: Array<{ reasoningEffort?: string }> = codeEffort
+      ? [{ reasoningEffort: codeEffort }, {}]
+      : [{}];
+
     let answer = '';
     // 流式 usage（stream_options.include_usage）：最后一个 chunk 携带本次请求的 token 用量
     let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
+    let finishReason: string | null | undefined;
+    let lastErr: unknown = null;
     try {
-      const stream = await answerClient.chat.completions.create(
-        {
-          model: target.model,
-          messages: [{ role: 'system', content: system }, ...messages],
-          stream: true,
-          stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
-          // 会话推理等级（low=关闭/高/max）→ 透传给支持 reasoning_effort 的模型（DeepSeek V4 等）
-          ...(session.reasoningEffort ? { reasoning_effort: session.reasoningEffort } : {}),
-          // 代码解析类问题（全文注入 + 详细格式规范）输出量巨大，流式生成 2-3 分钟不可接受：
-          // 设 max_tokens 上限强制收敛（3000 token ≈ 1 分钟内出完），配合提示词要求精炼。
-          // 普通问答不设限，保持完整回答能力。
-          ...(wantsCodeWalkthrough ? { max_tokens: 3000 } : {}),
-        },
-        { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
-      );
+      for (let i = 0; i < attempts.length; i++) {
+        const effort = attempts[i].reasoningEffort;
+        try {
+          const stream = await answerClient.chat.completions.create(
+            {
+              model: target.model,
+              messages: [{ role: 'system', content: system }, ...messages],
+              stream: true,
+              stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
+              // 会话推理等级（low=关闭/高/max）→ 透传给支持 reasoning_effort 的模型（DeepSeek V4 等）
+              ...(effort ? { reasoning_effort: effort } : {}),
+              // 代码解析类问题（全文注入 + 详细格式规范）输出量大，设 max_tokens 上限强制收敛
+              // （3000 token），配合提示词篇幅约束。普通问答不设限，保持完整回答能力。
+              ...(wantsCodeWalkthrough ? { max_tokens: 3000 } : {}),
+            },
+            { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
+          );
 
-      for await (const part of stream) {
-        const delta = part.choices[0]?.delta?.content;
-        if (delta) {
-          answer += delta;
-          writer('delta', { content: delta });
-        }
-        if (part.usage) {
-          usage = part.usage; // 流式结束时的 usage chunk
+          for await (const part of stream) {
+            const delta = part.choices[0]?.delta?.content;
+            if (delta) {
+              answer += delta;
+              writer('delta', { content: delta });
+            }
+            if (part.choices[0]?.finish_reason) {
+              finishReason = part.choices[0].finish_reason;
+            }
+            if (part.usage) {
+              usage = part.usage; // 流式结束时的 usage chunk
+            }
+          }
+          break; // 本次尝试成功
+        } catch (err) {
+          // 客户端主动断开 → 静默停止，不扣后续 token
+          if (abortController.signal.aborted) {
+            this.logger.log(`会话 ${sessionId} 被客户端中止`);
+            return;
+          }
+          lastErr = err;
+          const raw = `${(err as Error).message ?? ''}`.toLowerCase();
+          // reasoning_effort 被上游拒绝（模型/网关不支持该参数）→ 去掉参数重试一次；
+          // 其他错误不重试，跳出循环统一按失败处理
+          const paramRejected =
+            attempts.length > 1 &&
+            i === 0 &&
+            /reasoning_effort|unsupported parameter|unknown parameter|not support|invalid parameter/i.test(
+              raw,
+            );
+          if (!paramRejected) break;
+          this.logger.warn(
+            `会话 ${sessionId} reasoning_effort 参数被上游拒绝，去掉后重试: ${(err as Error).message}`,
+          );
         }
       }
-    } catch (err) {
-      // 客户端主动断开 → 静默停止，不扣后续 token
-      if (abortController.signal.aborted) {
-        this.logger.log(`会话 ${sessionId} 被客户端中止`);
-        return;
-      }
-      // P2-7：模型调用失败 → 回滚刚落库的用户消息（回答没生成，留着会让前端"重试"重复落库）
-      // 检索阶段失败时用户消息还没建，无需处理；此处只在 LLM 阶段失败时回滚。
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+    }
+
+    // 流式失败（非客户端中止）→ 回滚刚落库的用户消息并抛错（controller 转 SSE error 事件）
+    // P2-7：回答没生成，留着会让前端"重试"重复落库。检索阶段失败时用户消息还没建，无需处理。
+    if (lastErr) {
       await this.prisma.chatMessage
         .deleteMany({
           where: { id: savedUserMsg.id, sessionId, role: 'user' },
         })
         .catch(() => undefined);
-      const translated = this.translateLLMError(err, images.length > 0);
+      const translated = this.translateLLMError(lastErr, images.length > 0);
       this.logger.warn(
-        `会话 ${sessionId} LLM 调用失败: ${(err as Error).message} → ${translated.message}`,
+        `会话 ${sessionId} LLM 调用失败: ${(lastErr as Error).message} → ${translated.message}`,
       );
       throw translated;
-    } finally {
-      signal.removeEventListener('abort', onAbort);
+    }
+
+    // 模型"思考完却没输出正文"（思考抢占 max_tokens / 上游异常返回空）→ 不落库空消息：
+    // 回滚用户消息并给可操作提示，而不是静默给一条只有引用来源的空回答
+    if (!answer.trim()) {
+      await this.prisma.chatMessage
+        .deleteMany({
+          where: { id: savedUserMsg.id, sessionId, role: 'user' },
+        })
+        .catch(() => undefined);
+      const translated = new BadRequestException(
+        '模型本次没有生成任何内容（思考过程可能占满了输出额度）。请点击「重试」再试一次；若反复出现，请把该会话的推理等级设为「关闭」后重试。',
+      );
+      this.logger.warn(
+        `会话 ${sessionId} 模型返回空内容（finish_reason=${finishReason ?? '未知'}）`,
+      );
+      throw translated;
     }
 
     // ⑥ 流式结束：落库助手消息 + 引用来源（知识库 + 网络）+ Token 用量
@@ -559,7 +617,8 @@ export class ChatService {
         '7. 严禁使用"代码块 + 单句解释"的逐行穿插排版；',
         '8. **篇幅控制（重要）**：你有输出上限，超长文件（>500 行）不要逐模块完整展开——' +
           '优先讲清 核心结构、关键算法/交互、文件整体流程；次要模块用总结表格一笔带过。' +
-          '控制在 1 分钟能读完的篇幅，避免为了"完整"而输出巨量内容。',
+          '若篇幅紧张，宁可精简正文也要保证结尾总结表格完整。控制在 1 分钟能读完的篇幅，' +
+          '避免为了"完整"而输出巨量内容。',
       );
     }
     const system = systemParts.join('\n');
