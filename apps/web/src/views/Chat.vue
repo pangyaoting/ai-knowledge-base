@@ -1,6 +1,15 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatView' });
-import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue';
+import {
+  ref,
+  computed,
+  onMounted,
+  onActivated,
+  onDeactivated,
+  onBeforeUnmount,
+  watch,
+  nextTick,
+} from 'vue';
 import {
   Menu,
   BookOpen,
