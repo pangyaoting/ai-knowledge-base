@@ -56,23 +56,18 @@ export class ChatService {
     return Number.isFinite(v) && v > 0 ? v : 40000;
   }
 
-  /** 解析类输出总上限（思考+正文共用预算；.env 可配 PARSE_MAX_TOKENS，默认 8000。
-   *  8000 = 思考预算 2048 + 正文约 5950 token，保证正文充足不被思考挤占） */
+  /** 解析类输出总上限（.env 可配 PARSE_MAX_TOKENS，默认 16000）。
+   *  实测 v4-flash 高档思考会烧 7000+ token：上限给足（16000），思考+正文都够用，
+   *  避免"思考吃光额度、正文被截"（早前 6000/8000 上限下正文只剩 300~800 字）。 */
   private get parseMaxTokens(): number {
-    const v = Number(this.configService.get<string>('PARSE_MAX_TOKENS', '8000'));
-    return Number.isFinite(v) && v > 0 ? v : 8000;
+    const v = Number(this.configService.get<string>('PARSE_MAX_TOKENS', '16000'));
+    return Number.isFinite(v) && v > 0 ? v : 16000;
   }
 
-  /** 官方 DeepSeek 思考预算（.env 可配 PARSE_THINK_BUDGET，默认 2048；0 = 不设 thinking 参数） */
-  private get thinkBudgetTokens(): number {
-    const v = Number(this.configService.get<string>('PARSE_THINK_BUDGET', '2048'));
-    return Number.isFinite(v) && v >= 0 ? v : 2048;
-  }
-
-  /** "继续"续写轮的输出上限（.env 可配 PARSE_CONTINUE_MAX_TOKENS，默认 12000） */
+  /** "继续"续写轮的输出上限（.env 可配 PARSE_CONTINUE_MAX_TOKENS，默认 20000） */
   private get continueMaxTokens(): number {
-    const v = Number(this.configService.get<string>('PARSE_CONTINUE_MAX_TOKENS', '12000'));
-    return Number.isFinite(v) && v > 0 ? v : 12000;
+    const v = Number(this.configService.get<string>('PARSE_CONTINUE_MAX_TOKENS', '20000'));
+    return Number.isFinite(v) && v > 0 ? v : 20000;
   }
 
   // ==================== 会话管理 ====================
@@ -466,16 +461,16 @@ export class ChatService {
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
     // 模型目标已在开头解析（会话绑定 → 用户默认配置），token 全部由用户自己的 Key 承担。
-    // 批1-1/1-2 策略：不再强制关思考（深度由会话档位决定）；"思考吃光 max_tokens 导致正文
-    // 为空"改由"思考预算化"根治——官方 DeepSeek 请求带 thinking.budget_tokens（思考独立封顶，
-    // 不再与正文抢同一个 max_tokens），正文上限给足；第三方网关不支持该参数时自动去参重试。
+    // 思考策略（方案 B，2026-09 实测修正）：v4-flash 对 thinking.budget_tokens 参数是"接受但
+    // 静默忽略"（实测思考仍烧 7000+ token），无法靠"思考预算"约束 → 删掉该假参数，
+    // 回到"会话档位说了算"（high/max=深度思考，low=关闭，默认=模型默认），
+    // 用大输出上限（16000）保证思考后正文仍有充足额度，避免截断。
     const answerClient = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
     signal.addEventListener('abort', onAbort, { once: true });
 
-    const isOfficialDeepSeek = /api\.deepseek\.com/.test((target.baseURL ?? '').toLowerCase());
-    // 输出上限：续写轮 = PARSE_CONTINUE_MAX_TOKENS（默认 12000）；解析类 = PARSE_MAX_TOKENS（默认 6000）；
+    // 输出上限：续写轮 = PARSE_CONTINUE_MAX_TOKENS（默认 20000）；解析类 = PARSE_MAX_TOKENS（16000）；
     // 普通问答不设限，保持完整回答能力。
     const maxTokens = isContinuation
       ? this.continueMaxTokens
@@ -484,26 +479,10 @@ export class ChatService {
         : undefined;
 
     // 每次尝试的附加参数；attempts[0] = 主尝试，附加参数被上游拒绝时 attempts[1] 去参重试
-    type ExtraParams = {
-      thinking?: { type: 'enabled'; budget_tokens: number };
-      reasoning_effort?: string;
-    };
+    type ExtraParams = { reasoning_effort?: string };
     const extras: ExtraParams = {};
-    // 解析/续写类：正文完整优先——实测教训：会话开 high/max 且不设思考预算时，
-    // 思考能烧掉 5700/6000 token，正文只剩 ~300 token（447 字）就被截断。
-    // 因此解析类一律走"思考预算化"（官方 API）或显式关闭；高档位仅在普通问答保留。
-    if (wantsCodeWalkthrough || isContinuation) {
-      if (session.reasoningEffort === 'low') {
-        extras.reasoning_effort = 'low'; // 用户显式关闭思考
-      } else if (isOfficialDeepSeek && this.thinkBudgetTokens > 0) {
-        // 官方 API：思考预算独立封顶（beta 参数），正文必有充足额度，防空输出与截断
-        extras.thinking = { type: 'enabled', budget_tokens: this.thinkBudgetTokens };
-      } else if (session.reasoningEffort === 'high' || session.reasoningEffort === 'max') {
-        // 第三方网关无法预算化：只能尊重档位，正文靠空输出自动降级兜底
-        extras.reasoning_effort = session.reasoningEffort;
-      }
-      // 默认档 + 第三方网关：不加参数（跟随模型默认思考），兜底同上
-    } else if (session.reasoningEffort) {
+    if (session.reasoningEffort) {
+      // 解析与普通问答一致：思考深度跟随会话档位（low=关闭 / high/max=深度思考）
       extras.reasoning_effort = session.reasoningEffort;
     }
     const attempts: ExtraParams[] = Object.keys(extras).length ? [extras, {}] : [{}];
@@ -523,8 +502,7 @@ export class ChatService {
             stream: true,
             stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
             ...(maxTokens ? { max_tokens: maxTokens } : {}),
-            // 思考预算（官方 DeepSeek beta）/ 会话推理档位 二选一透传
-            ...(extra.thinking ? { thinking: extra.thinking } : {}),
+            // 会话推理档位（low=关闭/高/最高）透传；模型不支持时 attempts 去参重试
             ...(extra.reasoning_effort ? { reasoning_effort: extra.reasoning_effort } : {}),
           },
           { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
