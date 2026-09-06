@@ -650,6 +650,29 @@ async function handleBranch(idx: number) {
   }
 }
 
+// ===== 临时诊断（KeepAlive 滚动置顶排查，定位后删除） =====
+let diagSavedTop = 0;
+function diagTop(el: HTMLElement | null) {
+  return el ? `${el.scrollTop}/${el.scrollHeight}` : 'no-el';
+}
+onDeactivated(() => {
+  const el = messageContainer.value;
+  diagSavedTop = el?.scrollTop ?? 0;
+  console.log('[scroll-diag] deactivated top=', diagTop(el));
+});
+onActivated(async () => {
+  await nextTick();
+  const el = messageContainer.value;
+  console.log(
+    '[scroll-diag] activated saved=',
+    diagSavedTop,
+    'now=',
+    diagTop(el),
+    'msgs=',
+    messages.value.length,
+  );
+});
+
 // ==================== 交互 ====================
 
 // 自动滚动到底部：监听消息条数与流式内容变化；用户手动上滚时暂停，避免被拉回
