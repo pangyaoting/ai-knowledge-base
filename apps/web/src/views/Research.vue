@@ -79,9 +79,13 @@ function statusClass(s: Report['status']): string {
       return 'bg-green-50 text-green-700 dark:bg-green-500/15 dark:text-green-400';
     case 'failed':
       return 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-400';
+    case 'cancelled':
+      return 'bg-gray-50 text-gray-600 dark:bg-gray-500/15 dark:text-gray-400';
     case 'processing':
     case 'pending':
       return 'bg-yellow-50 text-yellow-700 dark:bg-yellow-500/15 dark:text-yellow-400';
+    default:
+      return 'bg-gray-50 text-gray-600 dark:bg-gray-500/15 dark:text-gray-400';
   }
 }
 const statusText: Record<Report['status'], string> = {
@@ -89,6 +93,7 @@ const statusText: Record<Report['status'], string> = {
   processing: '生成中',
   done: '已完成',
   failed: '失败',
+  cancelled: '已取消',
 };
 
 function formatTime(iso: string): string {
