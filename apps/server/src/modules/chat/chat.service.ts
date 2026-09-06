@@ -614,8 +614,11 @@ export class ChatService {
       return symbolHits;
     }
 
-    // A 档案锁定：中文问题先语义定位文件（最多 3 个），把检索范围从"全库"缩到"命中文件"
-    const locked = await this.ragService.profileLookup(userId, query, kbScope, 3);
+    // A 档案锁定：中文问题先语义定位文件，把检索范围从"全库"缩到"命中文件"。
+    // topDocs 取 6 而非 3：问"黑洞特效"时 docs/24、35（标题含黑洞）必然排前二，
+    // 若只锁 3 个，同主题代码文件（HomeCosmos.vue，档案含中文注释）可能被挤出锁定集，
+    // 导致检索只在笔记里找、永远拿不到真实源码。
+    const locked = await this.ragService.profileLookup(userId, query, kbScope, 6);
     const docIds = locked.map((d) => d.documentId);
     if (locked.length > 0) {
       this.logger.log(
