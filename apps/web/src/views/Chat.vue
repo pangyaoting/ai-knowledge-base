@@ -36,6 +36,7 @@ import { getModelConfigs } from '@/api/model-configs';
 import type { KnowledgeBase } from '@/types/knowledge';
 import type { ModelConfig } from '@/types/model-config';
 import type { ChatSession, ChatMessage, ChatSources, RetrievalSource } from '@/types/chat';
+import { MAX_IMAGES_PER_MESSAGE } from '@/types/chat';
 
 // ==================== 状态 ====================
 const sessions = ref<ChatSession[]>([]);
@@ -51,9 +52,9 @@ let localMsgSeq = 0;
 const inputDrafts = ref<Record<string, string>>({});
 const imageDrafts = ref<Record<string, string[]>>({});
 
-// ==================== 图片（粘贴 / 上传，最多 6 张，压缩后进消息） ====================
-const MAX_IMAGES = 9;
+// ==================== 图片（粘贴 / 上传，最多 9 张，压缩后进消息） ====================
 const pendingImages = ref<string[]>([]);
+const MAX_IMAGES = MAX_IMAGES_PER_MESSAGE;
 
 /** 粘贴图片：收集剪贴板全部图片 → 压缩 → 加入待发送列表 */
 async function onPasteImage(e: ClipboardEvent) {

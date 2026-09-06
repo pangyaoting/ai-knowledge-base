@@ -17,7 +17,7 @@ import Input from '@/components/ui/Input.vue';
 import DocCodeEditor from '@/components/knowledge/DocCodeEditor.vue';
 import DocTableRow from '@/components/knowledge/DocTableRow.vue';
 import { toast } from '@/composables/useToast';
-import { confirmDialog } from '@/composables/useConfirm';
+import { confirmDialog, promptDialog } from '@/composables/useConfirm';
 import {
   getDocuments,
   uploadDocument,
@@ -660,8 +660,14 @@ async function handleReplace(docId: string, file: File) {
 /** 重命名文件夹 = 批量把其下所有文件的路径前缀换成新名（保留父目录层级，P0-2） */
 async function handleRenameFolder(node: DocTreeNode) {
   const oldPath = node.path; // 如 'src/utils'（完整相对路径）
-  // eslint-disable-next-line no-alert
-  const newName = window.prompt('输入新的文件夹名称：', node.name)?.trim();
+  // P2-2：自定义输入弹窗（替换原生 window.prompt，样式统一）
+  const newName = await promptDialog({
+    title: '重命名文件夹',
+    message: `把「${node.name}」改名为：`,
+    initial: node.name,
+    placeholder: '新的文件夹名称',
+    confirmText: '重命名',
+  });
   if (!newName || newName === node.name) return;
   if (newName.includes('/') || newName.includes('\\')) {
     toast.error('文件夹名称不能包含路径分隔符');

@@ -1,5 +1,8 @@
 // 对话相关类型（与后端 ChatSession / ChatMessage / RetrievalSource 对应）
 
+/** 单次消息最多携带的图片数（Chat.vue 与 ChatMessageInput.vue 共用，避免硬编码漂移） */
+export const MAX_IMAGES_PER_MESSAGE = 9;
+
 export interface ChatSession {
   id: string;
   title: string;

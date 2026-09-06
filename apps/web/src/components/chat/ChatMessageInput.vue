@@ -4,7 +4,10 @@ defineOptions({ name: 'ChatMessageInput' });
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { Send, Square, X, ImagePlus, FileText, Cpu, Database } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
+import { MAX_IMAGES_PER_MESSAGE } from '@/types/chat';
 import type { ModelConfig } from '@/types/model-config';
+
+const maxImages = MAX_IMAGES_PER_MESSAGE;
 
 const props = defineProps<{
   modelConfigs: ModelConfig[];
@@ -224,7 +227,7 @@ defineExpose({ focusTextarea });
         </button>
       </div>
       <p class="flex items-center text-[11px] text-muted-foreground">
-        {{ props.pendingImages.length }}/9
+        {{ props.pendingImages.length }}/{{ maxImages }}
       </p>
       <div
         v-for="(f, i) in props.pendingFiles"
