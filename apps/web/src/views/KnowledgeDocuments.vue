@@ -133,6 +133,33 @@ const ringLabel = computed(() => {
   return '';
 });
 
+/** 目标上传文件夹路径（'' = 根目录；文件夹行"上传到此文件夹"时设置，如 '主项目/docs/'） */
+const uploadIntoDir = ref('');
+
+/** 上传用文件名：目标文件夹前缀 + 文件相对路径/原名（上传到指定文件夹时自动归位） */
+function uploadNameOf(f: File): string {
+  const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+  return uploadIntoDir.value ? uploadIntoDir.value + rel : rel;
+}
+
+/** 顶部"选择文件"：重置目标为根目录 */
+function onPickFilesRoot() {
+  uploadIntoDir.value = '';
+  fileInput?.value?.click();
+}
+
+/** 顶部"选择目录"：重置目标为根目录 */
+function onPickDirRoot() {
+  uploadIntoDir.value = '';
+  dirInput?.value?.click();
+}
+
+/** 文件夹行"上传文件到此文件夹"：把所选文件放到该文件夹下（增量：没变的跳过、变的替换、新的加入） */
+function handleUploadIntoFolder(dirPath: string) {
+  uploadIntoDir.value = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+  fileInput?.value?.click();
+}
+
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement | null;
   const files = input?.files ? Array.from(input.files) : [];
@@ -190,7 +217,7 @@ async function startUpload(files: File[]) {
     return;
   }
   const dup = nonEmpty.find((f) => {
-    const name = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+    const name = uploadNameOf(f);
     return list.value.some((d) => d.filename === name);
   });
   if (
@@ -215,7 +242,7 @@ async function startUpload(files: File[]) {
         const idx = nextIndex++;
         if (idx >= nonEmpty.length) break;
         const f = nonEmpty[idx];
-        const name = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+        const name = uploadNameOf(f);
         try {
           const res = await uploadDocument(
             knowledgeBaseId,
@@ -659,11 +686,11 @@ onBeforeUnmount(stopParsePoll);
           <input ref="fileInput" type="file" multiple class="hidden" @change="onFileChange" />
           <input ref="dirInput" type="file" webkitdirectory class="hidden" @change="onDirChange" />
           <div class="flex flex-wrap items-center justify-center gap-3">
-            <Button variant="outline" :disabled="uploading" @click="fileInput?.click()">
+            <Button variant="outline" :disabled="uploading" @click="onPickFilesRoot">
               <FolderOpen class="h-4 w-4" />
               选择文件（可多选）
             </Button>
-            <Button variant="outline" :disabled="uploading" @click="dirInput?.click()">
+            <Button variant="outline" :disabled="uploading" @click="onPickDirRoot">
               <FolderTree class="h-4 w-4" />
               选择目录
             </Button>
@@ -804,6 +831,7 @@ onBeforeUnmount(stopParsePoll);
                 @delete="handleDelete"
                 @rename-folder="handleRenameFolder"
                 @delete-folder="handleDeleteFolder"
+                @upload-folder="(node) => handleUploadIntoFolder(node.path)"
               />
             </template>
 
@@ -825,6 +853,7 @@ onBeforeUnmount(stopParsePoll);
                 @delete="handleDelete"
                 @rename-folder="handleRenameFolder"
                 @delete-folder="handleDeleteFolder"
+                @upload-folder="(node) => handleUploadIntoFolder(node.path)"
               />
             </template>
           </tbody>

@@ -9,6 +9,7 @@ import {
   Pencil,
   ChevronRight,
   Folder,
+  FolderUp,
 } from 'lucide-vue-next';
 import { fileIconOf, fileBadgeOf } from '@/utils/file-icons';
 import type { DocTreeNode } from '@/utils/doc-tree';
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   (e: 'delete', id: string, filename: string): void;
   (e: 'rename-folder', node: DocTreeNode): void;
   (e: 'delete-folder', node: DocTreeNode): void;
+  (e: 'upload-folder', node: DocTreeNode): void;
 }>();
 
 const statusText: Record<string, string> = {
@@ -116,6 +118,13 @@ function onReplaceChange(e: Event, docId: string) {
       <td class="px-4 py-2.5 text-muted-foreground">{{ node.chunkCount ?? 0 }}</td>
       <td class="px-4 py-2.5 text-right">
         <div class="flex items-center justify-end gap-1">
+          <button
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="'上传文件到此文件夹 ' + node.name"
+            @click.stop="emit('upload-folder', node)"
+          >
+            <FolderUp class="h-4 w-4" />
+          </button>
           <button
             class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             :title="'重命名文件夹 ' + node.name"
