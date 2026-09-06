@@ -160,6 +160,12 @@ function handleUploadIntoFolder(dirPath: string) {
   fileInput?.value?.click();
 }
 
+/** 文件夹行"上传本地文件夹到此处"：选本地目录 → 其下文件增量合入该文件夹（目录结构拼在其后） */
+function handleUploadDirIntoFolder(dirPath: string) {
+  uploadIntoDir.value = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+  dirInput?.value?.click();
+}
+
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement | null;
   const files = input?.files ? Array.from(input.files) : [];
@@ -832,6 +838,7 @@ onBeforeUnmount(stopParsePoll);
                 @rename-folder="handleRenameFolder"
                 @delete-folder="handleDeleteFolder"
                 @upload-folder="(node) => handleUploadIntoFolder(node.path)"
+                @upload-dir-folder="(node) => handleUploadDirIntoFolder(node.path)"
               />
             </template>
 
@@ -854,6 +861,7 @@ onBeforeUnmount(stopParsePoll);
                 @rename-folder="handleRenameFolder"
                 @delete-folder="handleDeleteFolder"
                 @upload-folder="(node) => handleUploadIntoFolder(node.path)"
+                @upload-dir-folder="(node) => handleUploadDirIntoFolder(node.path)"
               />
             </template>
           </tbody>

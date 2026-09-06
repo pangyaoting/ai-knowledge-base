@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Folder,
   FolderUp,
+  FolderTree,
 } from 'lucide-vue-next';
 import { fileIconOf, fileBadgeOf } from '@/utils/file-icons';
 import type { DocTreeNode } from '@/utils/doc-tree';
@@ -32,6 +33,7 @@ const emit = defineEmits<{
   (e: 'rename-folder', node: DocTreeNode): void;
   (e: 'delete-folder', node: DocTreeNode): void;
   (e: 'upload-folder', node: DocTreeNode): void;
+  (e: 'upload-dir-folder', node: DocTreeNode): void;
 }>();
 
 const statusText: Record<string, string> = {
@@ -124,6 +126,13 @@ function onReplaceChange(e: Event, docId: string) {
             @click.stop="emit('upload-folder', node)"
           >
             <FolderUp class="h-4 w-4" />
+          </button>
+          <button
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="'上传本地文件夹到此处（增量更新，未变自动跳过）' + node.name"
+            @click.stop="emit('upload-dir-folder', node)"
+          >
+            <FolderTree class="h-4 w-4" />
           </button>
           <button
             class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
