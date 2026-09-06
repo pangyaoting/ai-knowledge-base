@@ -297,16 +297,14 @@ const canRetrieve = question.trim().length > 0;   // 只发图片（无文字）
 let kbSources: RetrievalSource[] = [];
 let retrievalMode: 'fulltext' | 'retrieval' | 'none' = 'none';
 if (useKnowledgeBase && canRetrieve) {
-  if (kbIds.length) {
-    // 绑定明确知识库：先试全文（P0，04 章 §10.1）→ 超阈值走 retrieveWithHyde
+  if (kbIds.length) {   // 绑定明确库：先试全文（P0，04 章 §10.1）→ 超阈值走混合检索
     const ft = await this.ragService.loadFulltext(userId, kbIds, this.fulltextMaxChars);
     if (ft.sources.length > 0) { kbSources = ft.sources; retrievalMode = 'fulltext'; }
     else {
       kbSources = await this.retrieveWithHyde(userId, searchQuery, kbScope, target, sessionId);
       retrievalMode = 'retrieval';
     }
-  } else {
-    // 未绑定知识库 = 检索该用户全部知识库（范围不可控，不做全文）
+  } else {              // 未绑定 = 检索该用户全部库（范围不可控，不做全文）
     kbSources = await this.retrieveWithHyde(userId, searchQuery, kbScope, target, sessionId);
     retrievalMode = 'retrieval';
   }
@@ -1247,24 +1245,13 @@ private translateLLMError(err: unknown, hasImage: boolean): BadRequestException 
 对应代码（分支命中即 return，**特例在前、泛例在后**）：
 
 ```ts
-// 带图请求被上游拒绝（400/422/无 body）→ 优先提示模型不支持图片
-if (hasImage && (status === 400 || status === 422 || /not a vlm|vision language model|image/i.test(raw))) {
-  return new BadRequestException('当前模型不支持图片：请在该会话右上角切换到支持视觉的模型（如 deepseek-v4-flash-vision-exp、Qwen/Qwen3-VL 等），或在「模型配置」检查模型名与平台是否匹配。');
-}
-if (status === 401 || /invalid api key|authentication|unauthorized/i.test(raw)) { … }
-if (status === 402 || /insufficient|balance|quota|payment/i.test(raw)) { … }
+// 分支顺序：带图→401→402→429→model→context→content-type→兜底，命中即 return
+// （完整实现见 chat.service.ts 的 translateLLMError，此处展示两支代表写法）
 if (status === 429 || /rate.?limit|too many requests/i.test(raw)) {
   return new BadRequestException('请求过于频繁（触发限流），请稍等几秒再试。');
 }
-if (/model does not exist|model not found|no such model|invalid model/i.test(raw)) {
-  return new BadRequestException('模型名不存在：平台和模型名必须配套（DeepSeek 官方 API 用 deepseek-v4-flash 等；SiliconFlow 用 deepseek-ai/DeepSeek-V4-Flash 等）。请到「模型配置」修正模型名。');
-}
 if (/context|too long|maximum length|token.*limit/i.test(raw)) {
   return new BadRequestException('对话内容超出模型上下文长度：请精简问题、减少历史或切换更长上下文的模型。');
-}
-// 兜底：把上游 JSON 错误的关键信息带出来，而不是只给 SDK 的 content-type 报错
-if (/expected content-type/i.test(raw) && status !== 500) {
-  return new BadRequestException(`大模型接口调用失败（HTTP ${status}）：${…}`);
 }
 return new BadRequestException(
   `大模型调用失败（HTTP ${status}）：请检查「模型配置」的 Key / 模型名 / 余额，或切换到支持图片的视觉模型。${e.message ?? ''}`.slice(0, 300),
