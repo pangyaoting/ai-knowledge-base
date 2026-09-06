@@ -129,7 +129,7 @@ function onReplaceChange(e: Event, docId: string) {
           </button>
           <button
             class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            :title="'替换此文件夹：选本地文件夹，内容合入此处（同名替换、新增加入）'"
+            :title="'上传本地文件夹到此处（增量更新，未变自动跳过）' + node.name"
             @click.stop="emit('upload-dir-folder', node)"
           >
             <FolderTree class="h-4 w-4" />

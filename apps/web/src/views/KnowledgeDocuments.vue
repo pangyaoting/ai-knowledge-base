@@ -136,16 +136,9 @@ const ringLabel = computed(() => {
 /** 目标上传文件夹路径（'' = 根目录；文件夹行"上传到此文件夹"时设置，如 '主项目/docs/'） */
 const uploadIntoDir = ref('');
 
-/** 上传用文件名：目标文件夹前缀 + 文件相对路径/原名。
- *  顶部上传（uploadIntoDir 空）→ 保留完整相对路径（建树）；
- *  文件夹行上传（uploadIntoDir 非空）→ 去掉本地所选目录名，内容直接归入目标文件夹（替换语义，不嵌套） */
+/** 上传用文件名：目标文件夹前缀 + 文件相对路径/原名（上传到指定文件夹时自动归位） */
 function uploadNameOf(f: File): string {
-  const wp = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
-  let rel = wp || f.name;
-  if (uploadIntoDir.value && wp) {
-    const slash = rel.indexOf('/');
-    if (slash >= 0) rel = rel.slice(slash + 1); // 去掉所选目录名
-  }
+  const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
   return uploadIntoDir.value ? uploadIntoDir.value + rel : rel;
 }
 
