@@ -393,6 +393,8 @@ export class ChatService {
     });
 
     // ⑤ 组装 Prompt（知识库资料 + 网络资料一起注入；LLM 看到的是用户原问题）
+    // 代码解析类问题需要：排版规范注入 + 输出限长（防全文解析 2-3 分钟）
+    const wantsCodeWalkthrough = ChatService.wantsCodeWalkthrough(question);
     const { system, messages } = this.buildPrompt(
       question,
       kbSources,
@@ -421,6 +423,10 @@ export class ChatService {
           stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
           // 会话推理等级（low=关闭/高/max）→ 透传给支持 reasoning_effort 的模型（DeepSeek V4 等）
           ...(session.reasoningEffort ? { reasoning_effort: session.reasoningEffort } : {}),
+          // 代码解析类问题（全文注入 + 详细格式规范）输出量巨大，流式生成 2-3 分钟不可接受：
+          // 设 max_tokens 上限强制收敛（3000 token ≈ 1 分钟内出完），配合提示词要求精炼。
+          // 普通问答不设限，保持完整回答能力。
+          ...(wantsCodeWalkthrough ? { max_tokens: 3000 } : {}),
         },
         { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
       );
@@ -489,6 +495,17 @@ export class ChatService {
 
   // ==================== Prompt 组装 ====================
 
+  /**
+   * 是否"代码解析/讲解"类问题（点名代码文件名，或含解析意图词）。
+   * 影响：① buildPrompt 注入代码排版规范；② 流式调用设 max_tokens 上限防超时。
+   */
+  private static wantsCodeWalkthrough(question: string): boolean {
+    return (
+      /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/i.test(question) ||
+      /解析|逐行|讲解|每一行|怎么(写|做|实现|来的)|如何(实现|工作)|源码/.test(question)
+    );
+  }
+
   private buildPrompt(
     question: string,
     kbSources: RetrievalSource[],
@@ -529,9 +546,7 @@ export class ChatService {
     systemParts.push('回答使用简洁、结构化的中文。');
     // 代码解析格式规范（用户定制）：用户要求"解析/讲解代码"时，按固定排版输出，
     // 避免"代码一段配一句话"的碎片式排版。规范经浓缩以提升模型遵循度（完整版见 docs）。
-    const wantsCodeWalkthrough =
-      /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/i.test(question) ||
-      /解析|逐行|讲解|每一行|怎么(写|做|实现|来的)|如何(实现|工作)|源码/.test(question);
+    const wantsCodeWalkthrough = ChatService.wantsCodeWalkthrough(question);
     if (wantsCodeWalkthrough) {
       systemParts.push(
         '用户要求解析代码时，必须按以下固定排版输出（这是格式要求，非内容要求）：',
@@ -541,7 +556,10 @@ export class ChatService {
         '4. 变量/函数名用反引号、重要概念用**粗体**、文件名用**文件名**、警告用⚠️；',
         '5. 模块间用 `---` 分隔；',
         '6. **结尾必须有总结表格**：`| 功能模块 | 核心变量/函数 | 主要作用 | 关键技术点 |` 逐行填写各模块；',
-        '7. 严禁使用"代码块 + 单句解释"的逐行穿插排版。',
+        '7. 严禁使用"代码块 + 单句解释"的逐行穿插排版；',
+        '8. **篇幅控制（重要）**：你有输出上限，超长文件（>500 行）不要逐模块完整展开——' +
+          '优先讲清 核心结构、关键算法/交互、文件整体流程；次要模块用总结表格一笔带过。' +
+          '控制在 1 分钟能读完的篇幅，避免为了"完整"而输出巨量内容。',
       );
     }
     const system = systemParts.join('\n');
