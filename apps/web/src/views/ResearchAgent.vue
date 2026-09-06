@@ -91,8 +91,9 @@ const selectedMinutes = computed(() => estimateMinutes(selectedTokens.value));
 
 const budgetPercent = computed(() => {
   const t = current.value;
-  // 总预算 = 研究预算 + 固定 12k 报告整理预算（停止/完成时自动把笔记整理成正式报告）
-  const total = (t?.tokenBudget ?? 0) + 12000;
+  // P2-9：进度分母 = 研究预算（tokenBudget）——整理报告的固定 12k 是收尾阶段，
+  // 混进分母会让研究进度天然偏慢（研究 10 万 + 整理 1.2 万 ≈ 偏慢 12%）
+  const total = t?.tokenBudget ?? 0;
   if (!total) return 0;
   return Math.min(100, Math.round(((t?.tokensUsed ?? 0) / total) * 100));
 });
@@ -597,6 +598,7 @@ onBeforeUnmount(() => {
             <Zap class="h-3.5 w-3.5" />
             <span>
               token 已用 {{ fmtTokens(current.tokensUsed) }} /
+              <!-- 总预算展示（含整理 12k；与后端 agent-runner ASSEMBLY_BUDGET=12000 保持一致；进度条分母只用研究预算见 budgetPercent） -->
               {{ fmtTokens(current.tokenBudget + 12000) }}
               <span class="text-[10px]">
                 （研究 {{ fmtTokens(current.tokenBudget) }} + 报告整理 12k）
@@ -767,7 +769,7 @@ onBeforeUnmount(() => {
                 class="text-amber-800 dark:text-amber-300"
               >
                 🗑
-                任务已取消，尚未开始研究。可点击「继续研究」按已拆解方向直接开始，或删除后重新创建。
+                任务已取消，尚未开始研究（方向还未拆解）。「继续研究」将重新拆解方向后开始，或删除后重新创建。
               </p>
               <p v-else class="text-amber-800 dark:text-amber-300">
                 ⏸ 研究已停止（{{
