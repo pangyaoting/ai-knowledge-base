@@ -428,14 +428,16 @@ async function handleReplace(docId: string, file: File) {
   updatingId.value = docId;
   try {
     const oldDoc = list.value.find((d) => d.id === docId);
+    // 行内"更新/替换"语义：名字和内容都换成所选新文件，但留在原文件夹——
+    // 新文件名 = 旧文件所在目录 + 新文件原名（如 docs/00.md 替换成 test.txt → docs/test.txt）
+    let newName = file.name;
+    if (oldDoc?.filename) {
+      const slash = Math.max(oldDoc.filename.lastIndexOf('/'), oldDoc.filename.lastIndexOf('\\'));
+      const dir = slash >= 0 ? oldDoc.filename.slice(0, slash + 1) : '';
+      newName = dir + file.name;
+    }
     // 先提交新版本（后台队列处理），等新文档处理完成后再删旧版——避免中间真空期、失败不丢旧数据
-    // 关键：带上原文件的完整路径（filename），否则新文档会落在知识库根目录而非原文件夹
-    const created = await uploadDocument(
-      knowledgeBaseId,
-      file,
-      undefined,
-      oldDoc?.filename ?? file.name,
-    );
+    const created = await uploadDocument(knowledgeBaseId, file, undefined, newName);
     // 增量向量化：内容没变 → 后端跳过，无需等待/删除
     if ('skipped' in created) {
       await load();
@@ -443,12 +445,12 @@ async function handleReplace(docId: string, file: File) {
       return;
     }
     await waitForDoc(created.id);
-    // 若新旧文件名相同，后端队列已自动替换（旧文档已被删），无需再手动删（否则会 404 报"文档不存在"）
+    // 新文档处理完成后删除旧文档（新名字与旧不同时；同名则由后端队列自动替换）
     if (created.filename !== oldDoc?.filename) {
       await deleteDocument(knowledgeBaseId, docId);
     }
     await load();
-    toast.success('文档已更新并重新向量化');
+    toast.success(`文档已替换为「${newName}」并重新向量化`);
   } catch (e) {
     toast.error((e as Error).message);
   } finally {
