@@ -17,6 +17,7 @@ import Input from '@/components/ui/Input.vue';
 import DocCodeEditor from '@/components/knowledge/DocCodeEditor.vue';
 import DocTableRow from '@/components/knowledge/DocTableRow.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 import {
   getDocuments,
   uploadDocument,
@@ -203,14 +204,12 @@ async function replaceFolderWithFile(file: File, dir: string) {
   const dirTrim = dir.endsWith('/') ? dir.slice(0, -1) : dir;
   const parent = dirTrim.slice(0, dirTrim.lastIndexOf('/') + 1); // 目标文件夹的父路径
   const existing = list.value.filter((d) => d.filename.startsWith(dir));
-  // eslint-disable-next-line no-alert
-  if (
-    !window.confirm(
-      `用文件「${file.name}」替换文件夹「${dirTrim}」？\n\n文件夹内 ${existing.length} 个文档将被删除，文件放到 ${parent || '根目录'}（文件夹消失）。继续？`,
-    )
-  ) {
-    return;
-  }
+  const ok = await confirmDialog({
+    title: '文件夹替换为文件',
+    message: `用文件「${file.name}」替换文件夹「${dirTrim}」？\n\n文件夹内 ${existing.length} 个文档将被删除，文件放到 ${parent || '根目录'}（文件夹消失）。`,
+    confirmText: '替换',
+  });
+  if (!ok) return;
   replacingFolder = true;
   try {
     // 上传新文件（放父目录）→ 成功后再删文件夹全部文档
@@ -237,14 +236,12 @@ async function replaceFolderWithFile(file: File, dir: string) {
 async function replaceFolderUpload(files: File[], dir: string) {
   // 已选好本地目录，此刻确认执行（替换含删除，需用户明确同意）
   const existingCount = list.value.filter((d) => d.filename.startsWith(dir)).length;
-  // eslint-disable-next-line no-alert
-  if (
-    !window.confirm(
-      `用所选文件夹替换「${dir}」？\n\n该文件夹现有 ${existingCount} 个文档：同名将更新，本地没有的旧文件将被删除。继续？`,
-    )
-  ) {
-    return;
-  }
+  const ok = await confirmDialog({
+    title: '用本地文件夹替换',
+    message: `用所选文件夹替换「${dir}」？\n\n该文件夹现有 ${existingCount} 个文档：同名将更新，本地没有的旧文件将被删除。`,
+    confirmText: '替换',
+  });
+  if (!ok) return;
   replacingFolder = true;
   try {
     const targets: Array<{ f: File; name: string }> = [];
@@ -376,14 +373,14 @@ async function startUpload(files: File[]) {
     const name = uploadNameOf(f);
     return list.value.some((d) => d.filename === name);
   });
-  if (
-    dup &&
-    // eslint-disable-next-line no-alert
-    !window.confirm(
-      `存在同名文件「${(dup as File & { webkitRelativePath?: string }).webkitRelativePath || dup.name}」，上传后将替换旧版（旧文档及其向量数据将被删除）。继续？`,
-    )
-  ) {
-    return;
+  if (dup) {
+    const dupName = (dup as File & { webkitRelativePath?: string }).webkitRelativePath || dup.name;
+    const ok = await confirmDialog({
+      title: '同名文件替换',
+      message: `存在同名文件「${dupName}」，上传后将替换旧版（旧文档及其向量数据将被删除）。继续？`,
+      confirmText: '替换上传',
+    });
+    if (!ok) return;
   }
 
   uploadPhase.value = 'uploading';
@@ -559,8 +556,7 @@ async function load() {
 }
 
 async function handleDelete(docId: string, filename: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`删除文档「${filename}」及其向量数据？`)) return;
+  if (!(await confirmDialog(`删除文档「${filename}」及其向量数据？此操作不可恢复。`))) return;
   try {
     await deleteDocument(knowledgeBaseId, docId);
     await load();
@@ -590,10 +586,17 @@ async function handleDownload(doc: Document) {
 const updatingId = ref<string | null>(null);
 
 /** 行内"更新/替换"：子组件已解析文件并 emit (docId, file) */
-function onReplaceFileChange(docId: string, file: File) {
+async function onReplaceFileChange(docId: string, file: File) {
   if (!file) return;
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`用「${file.name}」替换当前文档？旧文档及其向量数据将被删除。`)) return;
+  if (
+    !(await confirmDialog({
+      title: '替换文档',
+      message: `用「${file.name}」替换当前文档？旧文档及其向量数据将被删除。`,
+      confirmText: '替换',
+    }))
+  ) {
+    return;
+  }
   void handleReplace(docId, file);
 }
 
@@ -696,8 +699,11 @@ async function handleDeleteFolder(node: DocTreeNode) {
     toast.error('文件夹下没有文件');
     return;
   }
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`删除文件夹「${node.name}」及其下 ${docs.length} 个文档（含向量数据）？`)) {
+  if (
+    !(await confirmDialog(
+      `删除文件夹「${node.name}」及其下 ${docs.length} 个文档（含向量数据）？此操作不可恢复。`,
+    ))
+  ) {
     return;
   }
   const errors: string[] = [];
@@ -738,8 +744,9 @@ function clearSelection() {
 async function deleteSelected() {
   const docs = list.value.filter((d) => selectedIds.has(d.id));
   if (!docs.length) return;
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`删除选中的 ${docs.length} 个文档（含向量数据）？`)) return;
+  if (!(await confirmDialog(`删除选中的 ${docs.length} 个文档（含向量数据）？此操作不可恢复。`))) {
+    return;
+  }
   const errors: string[] = [];
   let next = 0;
   const worker = async () => {

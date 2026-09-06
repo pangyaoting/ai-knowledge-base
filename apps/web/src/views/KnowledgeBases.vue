@@ -17,6 +17,7 @@ import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
 import Skeleton from '@/components/ui/Skeleton.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 import {
   getKnowledgeBases,
   createKnowledgeBase,
@@ -96,9 +97,13 @@ async function handleCreate() {
 }
 
 async function handleDelete(id: string, name: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`删除知识库「${name}」将同时删除其中所有文档和向量数据，确定要删除吗？`))
+  if (
+    !(await confirmDialog(
+      `删除知识库「${name}」将同时删除其中所有文档和向量数据，此操作不可恢复。确定删除吗？`,
+    ))
+  ) {
     return;
+  }
   try {
     await deleteKnowledgeBase(id);
     await load();

@@ -7,6 +7,7 @@ import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 import { getReports, getReport, createReport, deleteReport, cancelReport } from '@/api/research';
 import { getKnowledgeBases } from '@/api/knowledge';
 import { getModelConfigs } from '@/api/model-configs';
@@ -254,8 +255,7 @@ async function handleCreate() {
 }
 
 async function handleDelete(id: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm('删除这份研究报告？')) return;
+  if (!(await confirmDialog('删除这份研究报告？此操作不可恢复。'))) return;
   try {
     await deleteReport(id);
     if (currentId.value === id) {

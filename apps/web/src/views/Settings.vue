@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -297,14 +298,15 @@ async function handleDeleteAccount() {
     toast.error('请输入当前密码确认注销');
     return;
   }
-  // eslint-disable-next-line no-alert
-  if (
-    !window.confirm(
+  // 替换原生 confirm：样式统一 + 展示完整后果
+  const ok = await confirmDialog({
+    title: '注销账号',
+    message:
       '确定要注销账号吗？账号及全部数据（知识库、文档、对话、研究报告、自主研究任务、模型配置）将被永久删除，且不可恢复。',
-    )
-  ) {
-    return;
-  }
+    confirmText: '确认注销',
+    danger: true,
+  });
+  if (!ok) return;
   deleting.value = true;
   try {
     await deleteAccount(deleteForm.password);

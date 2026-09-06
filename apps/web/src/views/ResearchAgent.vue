@@ -20,6 +20,7 @@ import AgentCreateForm from '@/components/research/AgentCreateForm.vue';
 import AgentExtendModal from '@/components/research/AgentExtendModal.vue';
 import AgentReportView from '@/components/research/AgentReportView.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 import {
   getAgentTasks,
   getAgentTask,
@@ -441,8 +442,8 @@ async function handleExtend(tokens: number, minutes: number) {
 }
 
 async function handleDelete(id: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm('删除这个研究任务？')) return;
+  if (!(await confirmDialog('删除这个研究任务？任务记录及已生成报告将一并删除，不可恢复。')))
+    return;
   try {
     await deleteAgentTask(id);
     if (currentId.value === id) {

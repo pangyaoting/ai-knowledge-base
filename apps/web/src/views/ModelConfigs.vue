@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button.vue';
 import Skeleton from '@/components/ui/Skeleton.vue';
 import ModelConfigForm from '@/components/ModelConfigForm.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 import {
   getModelConfigs,
   deleteModelConfig,
@@ -51,8 +52,7 @@ async function onFormSaved() {
 }
 
 async function handleDelete(id: string, name: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm(`删除模型配置「${name}」？`)) return;
+  if (!(await confirmDialog(`删除模型配置「${name}」？删除后需重新绑定才能使用。`))) return;
   try {
     await deleteModelConfig(id);
     if (editingId.value === id) editingId.value = null;

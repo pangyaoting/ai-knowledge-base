@@ -18,6 +18,7 @@ import ChatThinkingBar from '@/components/chat/ChatThinkingBar.vue';
 import ChatMessageInput from '@/components/chat/ChatMessageInput.vue';
 import ChatKbPickerModal from '@/components/chat/ChatKbPickerModal.vue';
 import { toast } from '@/composables/useToast';
+import { confirmDialog } from '@/composables/useConfirm';
 import {
   getChatSessions,
   createChatSession,
@@ -446,8 +447,7 @@ async function confirmCreateSession() {
 }
 
 async function handleDeleteSession(id: string) {
-  // eslint-disable-next-line no-alert
-  if (!window.confirm('删除该会话及其全部消息？')) return;
+  if (!(await confirmDialog('删除该会话及其全部消息？此操作不可恢复。'))) return;
   try {
     await deleteChatSession(id);
     delete inputDrafts.value[id];
