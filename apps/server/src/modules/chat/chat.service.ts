@@ -607,9 +607,29 @@ export class ChatService {
     target: ChatTarget,
     sessionId: string,
   ): Promise<RetrievalSource[]> {
-    // C 符号命中优先：问题点名符号 → 返回实现源码，跳过语义检索
+    // C 符号命中优先：问题点名符号 → 返回实现源码。
+    // 不只给符号实现：并做片段检索补充上下文（cap 8）——
+    // 用户问"updateBlackHole 在哪被调用""rrfMerge 和 aggregateFulltext 区别"时，
+    // 纯符号函数体答不了调用点/对比，需要片段提供上下文。
+    // 片段先限定在符号所在文档内找（同文件上下文最相关），0 条再放宽全库。
     const symbolHits = await this.ragService.symbolLookup(userId, query, kbScope);
     if (symbolHits.length > 0) {
+      const symDocIds = [...new Set(symbolHits.map((s) => s.documentId))];
+      let ctx = await this.ragService.retrieve(userId, query, kbScope, 5, symDocIds);
+      if (ctx.length === 0) {
+        ctx = await this.ragService.retrieve(userId, query, kbScope, 5);
+      }
+      if (ctx.length > 0) {
+        const seen = new Set(symbolHits.map((s) => s.chunkId));
+        for (const s of ctx) {
+          if (symbolHits.length >= 8) break;
+          if (!seen.has(s.chunkId)) symbolHits.push(s);
+        }
+        this.logger.log(
+          `会话 ${sessionId} 符号命中 ${symbolHits.length} 条（实现 + 片段上下文补充）`,
+        );
+        return symbolHits;
+      }
       this.logger.log(`会话 ${sessionId} 符号命中 ${symbolHits.length} 条（问题包含符号名）`);
       return symbolHits;
     }
