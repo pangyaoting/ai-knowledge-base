@@ -49,7 +49,7 @@
 
 - **私钥** = 钥匙（自己留着，绝不外传）；**公钥** = 锁（交给对方）；
 - CI 部署流程：GitHub 拿**私钥**去开锁，服务器用**公钥**验证 → 配对成功才放行登录；
-- 你本地 `C:\Users\qie'li\.ssh\` 下现在有：
+- 你本地 `~/.ssh/`（用户目录，具体路径见本机）下现在有：
   - `kb_ci` / `kb_ci.pub` —— CI 自动部署用（私钥在 GitHub Secrets）
   - `kb_deploy` / `kb_deploy.pub` —— 早期方案遗留，已不需要（别删也行，别外传）
 
@@ -59,7 +59,7 @@
 |---|---|---|
 | `JWT_SECRET` / `JWT_REFRESH_SECRET` | 签发访问令牌/刷新令牌的签名 | 改了所有人要重新登录 |
 | `MODEL_KEY_SECRET` | 加密用户网页绑定的模型 Key（AES-256-GCM） | **改了用户存的 Key 全解不开**（需重绑） |
-| `DATABASE_URL` 密码 | PostgreSQL（docker 内 kb123456） | 容器参数对应 |
+| `DATABASE_URL` 密码 | PostgreSQL（docker 内 **`<已脱敏，见服务器 .env>`**） | 容器参数对应 |
 | 服务器 `.env` 备份 | `/opt/kb/.env.bak` | 每次 CI 部署自动备份 |
 
 ---
@@ -98,7 +98,7 @@
 
 | 项 | 状态 | 建议 |
 |---|---|---|
-| root 密码 | ⚠️ 较弱（`123456@qwe`） | **改强**：腾讯云控制台重置密码（10 位+大小写数字符号） |
+| root 密码 | ⚠️ 已按建议改强（**具体值不入库，见腾讯云控制台**） | 保持强密码（10 位+大小写数字符号），勿写进任何文档/仓库 |
 | kb_ci 私钥 | 只在 GitHub Secrets | ✅ 正确；本地 `kb_ci` 文件别外发 |
 | 模型 Key | 用户侧加密存库；平台 Key 在服务器 .env | ✅ 仓库里绝不能出现任何 `sk-` |
 | 服务器 .env | `/opt/kb/ai-knowledge-base/.env`（CI 自动备份到 /opt/kb/.env.bak） | ✅ |
