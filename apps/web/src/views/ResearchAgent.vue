@@ -310,10 +310,15 @@ async function handleCreate() {
 
 async function handleStop() {
   const t = current.value;
-  if (!t || !['pending', 'running'].includes(t.status)) return;
+  // P0-3：awaiting_confirm（待确认方向）也能停止（=取消拆解，后端 agent-task 合法支持）
+  if (!t || !['pending', 'running', 'awaiting_confirm'].includes(t.status)) return;
   try {
     current.value = await stopAgentTask(t.id);
-    toast.success('已请求停止，正在整理成正式报告...');
+    toast.success(
+      t.status === 'awaiting_confirm'
+        ? '已取消该任务（方向确认阶段，未开始研究）'
+        : '已请求停止，正在整理成正式报告...',
+    );
     startPolling();
   } catch (e) {
     toast.error((e as Error).message);
@@ -377,7 +382,7 @@ function handleExport() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${(t.goal || '自主探索').slice(0, 40)}.md`;
+  a.download = `${(t.goal || '自主探索').replace(/[\\/:*?"<>|]/g, '-').slice(0, 40)}.md`;
   a.click();
   URL.revokeObjectURL(url);
 }

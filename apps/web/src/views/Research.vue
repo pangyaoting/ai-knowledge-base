@@ -124,19 +124,26 @@ async function selectReport(id: string) {
 /** 轮询生成进度（1.5s），完成后停止 */
 function startPolling() {
   stopPolling();
+  pollFails = 0;
   pollTimer = setInterval(async () => {
     if (!currentId.value) return;
     try {
       const r = await getReport(currentId.value);
+      pollFails = 0;
       current.value = r;
       const i = reports.value.findIndex((x) => x.id === r.id);
       if (i >= 0) reports.value[i] = r;
       if (r.status === 'done' || r.status === 'failed') stopPolling();
     } catch {
-      stopPolling();
+      // P0-1：网络抖动不能停轮询——连续失败 3 次才停（后端仍可能正常生成）
+      pollFails++;
+      if (pollFails >= 3) stopPolling();
     }
   }, 1500);
 }
+
+/** 连续轮询失败计数（网络抖动自动恢复，连续 3 次才判定中断） */
+let pollFails = 0;
 
 function stopPolling() {
   if (pollTimer) {
@@ -164,6 +171,18 @@ async function handleNew() {
   current.value = null;
   error.value = '';
   await openKbs();
+}
+
+/** 失败后"重新生成"：回填原主题（检索范围在失败时未被清空，沿用）→ 直接重新提交 */
+async function handleRetryFailed() {
+  const r = current.value;
+  if (!r) return;
+  topic.value = r.topic ?? '';
+  currentId.value = null;
+  current.value = null;
+  error.value = '';
+  await openKbs();
+  void handleCreate();
 }
 
 async function handleCreate() {
@@ -223,7 +242,9 @@ function handleExport() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${r.topic}.md`;
+  a.download = `${String(r.topic)
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .slice(0, 80)}.md`; // 清洗非法文件名字符
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -457,15 +478,7 @@ onBeforeUnmount(stopPolling);
             class="flex flex-col items-center justify-center py-24 text-center"
           >
             <p class="text-sm text-destructive">生成失败：{{ current.error || '未知错误' }}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              class="mt-4"
-              @click="
-                currentId = null;
-                current = null;
-              "
-            >
+            <Button variant="outline" size="sm" class="mt-4" @click="handleRetryFailed">
               重新生成
             </Button>
           </div>
