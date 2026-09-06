@@ -177,6 +177,20 @@
   color: var(--primary);
   text-decoration: underline;
 }
+/* P2-10：报告正文 [来源N] 引用标记 —— 可点击跳转到来源 */
+.markdown-body .report-src-ref {
+  color: var(--primary);
+  text-decoration: none;
+  cursor: pointer;
+  font-weight: 500;
+  border-bottom: 1px dashed color-mix(in srgb, var(--primary) 60%, transparent);
+  transition: background-color 0.15s;
+  padding: 0 1px;
+}
+.markdown-body .report-src-ref:hover {
+  background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+  border-bottom-style: solid;
+}
 .markdown-body blockquote {
   border-left: 3px solid var(--border);
   padding-left: 0.75em;

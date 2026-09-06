@@ -121,6 +121,9 @@ async function selectReport(id: string) {
   // 记忆当前报告：切到别的导航再回来，仍停留在该报告
   sessionStorage.setItem('research-active-report', id);
   error.value = '';
+  // P2-10：切换报告时重置来源跳转高亮（展开态保留用户上次操作？不，重置更干净）
+  activeSourceNum.value = null;
+  sourcesOpen.value = false;
   try {
     current.value = await getReport(id);
     if (current.value && generating.value) startPolling();
@@ -269,9 +272,39 @@ async function handleDelete(id: string) {
 
 // ==================== 报告渲染 ====================
 
-/** 点击复制代码按钮（事件委托，同对话页）；http 下 clipboard API 不可用 → copyText 自动降级 */
+/** 报告正文渲染：把 [来源N] 标记转成可点击锚点（P2-10），点击可跳转定位到来源 */
+function renderReportContent(content: string): string {
+  const html = renderMarkdown(content);
+  // 先保护代码块（pre/code 内可能含 [来源N] 字面量，不该变成链接）
+  const codes: string[] = [];
+  const guarded = html.replace(/<pre[\s\S]*?<\/pre>|<code[\s\S]*?<\/code>/g, (m) => {
+    codes.push(m);
+    return `\u0000SRCCODE${codes.length - 1}\u0000`;
+  });
+  const replaced = guarded.replace(
+    /\[来源(\d+)\]/g,
+    (_m, n: string) =>
+      `<a class="report-src-ref" data-src-num="${n}" href="javascript:void(0)">[来源${n}]</a>`,
+  );
+  return replaced.replace(/\u0000SRCCODE(\d+)\u0000/g, (_m, i: string) => codes[Number(i)]);
+}
+
+/**
+ * 点击报告正文（事件委托）：
+ * - [来源N] 引用标记 → 展开来源面板并定位高亮到对应条目
+ * - 代码复制按钮（同对话页）
+ */
 async function handleReportClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
+  // 代码块内的引用不可点（renderReportContent 已保护，这里双保险）
+  if (target.closest('pre')) return;
+  const srcRef = target.closest<HTMLAnchorElement>('.report-src-ref');
+  if (srcRef) {
+    e.preventDefault();
+    const num = Number(srcRef.dataset.srcNum);
+    jumpToSource(num);
+    return;
+  }
   if (target.classList.contains('code-copy')) {
     const code = getCopyCode(target);
     if (code && (await copyText(code))) {
@@ -279,6 +312,28 @@ async function handleReportClick(e: MouseEvent) {
       setTimeout(() => (target.textContent = '复制'), 1500);
     }
   }
+}
+
+/** 来源面板展开态（点击 [来源N] 时自动展开） */
+const sourcesOpen = ref(false);
+/** 当前高亮的来源编号 */
+const activeSourceNum = ref<number | null>(null);
+
+/** 从正文 [来源N] 跳转：展开来源面板 + 高亮该条 + 打开原文预览 */
+function jumpToSource(num: number) {
+  const src = current.value?.sources?.find((s) => s.number === num);
+  if (!src) {
+    toast.info(`来源 ${num} 不在引用列表中`);
+    return;
+  }
+  sourcesOpen.value = true;
+  activeSourceNum.value = num;
+  openSource(src);
+  // 等面板展开渲染后滚动定位到该条
+  requestAnimationFrame(() => {
+    const el = document.querySelector(`[data-source-row="${num}"]`);
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
 }
 
 /** 导出报告为 Markdown（前端直接下载，无需后端） */
@@ -559,12 +614,16 @@ onBeforeUnmount(stopPolling);
             <div
               class="markdown-body rounded-lg border bg-card px-5 py-4"
               @click="handleReportClick"
-              v-html="renderMarkdown(current.content)"
+              v-html="renderReportContent(current.content)"
             />
 
-            <!-- 引用来源 -->
+            <!-- 引用来源（P2-10：正文 [来源N] 可点击，展开并定位到此面板对应条目） -->
             <div v-if="current.sources?.length" class="mt-4">
-              <details class="rounded-lg border bg-muted/40 px-3 py-2 text-xs">
+              <details
+                class="rounded-lg border bg-muted/40 px-3 py-2 text-xs"
+                :open="sourcesOpen"
+                @toggle="sourcesOpen = ($event.target as HTMLDetailsElement).open"
+              >
                 <summary class="cursor-pointer font-medium text-muted-foreground">
                   📚 引用来源（{{ current.sources.length }} 条，点击可定位原文）
                 </summary>
@@ -572,7 +631,11 @@ onBeforeUnmount(stopPolling);
                   <li
                     v-for="src in current.sources"
                     :key="src.number"
+                    :data-source-row="src.number"
                     class="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent/60"
+                    :class="
+                      activeSourceNum === src.number ? 'bg-primary/10 ring-1 ring-primary/40' : ''
+                    "
                     :title="'点击定位到原文第 ' + (src.chunkIndex + 1) + ' 段'"
                     @click="openSource(src)"
                   >
