@@ -219,14 +219,64 @@ export class RagService {
    * 比语义检索精准：不看"像不像"，只看"问题里是否出现库里的符号名"（标识符精确匹配）。
    * 命中结果 similarity 置 null（非语义分数），调用方作为高置信来源优先采用。
    * 中文/无标识符问题返回空（fallback 语义检索）。
+   *
+   * 噪音过滤（评测发现的劫持）：
+   * - 全大写缩写（OCR/API/SSE…）：问"支持 OCR 吗"是问能力边界，不是点名符号，排除；
+   * - 通用英文词（token/user/error…）：太泛，任何库都可能有同名符号，
+   *   会让"登录鉴权怎么拿到 token"被一个叫 token 的变量符号劫持，跳过真正的语义检索。
    */
+  private static readonly SYMBOL_STOPWORDS = new Set([
+    'token',
+    'user',
+    'users',
+    'error',
+    'data',
+    'file',
+    'files',
+    'type',
+    'types',
+    'name',
+    'date',
+    'time',
+    'key',
+    'keys',
+    'id',
+    'api',
+    'url',
+    'body',
+    'params',
+    'string',
+    'number',
+    'boolean',
+    'object',
+    'array',
+    'value',
+    'status',
+    'code',
+    'message',
+    'model',
+    'config',
+    'login',
+    'logout',
+    'register',
+    'avatar',
+    'theme',
+  ]);
+
+  /** 是否值得当符号名查：排除全大写缩写（OCR/SSE/API）与通用停用词 */
+  private static isSymbolToken(tok: string): boolean {
+    if (tok === tok.toUpperCase()) return false; // 全大写 = 缩写/常量，非函数名
+    return !RagService.SYMBOL_STOPWORDS.has(tok.toLowerCase());
+  }
+
   async symbolLookup(
     userId: string,
     question: string,
     kbIds?: string[],
   ): Promise<RetrievalSource[]> {
-    // 提取问题里的标识符（camelCase/snake 等符号名），排除 3 字符以下减少噪音
-    const tokens = question.match(/[A-Za-z_$][\w$]{2,}/g) ?? [];
+    // 提取问题里的标识符（camelCase/snake 等符号名），排除 3 字符以下 + 噪音词
+    const tokens =
+      question.match(/[A-Za-z_$][\w$]{2,}/g)?.filter((t) => RagService.isSymbolToken(t)) ?? [];
     if (tokens.length === 0) return [];
     const hits = await this.prisma.codeSymbol.findMany({
       where: {
@@ -295,7 +345,8 @@ export class RagService {
 
   /**
    * 按业务关键词补召模块代码文件（确定性路径匹配，兜档案语义召回之不足）。
-   * 只召回"模块内主 service"（*service.ts / *controller.ts / 关键工具），避免拉整个目录。
+   * 只召回"模块内主实现"：优先 *service.ts / *controller.ts（业务逻辑所在），
+   * 排除 spec/test（测试文件）、dto（纯类型），避免拉进无关文件。
    */
   async profileLookupByKeyword(
     userId: string,
@@ -312,11 +363,27 @@ export class RagService {
         filename: { contains: matched.pathPart },
         fileType: 'code',
         status: 'done',
+        NOT: {
+          OR: [
+            { filename: { contains: '.spec.' } },
+            { filename: { contains: '/dto/' } },
+            { filename: { contains: '.dto.' } },
+          ],
+        },
       },
       select: { id: true, filename: true },
-      take: limit,
+      take: 10, // 多取再排序，保证 service/controller 优先
     });
-    return rows.map((r) => ({ documentId: r.id, filename: r.filename }));
+    // 业务逻辑优先：service > controller > 其他（按文件名子串打分）
+    const score = (fn: string): number => {
+      if (/\.service\./.test(fn)) return 0;
+      if (/\.controller\./.test(fn)) return 1;
+      return 2;
+    };
+    return rows
+      .sort((a, b) => score(a.filename) - score(b.filename))
+      .slice(0, limit)
+      .map((r) => ({ documentId: r.id, filename: r.filename }));
   }
 
   /**
