@@ -31,6 +31,7 @@ import {
   deleteAgentTask,
 } from '@/api/research-agent';
 import { getModelConfigs } from '@/api/model-configs';
+import { notifyUser, ensureNotifyPermission } from '@/utils/notify';
 import type { AgentTask, AgentMode, AgentDirection } from '@/types/research-agent';
 import type { ModelConfig } from '@/types/model-config';
 
@@ -201,16 +202,40 @@ async function selectTask(id: string) {
   }
 }
 
-/** 轮询进度（2.5s），结束或阶段报告出来后停止 */
+/** 轮询进度（2.5s），结束或阶段报告出来后停止；长任务结束时弹系统通知（P2-11） */
 function startPolling() {
   stopPolling();
+  // 记住进入轮询时的状态，用于检测「非终态 → 终态」转移，只在状态真正变化那一刻通知一次
+  let lastStatus: AgentTask['status'] | undefined = current.value?.status;
+  let lastHadReport = Boolean(current.value?.report);
   pollTimer = setInterval(async () => {
     if (!currentId.value) return;
     try {
       const t = await getAgentTask(currentId.value);
+      const prevStatus = lastStatus;
+      const prevHadReport = lastHadReport;
       current.value = t;
+      lastStatus = t.status;
+      lastHadReport = Boolean(t.report);
       const i = tasks.value.findIndex((x) => x.id === t.id);
       if (i >= 0) tasks.value[i] = t;
+      // P2-11：状态转移通知（跳过刚进入页面时已是终态的情况）
+      if (prevStatus !== undefined) {
+        if (t.status === 'done' && prevStatus !== 'done') {
+          notifyUser(
+            '研究任务完成',
+            t.goal ? `《${t.goal}》已完成，点击查看报告` : '点击查看完整报告',
+          );
+        } else if (t.status === 'failed' && prevStatus !== 'failed') {
+          notifyUser('研究任务失败', t.goal ? `《${t.goal}》失败，可查看原因` : '点击查看失败原因');
+        } else if (t.status === 'awaiting_confirm' && prevStatus !== 'awaiting_confirm') {
+          // Agent 停下来等你确认方向 → 值得弹一次（可能等了几分钟）
+          notifyUser('等待确认研究方向', 'Agent 已拆解完研究方向，请回来选择后继续');
+        } else if (t.status === 'stopped' && t.report && !prevHadReport) {
+          // 手动停止后，阶段/最终报告整理完成
+          notifyUser('研究报告已整理完成', '任务已停止，报告可查看与导出');
+        }
+      }
       if (!polling.value) stopPolling();
     } catch {
       stopPolling();
@@ -300,6 +325,8 @@ async function handleCreate() {
     tasks.value.unshift(task);
     await selectTask(task.id);
     toast.success('研究任务已创建，正在拆解研究方向...');
+    // P2-11：研究可能要几十分钟，顺手问一次通知权限（拒绝也不影响使用）
+    void ensureNotifyPermission();
   } catch (err) {
     toast.error((err as Error).message);
   } finally {

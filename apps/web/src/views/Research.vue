@@ -12,6 +12,7 @@ import { getKnowledgeBases } from '@/api/knowledge';
 import { getModelConfigs } from '@/api/model-configs';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import { copyText } from '@/utils/clipboard';
+import { notifyUser, ensureNotifyPermission } from '@/utils/notify';
 import type { Report, ReportSource } from '@/types/research';
 import type { KnowledgeBase } from '@/types/knowledge';
 import type { ModelConfig } from '@/types/model-config';
@@ -128,10 +129,12 @@ async function selectReport(id: string) {
   }
 }
 
-/** 轮询生成进度（1.5s），完成后停止 */
+/** 轮询生成进度（1.5s），完成后停止；长任务结束时弹系统通知（P2-11） */
 function startPolling() {
   stopPolling();
   pollFails = 0;
+  // 记录进入轮询时的状态，用于检测「非终态 → 终态」的转移，只在真正完成那一刻通知一次
+  let lastStatus = current.value?.status ?? 'pending';
   pollTimer = setInterval(async () => {
     if (!currentId.value) return;
     try {
@@ -140,7 +143,26 @@ function startPolling() {
       current.value = r;
       const i = reports.value.findIndex((x) => x.id === r.id);
       if (i >= 0) reports.value[i] = r;
-      if (r.status === 'done' || r.status === 'failed' || r.status === 'cancelled') stopPolling();
+      if (r.status === 'done' || r.status === 'failed' || r.status === 'cancelled') {
+        // 从生成中/排队中跳转到终态 → 弹通知（已授权时）
+        const notTerminal =
+          lastStatus !== 'done' && lastStatus !== 'failed' && lastStatus !== 'cancelled';
+        if (notTerminal) {
+          if (r.status === 'done')
+            notifyUser(
+              '研究报告生成完成',
+              r.topic ? `《${r.topic}》已生成，点击查看` : '点击查看报告',
+            );
+          else if (r.status === 'failed')
+            notifyUser(
+              '研究报告生成失败',
+              r.topic ? `《${r.topic}》生成失败，可重新生成` : '点击查看失败原因',
+            );
+          else notifyUser('研究报告已取消', r.topic ? `《${r.topic}》已取消` : '');
+        }
+        stopPolling();
+      }
+      lastStatus = r.status;
     } catch {
       // P0-1：网络抖动不能停轮询——连续失败 3 次才停（后端仍可能正常生成）
       pollFails++;
@@ -219,6 +241,8 @@ async function handleCreate() {
     topic.value = '';
     pickingKbIds.value = [];
     await selectReport(report.id);
+    // P2-11：生成可能要几分钟，顺手问一次通知权限（拒绝也不影响使用）
+    void ensureNotifyPermission();
   } catch (e) {
     toast.error((e as Error).message);
   } finally {
