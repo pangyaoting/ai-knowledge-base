@@ -31,6 +31,9 @@ function parseImageUrls(raw: string | null): string[] | null {
 
 const HISTORY_ROUNDS = 6; // 历史对话最多保留最近 3 轮（6 条）
 
+/** 截断标记：finish_reason=length 时追加到回答尾部；历史带此标记 + 用户回复"继续" → 续写模式 */
+const TRUNCATION_HINT = '已达输出上限';
+
 /**
  * 对话服务：会话管理 + RAG 问答编排
  * 流程：检索 → 组装 Prompt → DeepSeek 流式 → 通过 writer 输出 SSE 事件
@@ -51,6 +54,24 @@ export class ChatService {
   private get fulltextMaxChars(): number {
     const v = Number(this.configService.get<string>('FULLTEXT_MAX_CHARS', '40000'));
     return Number.isFinite(v) && v > 0 ? v : 40000;
+  }
+
+  /** 解析类正文输出上限（.env 可配 PARSE_MAX_TOKENS，默认 6000） */
+  private get parseMaxTokens(): number {
+    const v = Number(this.configService.get<string>('PARSE_MAX_TOKENS', '6000'));
+    return Number.isFinite(v) && v > 0 ? v : 6000;
+  }
+
+  /** 官方 DeepSeek 思考预算（.env 可配 PARSE_THINK_BUDGET，默认 2048；0 = 不设 thinking 参数） */
+  private get thinkBudgetTokens(): number {
+    const v = Number(this.configService.get<string>('PARSE_THINK_BUDGET', '2048'));
+    return Number.isFinite(v) && v >= 0 ? v : 2048;
+  }
+
+  /** "继续"续写轮的输出上限（.env 可配 PARSE_CONTINUE_MAX_TOKENS，默认 12000） */
+  private get continueMaxTokens(): number {
+    const v = Number(this.configService.get<string>('PARSE_CONTINUE_MAX_TOKENS', '12000'));
+    return Number.isFinite(v) && v > 0 ? v : 12000;
   }
 
   // ==================== 会话管理 ====================
@@ -338,9 +359,19 @@ export class ChatService {
     //    例如第二问"它的原理是什么" → "【上一轮主题】的原理是什么"。
     //    改写只影响【检索】，回答仍用用户的原问题（不改变对话语义）。
     //    纯对话模式（不用知识库也不联网）不需要检索 → 跳过改写，省一次 LLM 调用。
+    // 代码解析类判定提前（影响：跳过改写/跳过联网/检索收窄/思考预算与输出上限）
+    const wantsCodeWalkthrough = ChatService.wantsCodeWalkthrough(question);
+    const namedFile = ChatService.namedCodeFile(question);
+    // "继续"续写模式：用户回复 继续/接着写 且上一轮回答因截断带上了标记（见 TRUNCATION_HINT）
+    const isPureContinue = /^\s*(继续|接着(写|讲|说|解析)?|continue)\s*$/i.test(question.trim());
+    const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
+    const isContinuation = isPureContinue && !!lastAssistant?.content.includes(TRUNCATION_HINT);
+
+    // 解析类/续写类不查询改写：文件名问法自包含，改写只会搅乱文件名；"继续"改写无意义
+    // （省一次串行 LLM 调用 3~10s）
     const needRetrieval = useKnowledgeBase || useWebSearch;
     const searchQuery =
-      history.length && needRetrieval && question.trim()
+      history.length && needRetrieval && question.trim() && !wantsCodeWalkthrough && !isContinuation
         ? await this.rewriteQuery(question, history, target)
         : question;
 
@@ -376,8 +407,30 @@ export class ChatService {
         retrievalMode = 'retrieval';
       }
     }
+    // 批1-4：解析类/续写类默认不联网——解析对象是代码本身，联网教程只会添乱拖慢
     const webSources =
-      useWebSearch && canRetrieve ? await this.webSearchService.search(searchQuery) : [];
+      useWebSearch && canRetrieve && !wantsCodeWalkthrough && !isContinuation
+        ? await this.webSearchService.search(searchQuery)
+        : [];
+
+    // 批1-4：解析类未点名文件 → 检索资料只是辅助上下文（解析对象应在历史/上传内容里），
+    // 收窄注入量并 code 优先：深度由 A+C 档案/符号定位保证，这里只减噪音防思考发散
+    if (
+      wantsCodeWalkthrough &&
+      !namedFile &&
+      retrievalMode === 'retrieval' &&
+      kbSources.length > 6
+    ) {
+      const codeFirst = (fn: string) =>
+        /\.(ts|js|vue|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql)$/i.test(fn);
+      const codeSrc = kbSources.filter((s) => codeFirst(s.filename));
+      const docSrc = kbSources.filter((s) => !codeFirst(s.filename));
+      kbSources = [...codeSrc, ...docSrc].slice(0, 6);
+      this.logger.log(
+        `会话 ${sessionId} 解析类未点名文件：注入收窄至 ${kbSources.length} 条（code 优先）`,
+      );
+    }
+
     writer('sources', { kb: kbSources, web: webSources, mode: retrievalMode });
 
     // ④ 保存用户消息（含图片 data URL 数组；单图兼容字段存第一张）
@@ -393,8 +446,6 @@ export class ChatService {
     });
 
     // ⑤ 组装 Prompt（知识库资料 + 网络资料一起注入；LLM 看到的是用户原问题）
-    // 代码解析类问题需要：排版规范注入 + 输出限长（防全文解析 2-3 分钟）
-    const wantsCodeWalkthrough = ChatService.wantsCodeWalkthrough(question);
     const { system, messages } = this.buildPrompt(
       question,
       kbSources,
@@ -402,28 +453,48 @@ export class ChatService {
       history,
       useKnowledgeBase,
       images,
+      { walkthrough: wantsCodeWalkthrough, continuation: isContinuation },
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
     // 模型目标已在开头解析（会话绑定 → 用户默认配置），token 全部由用户自己的 Key 承担。
-    // 慢与"空输出"的根源常在默认思考：V4 系模型默认会先思考，解析类大请求会思考很久
-    // （页面无任何输出），且思考可能占满 max_tokens 额度导致正文为空。因此解析类问题
-    // 强制推理等级 low（关闭思考）——用户显式选 high/max 时尊重其深度思考意图，不覆盖。
+    // 批1-1/1-2 策略：不再强制关思考（深度由会话档位决定）；"思考吃光 max_tokens 导致正文
+    // 为空"改由"思考预算化"根治——官方 DeepSeek 请求带 thinking.budget_tokens（思考独立封顶，
+    // 不再与正文抢同一个 max_tokens），正文上限给足；第三方网关不支持该参数时自动去参重试。
     const answerClient = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
     const abortController = new AbortController();
     const onAbort = () => abortController.abort();
     signal.addEventListener('abort', onAbort, { once: true });
 
-    const codeEffort =
-      wantsCodeWalkthrough &&
-      session.reasoningEffort !== 'high' &&
-      session.reasoningEffort !== 'max'
-        ? 'low'
-        : (session.reasoningEffort ?? undefined);
-    // 部分模型/网关不支持 reasoning_effort 参数（400）→ 去掉该参数原样重试一次
-    const attempts: Array<{ reasoningEffort?: string }> = codeEffort
-      ? [{ reasoningEffort: codeEffort }, {}]
-      : [{}];
+    const isOfficialDeepSeek = /api\.deepseek\.com/.test((target.baseURL ?? '').toLowerCase());
+    // 输出上限：续写轮 = PARSE_CONTINUE_MAX_TOKENS（默认 12000）；解析类 = PARSE_MAX_TOKENS（默认 6000）；
+    // 普通问答不设限，保持完整回答能力。
+    const maxTokens = isContinuation
+      ? this.continueMaxTokens
+      : wantsCodeWalkthrough
+        ? this.parseMaxTokens
+        : undefined;
+
+    // 每次尝试的附加参数；attempts[0] = 主尝试，附加参数被上游拒绝时 attempts[1] 去参重试
+    type ExtraParams = {
+      thinking?: { type: 'enabled'; budget_tokens: number };
+      reasoning_effort?: string;
+    };
+    const extras: ExtraParams = {};
+    if (wantsCodeWalkthrough) {
+      if (session.reasoningEffort === 'high' || session.reasoningEffort === 'max') {
+        extras.reasoning_effort = session.reasoningEffort; // 用户显式深度思考：尊重，不封顶
+      } else if (session.reasoningEffort === 'low') {
+        extras.reasoning_effort = 'low'; // 用户显式关闭思考
+      } else if (isOfficialDeepSeek && this.thinkBudgetTokens > 0) {
+        // 默认档 + 官方 API：思考预算化（beta 参数：思考独立封顶，正文必有额度，防空输出）
+        extras.thinking = { type: 'enabled', budget_tokens: this.thinkBudgetTokens };
+      }
+      // 默认档 + 第三方网关：不加参数（跟随模型默认思考），空输出由下方自动降级重试兜底
+    } else if (session.reasoningEffort) {
+      extras.reasoning_effort = session.reasoningEffort;
+    }
+    const attempts: ExtraParams[] = Object.keys(extras).length ? [extras, {}] : [{}];
 
     let answer = '';
     // 流式 usage（stream_options.include_usage）：最后一个 chunk 携带本次请求的 token 用量
@@ -431,38 +502,42 @@ export class ChatService {
     let finishReason: string | null | undefined;
     let lastErr: unknown = null;
     try {
-      for (let i = 0; i < attempts.length; i++) {
-        const effort = attempts[i].reasoningEffort;
-        try {
-          const stream = await answerClient.chat.completions.create(
-            {
-              model: target.model,
-              messages: [{ role: 'system', content: system }, ...messages],
-              stream: true,
-              stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
-              // 会话推理等级（low=关闭/高/max）→ 透传给支持 reasoning_effort 的模型（DeepSeek V4 等）
-              ...(effort ? { reasoning_effort: effort } : {}),
-              // 代码解析类问题（全文注入 + 详细格式规范）输出量大，设 max_tokens 上限强制收敛
-              // （3000 token），配合提示词篇幅约束。普通问答不设限，保持完整回答能力。
-              ...(wantsCodeWalkthrough ? { max_tokens: 3000 } : {}),
-            },
-            { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
-          );
-
-          for await (const part of stream) {
-            const delta = part.choices[0]?.delta?.content;
-            if (delta) {
-              answer += delta;
-              writer('delta', { content: delta });
-            }
-            if (part.choices[0]?.finish_reason) {
-              finishReason = part.choices[0].finish_reason;
-            }
-            if (part.usage) {
-              usage = part.usage; // 流式结束时的 usage chunk
-            }
+      // 单次生成尝试：创建流并逐字转发为 SSE delta；返回本次正文与终止原因
+      const runAttempt = async (extra: ExtraParams) => {
+        const stream = await answerClient.chat.completions.create(
+          {
+            model: target.model,
+            messages: [{ role: 'system', content: system }, ...messages],
+            stream: true,
+            stream_options: { include_usage: true }, // 数据看板的 Token 统计依赖它
+            ...(maxTokens ? { max_tokens: maxTokens } : {}),
+            // 思考预算（官方 DeepSeek beta）/ 会话推理档位 二选一透传
+            ...(extra.thinking ? { thinking: extra.thinking } : {}),
+            ...(extra.reasoning_effort ? { reasoning_effort: extra.reasoning_effort } : {}),
+          },
+          { signal: abortController.signal }, // 客户端断开时中止生成，不浪费 token
+        );
+        const out = { text: '', reason: undefined as string | null | undefined };
+        for await (const part of stream) {
+          const delta = part.choices[0]?.delta?.content;
+          if (delta) {
+            out.text += delta;
+            writer('delta', { content: delta });
           }
-          break; // 本次尝试成功
+          if (part.choices[0]?.finish_reason) out.reason = part.choices[0].finish_reason;
+          if (part.usage) usage = part.usage; // 流式结束时的 usage chunk
+        }
+        return out;
+      };
+
+      // 主尝试：成功出正文即收；成功但为空且有下一组参数 → 换参数再试
+      for (let i = 0; i < attempts.length; i++) {
+        try {
+          const out = await runAttempt(attempts[i]);
+          answer = out.text;
+          finishReason = out.reason;
+          if (answer.trim() || i === attempts.length - 1) break;
+          this.logger.warn(`会话 ${sessionId} 第 ${i + 1} 次生成为空，尝试去掉附加参数再试`);
         } catch (err) {
           // 客户端主动断开 → 静默停止，不扣后续 token
           if (abortController.signal.aborted) {
@@ -471,18 +546,34 @@ export class ChatService {
           }
           lastErr = err;
           const raw = `${(err as Error).message ?? ''}`.toLowerCase();
-          // reasoning_effort 被上游拒绝（模型/网关不支持该参数）→ 去掉参数重试一次；
+          // 附加参数（thinking/reasoning_effort）被上游拒绝（模型/网关不支持）→ 去参重试一次；
           // 其他错误不重试，跳出循环统一按失败处理
           const paramRejected =
             attempts.length > 1 &&
             i === 0 &&
-            /reasoning_effort|unsupported parameter|unknown parameter|not support|invalid parameter/i.test(
+            /reasoning_effort|thinking|budget_tokens|unsupported parameter|unknown parameter|not support|invalid parameter/i.test(
               raw,
             );
           if (!paramRejected) break;
           this.logger.warn(
-            `会话 ${sessionId} reasoning_effort 参数被上游拒绝，去掉后重试: ${(err as Error).message}`,
+            `会话 ${sessionId} 附加参数被上游拒绝，去掉后重试: ${(err as Error).message}`,
           );
+        }
+      }
+
+      // 批1-8：仍为空 → 关闭思考自动降级重试一次（正文必须有，思考不是必要环节）
+      if (!lastErr && !answer.trim()) {
+        this.logger.warn(`会话 ${sessionId} 生成结果为空，关闭思考自动重试一次`);
+        try {
+          const out = await runAttempt({ reasoning_effort: 'low' });
+          answer = out.text;
+          finishReason = out.reason;
+        } catch (err) {
+          if (abortController.signal.aborted) {
+            this.logger.log(`会话 ${sessionId} 被客户端中止`);
+            return;
+          }
+          lastErr = err;
         }
       }
     } finally {
@@ -504,7 +595,7 @@ export class ChatService {
       throw translated;
     }
 
-    // 模型"思考完却没输出正文"（思考抢占 max_tokens / 上游异常返回空）→ 不落库空消息：
+    // 模型两次生成都为空（思考抢占上限 / 上游异常）→ 不落库空消息：
     // 回滚用户消息并给可操作提示，而不是静默给一条只有引用来源的空回答
     if (!answer.trim()) {
       await this.prisma.chatMessage
@@ -513,12 +604,18 @@ export class ChatService {
         })
         .catch(() => undefined);
       const translated = new BadRequestException(
-        '模型本次没有生成任何内容（思考过程可能占满了输出额度）。请点击「重试」再试一次；若反复出现，请把该会话的推理等级设为「关闭」后重试。',
+        '模型两次生成都未返回内容（可能是上游异常，或思考过程占满了输出额度）。请点击「重试」再试一次；若反复出现，请把该会话的推理等级设为「关闭」，或检查「模型配置」的模型名与平台是否匹配。',
       );
       this.logger.warn(
         `会话 ${sessionId} 模型返回空内容（finish_reason=${finishReason ?? '未知'}）`,
       );
       throw translated;
+    }
+
+    // 批1-3：截断不静默——finish_reason=length 时在回答尾部附标记。
+    // 历史里带此标记 + 用户回复"继续" → 走续写模式（放宽上限 + 提示接着写，见 buildPrompt）
+    if (finishReason === 'length' && answer.trim()) {
+      answer = `${answer.replace(/\s+$/, '')}\n\n> ${TRUNCATION_HINT}：回复「继续」可接着输出。`;
     }
 
     // ⑥ 流式结束：落库助手消息 + 引用来源（知识库 + 网络）+ Token 用量
@@ -557,9 +654,18 @@ export class ChatService {
    * 是否"代码解析/讲解"类问题（点名代码文件名，或含解析意图词）。
    * 影响：① buildPrompt 注入代码排版规范；② 流式调用设 max_tokens 上限防超时。
    */
+  /** 问题点名的代码文件名（含扩展名）；未点名返回 null */
+  private static namedCodeFile(question: string): string | null {
+    return (
+      question.match(
+        /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/i,
+      )?.[1] ?? null
+    );
+  }
+
   private static wantsCodeWalkthrough(question: string): boolean {
     return (
-      /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/i.test(question) ||
+      !!ChatService.namedCodeFile(question) ||
       /解析|逐行|讲解|每一行|怎么(写|做|实现|来的)|如何(实现|工作)|源码/.test(question)
     );
   }
@@ -571,6 +677,7 @@ export class ChatService {
     history: Array<{ role: string; content: string }>,
     useKnowledgeBase: boolean,
     imageDataUrls: string[],
+    opts?: { walkthrough?: boolean; continuation?: boolean },
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
     // - 使用知识库：强调以知识库资料为准，标注 [来源N]
@@ -602,10 +709,17 @@ export class ChatService {
       systemParts.push('你是一个友善、严谨的中文 AI 助手。');
     }
     systemParts.push('回答使用简洁、结构化的中文。');
+    // 批1-3：续写模式（上一轮回答被截断并带标记，用户回复"继续"）
+    if (opts?.continuation) {
+      systemParts.push(
+        '上一轮回答因长度上限被截断，用户回复「继续」：请严格接着上一轮末尾的内容继续输出（从断点续写），保持上一轮的回答排版风格，不要重复已经写过的内容，不要重新开头。',
+      );
+    }
     // 代码解析格式规范（用户定制）：用户要求"解析/讲解代码"时，按固定排版输出，
     // 避免"代码一段配一句话"的碎片式排版。规范经浓缩以提升模型遵循度（完整版见 docs）。
-    const wantsCodeWalkthrough = ChatService.wantsCodeWalkthrough(question);
-    if (wantsCodeWalkthrough) {
+    const wantsCodeWalkthrough = opts?.walkthrough ?? ChatService.wantsCodeWalkthrough(question);
+    // 续写轮不重新注入排版规范（接着上一轮风格写即可），避免"从头再来"
+    if (wantsCodeWalkthrough && !opts?.continuation) {
       systemParts.push(
         '用户要求解析代码时，必须按以下固定排版输出（这是格式要求，非内容要求）：',
         '1. 开头：`**[文件名]** 完整解析` + 分隔线 `---`；',
@@ -620,6 +734,14 @@ export class ChatService {
           '若篇幅紧张，宁可精简正文也要保证结尾总结表格完整。控制在 1 分钟能读完的篇幅，' +
           '避免为了"完整"而输出巨量内容。',
       );
+      // 批1-5：本次没检索到任何代码、历史里也没有用户贴的代码 → 老实要代码，别硬编
+      if (kbSources.length === 0) {
+        systemParts.push(
+          '注意：本次未检索到任何代码文件内容。若【历史对话】里也没有用户贴出的代码，请先在回答开头明确告诉用户：' +
+            '"未找到可解析的代码——请点名要解析的文件名（如 HomeCosmos.vue），或直接把代码贴进对话。"' +
+            '不要凭空编造对不存在代码的分析。',
+        );
+      }
     }
     const system = systemParts.join('\n');
 

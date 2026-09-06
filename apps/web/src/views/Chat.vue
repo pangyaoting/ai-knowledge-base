@@ -632,6 +632,14 @@ async function sendPayload(
             streamRaf = 0;
             streamContent.value = pendingStream;
           }
+          // 空回答保护（服务端已兜底报错，前端双保险）：不 push 空气泡，按失败处理可重试
+          if (!streamContent.value.trim()) {
+            error.value = '模型未返回内容，请重试';
+            retryDraft.value = { question, images: payloadImages, files: payloadFiles };
+            streamContent.value = '';
+            streamSources.value = { kb: [], web: [] };
+            return;
+          }
           messages.value.push({
             id: `local-${Date.now()}-${++localMsgSeq}`,
             sessionId: currentSessionId.value!,
