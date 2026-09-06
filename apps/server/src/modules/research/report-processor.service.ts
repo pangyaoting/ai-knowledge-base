@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from '../chat/rag.service';
+import { WebSearchService } from '../chat/web-search.service';
 import { ModelConfigService, ChatTarget } from '../models/model-config.service';
 
 export interface ReportJobData {
@@ -40,8 +42,24 @@ export class ReportProcessor {
   constructor(
     private prisma: PrismaService,
     private ragService: RagService,
+    private webSearchService: WebSearchService,
     private modelConfigService: ModelConfigService,
+    private configService: ConfigService,
   ) {}
+
+  // —— 参数化上限（弱点②：.env 可配，默认保持原值）——
+  /** 单节正文输出上限（token） */
+  private get sectionMaxTokens(): number {
+    return this.num('SECTION_MAX_TOKENS', 2000);
+  }
+  /** 联网搜索条数（每个子问题） */
+  private get webResults(): number {
+    return this.num('REPORT_WEB_RESULTS', 3);
+  }
+  private num(key: string, fallback: number): number {
+    const v = Number(this.configService.get<string>(key));
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  }
 
   /** 一次 LLM 补全（非流式，使用用户自己的模型配置）；输出撞到 max_tokens 上限时记录日志 */
   private async complete(
@@ -104,14 +122,18 @@ export class ReportProcessor {
       });
       const subQuestions = await this.splitTopic(target, report.topic);
 
-      // ② 每个子问题：检索 + 撰写小节（并行，来源编号全局统一）
+      // ② 每个子问题：检索（知识库 + 联网并行）+ 撰写小节（小节间并行，来源编号全局统一）
       await this.prisma.report.update({ where: { id: reportId }, data: { step: 2 } });
       const sections: ReportSection[] = [];
       const sourceMap = new Map<string, ReportSource>();
       await Promise.all(
         subQuestions.map(async (question, index) => {
-          const sources = await this.ragService.retrieve(userId, question, undefined, 4);
-          const numbered = sources.map((s) => {
+          // 弱点①补联网：知识库检索 + Tavily 网页搜索并行（报告不再只依赖库内资料）
+          const [kbRows, webRows] = await Promise.all([
+            this.ragService.retrieve(userId, question, undefined, 4),
+            this.webSearchService.search(question, this.webResults),
+          ]);
+          const sources = kbRows.map((s) => {
             const existing = sourceMap.get(s.chunkId);
             const num = existing?.number ?? sourceMap.size + 1;
             if (!existing) {
@@ -125,7 +147,7 @@ export class ReportProcessor {
             }
             return { ...s, num };
           });
-          const content = await this.writeSection(target, question, numbered);
+          const content = await this.writeSection(target, question, sources, webRows);
           sections.push({ index, question, content });
         }),
       );
@@ -183,23 +205,48 @@ export class ReportProcessor {
       .slice(0, 5);
   }
 
-  /** 单个小节：检索片段 + 撰写（[来源N] 编号与全局一致） */
+  /** 单个小节：知识库片段 + 联网资料 一起撰写（[来源N] 全局编号；[网N] 附网页链接） */
   private async writeSection(
     target: ChatTarget,
     question: string,
     sources: Array<RetrievalSource & { num: number }>,
+    webSources: Array<{ title: string; url: string; content: string }>,
   ): Promise<string> {
-    const sourceText = sources.length
+    const kbText = sources.length
       ? sources
           .map((s) => `[${s.num}]（来自《${s.filename}》第 ${s.chunkIndex + 1} 段）\n${s.content}`)
           .join('\n\n')
-      : '（未检索到相关资料）';
-    return this.complete(
-      target,
-      '你是严谨的研究撰写助手。根据【资料】撰写本小节内容，引用时标注 [来源N]（编号与资料一致）；资料没有的信息不要编造，可基于自身知识补充并注明"（补充）"。输出 Markdown。',
-      `【资料】\n${sourceText}\n\n【小节主题】\n${question}`,
-      2000,
-    );
+      : '';
+    const webText = webSources.length
+      ? webSources
+          .map(
+            (w, i) =>
+              `[网${i + 1}]（来自网页：${w.title}\n链接：${w.url}）\n${w.content?.slice(0, 1500)}`,
+          )
+          .join('\n\n')
+      : '';
+    const sourceText = [kbText, webText].filter(Boolean).join('\n\n') || '（未检索到资料）';
+    const system =
+      '你是严谨的研究撰写助手。根据【资料】撰写本小节内容：知识库资料标注 [来源N]、网页资料标注 [网N]（编号与资料一致）；资料没有的信息不要编造，可基于自身知识补充并注明"（补充）"。输出 Markdown。';
+    const user = `【资料】\n${sourceText}\n\n【小节主题】\n${question}`;
+    let content = await this.complete(target, system, user, this.sectionMaxTokens);
+    // 弱点③质量门控：输出过短（<80 字）或资料存在却完全没引用 → 重写一次（限 1 次，控制成本）
+    const hasKb = kbText.length > 0;
+    const hasWeb = webText.length > 0;
+    const looksThin =
+      content.length < 80 ||
+      (hasKb && !content.includes('[来源')) ||
+      (hasWeb && !content.includes('[网'));
+    if (looksThin) {
+      this.logger.log(`小节质量门控触发重写：${question.slice(0, 30)}…`);
+      content = await this.complete(
+        target,
+        '你是严谨的研究撰写助手。上次输出不合格（过短或未引用资料），请基于【资料】重写本小节：内容充实、结构完整，引用资料时标注 [来源N]/[网N]（编号与资料一致），资料没有的不要编造。',
+        user,
+        this.sectionMaxTokens,
+      );
+    }
+    return content;
   }
 
   /**
