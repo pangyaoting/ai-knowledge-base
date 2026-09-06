@@ -366,6 +366,13 @@ export class ChatService {
     const isPureContinue = /^\s*(继续|接着(写|讲|说|解析)?|continue)\s*$/i.test(question.trim());
     const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
     const isContinuation = isPureContinue && !!lastAssistant?.content.includes(TRUNCATION_HINT);
+    // 含"内部符号名 + 实现/调用意图"的问题（如"updateBlackHole 在哪被调用"）→ 联网帮不上忙，
+    // 反而会召回 DeleteBlackhole(阿里云 DDoS) 这类同名噪音 → 这类问题不联网
+    const symbolAskNoWeb =
+      /(定义|调用|实现|函数|方法|源码|在哪|哪里|作用|干什么|做什么|逻辑)/.test(question) &&
+      (question.match(/[A-Za-z_$][A-Za-z0-9_$]{4,}/g) ?? []).some(
+        (t) => /[a-z]/.test(t) && /[A-Z]/.test(t),
+      );
 
     // 解析类/续写类不查询改写：文件名问法自包含，改写只会搅乱文件名；"继续"改写无意义
     // （省一次串行 LLM 调用 3~10s）
@@ -407,9 +414,9 @@ export class ChatService {
         retrievalMode = 'retrieval';
       }
     }
-    // 批1-4：解析类/续写类默认不联网——解析对象是代码本身，联网教程只会添乱拖慢
+    // 解析类/续写类/符号问答默认不联网——解析对象与答案都在代码里，联网教程只会添乱拖慢
     const webSources =
-      useWebSearch && canRetrieve && !wantsCodeWalkthrough && !isContinuation
+      useWebSearch && canRetrieve && !wantsCodeWalkthrough && !isContinuation && !symbolAskNoWeb
         ? await this.webSearchService.search(searchQuery)
         : [];
 

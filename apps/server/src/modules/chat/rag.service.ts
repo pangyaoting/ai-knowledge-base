@@ -299,7 +299,11 @@ export class RagService {
       },
       take: 10,
     });
-    if (hits.length === 0) return [];
+    if (hits.length === 0) {
+      // 符号表没命中（索引缺漏/上传不完整/命名变体）→ 字面量兜底：
+      // 直接在片段原文里找该标识符——定义处与调用处都含此词，能答"XX 在哪被调用/定义"
+      return this.literalLookup(userId, tokens, kbIds, 6);
+    }
     return hits.map((h) => ({
       chunkId: `${h.documentId}:${h.symbolName}`,
       // 实现源码优先；解析不到 body（如 interface）退签名
@@ -309,6 +313,76 @@ export class RagService {
       filename: h.filename,
       similarity: null,
     }));
+  }
+
+  /**
+   * 字面量兜底检索：按标识符在片段原文做子串匹配（ILIKE，命中 pg_trgm GIN 索引）。
+   * 用于符号表未命中时（索引缺漏/命名变体/部分上传），把"定义处/调用处"片段直接捞回来。
+   * 只接受长度 ≥ 5 的标识符，避免 api/token 这类短通用词造成海量噪音。
+   */
+  private async literalLookup(
+    userId: string,
+    tokens: string[],
+    kbIds: string[] | undefined,
+    limit: number,
+  ): Promise<RetrievalSource[]> {
+    const candidates = tokens.filter((t) => t.length >= 5);
+    const sources: RetrievalSource[] = [];
+    const seen = new Set<string>();
+    let kbLiteral: string | null = null;
+    if (kbIds?.length) {
+      const owned = await this.prisma.knowledgeBase.findMany({
+        where: { id: { in: kbIds }, ownerId: userId },
+        select: { id: true },
+      });
+      if (owned.length === new Set(kbIds).size) {
+        kbLiteral = `{${owned.map((k) => `"${k.id}"`).join(',')}}`;
+      }
+    }
+    for (const token of candidates) {
+      if (sources.length >= limit) break;
+      const rows = await this.prisma.$queryRaw<
+        Array<{
+          chunk_id: string;
+          content: string;
+          chunk_index: number;
+          document_id: string;
+          filename: string;
+        }>
+      >`
+        SELECT COALESCE(parent_chunk.id, c.id) AS chunk_id,
+               COALESCE(parent_chunk.content, c.content) AS content,
+               COALESCE(parent_chunk.chunk_index, c.chunk_index) AS chunk_index,
+               d.id AS document_id, d.filename
+        FROM chunks c
+        JOIN documents d ON d.id = c.document_id
+        LEFT JOIN chunks parent_chunk ON parent_chunk.id = c.parent_id
+        JOIN knowledge_bases kb ON kb.id = d.knowledge_base_id
+        WHERE c.embedding IS NOT NULL
+          AND kb.owner_id = ${userId}
+          AND (${kbLiteral}::text[] IS NULL OR d.knowledge_base_id = ANY(${kbLiteral}::text[]))
+          AND c.content ILIKE ${'%' + token + '%'}
+        ORDER BY (c.content ILIKE ${'%' + token + '(%'}) DESC, d.filename, c.chunk_index
+        LIMIT ${limit}
+      `;
+      for (const r of rows) {
+        if (sources.length >= limit) break;
+        if (seen.has(r.chunk_id)) continue;
+        seen.add(r.chunk_id);
+        sources.push({
+          chunkId: r.chunk_id,
+          content: r.content,
+          chunkIndex: r.chunk_index,
+          documentId: r.document_id,
+          filename: r.filename,
+          similarity: null,
+        });
+      }
+      if (rows.length > 0) {
+        this.logger.log(`字面量兜底命中符号 ${token}：${rows.length} 个片段`);
+      }
+    }
+    return sources;
   }
 
   /**
