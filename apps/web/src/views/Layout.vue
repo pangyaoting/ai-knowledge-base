@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { Brain, LogOut, ChevronDown, Settings, Menu, Sun, Moon } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
@@ -14,6 +14,20 @@ const { isDark, toggleTheme } = useTheme();
 
 const menuOpen = ref(false); // 用户菜单
 const mobileNavOpen = ref(false); // 移动端导航面板
+
+/**
+ * P1-1 点外关闭：header 用了 backdrop-blur，会形成 containing block，
+ * 内部 fixed inset-0 遮罩实际只覆盖 header 高度、点正文关不掉。
+ * 改用 document click 监听（header 内点击不关，其余任何点击都收起两个面板）。
+ */
+function onClickOutside(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('header')) return;
+  menuOpen.value = false;
+  mobileNavOpen.value = false;
+}
+
+onMounted(() => document.addEventListener('click', onClickOutside));
+onBeforeUnmount(() => document.removeEventListener('click', onClickOutside));
 
 /** 导航项：to + 文案（桌面端与移动端共用） */
 const navItems = [
@@ -79,7 +93,7 @@ async function handleLogout() {
         </RouterLink>
 
         <div class="flex items-center gap-1">
-          <!-- 移动端：汉堡菜单打开导航面板 -->
+          <!-- 移动端：汉堡菜单打开导航面板（<md 显示） -->
           <button
             class="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
             aria-label="导航菜单"
@@ -88,8 +102,8 @@ async function handleLogout() {
             <Menu class="h-5 w-5" />
           </button>
 
-          <!-- 导航（桌面端常驻） -->
-          <nav class="mr-2 hidden items-center gap-1 sm:flex">
+          <!-- 导航（桌面端常驻，md 起显示；与汉堡 md:hidden 对齐，避免 640-767px 双导航溢出） -->
+          <nav class="mr-2 hidden items-center gap-1 md:flex">
             <RouterLink
               v-for="item in navItems"
               :key="item.to"
@@ -116,9 +130,8 @@ async function handleLogout() {
           </nav>
         </div>
 
-        <!-- 移动端导航面板（下拉） -->
+        <!-- 移动端导航面板（下拉；点外部由 document click 监听关闭） -->
         <template v-if="mobileNavOpen">
-          <div class="fixed inset-0 z-40 md:hidden" @click="mobileNavOpen = false" />
           <nav
             class="absolute inset-x-0 top-full z-50 flex flex-col gap-0.5 border-b bg-card px-3 py-2 shadow-lg md:hidden"
           >
@@ -187,9 +200,7 @@ async function handleLogout() {
               />
             </button>
 
-            <!-- 点击外部关闭 -->
-            <div v-if="menuOpen" class="fixed inset-0 z-40" @click="menuOpen = false" />
-
+            <!-- 点击外部关闭由 document click 监听处理（blur 头部 fixed 遮罩失效） -->
             <div
               v-if="menuOpen"
               class="absolute right-0 top-full z-50 mt-1.5 w-44 overflow-hidden rounded-lg border bg-card py-1 shadow-lg"

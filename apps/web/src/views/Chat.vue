@@ -447,6 +447,8 @@ async function confirmCreateSession() {
 }
 
 async function handleDeleteSession(id: string) {
+  // P1-2：流式生成中的会话禁止删除（按钮已禁用，这里双保险）
+  if (streaming.value && currentSessionId.value === id) return;
   if (!(await confirmDialog('删除该会话及其全部消息？此操作不可恢复。'))) return;
   try {
     await deleteChatSession(id);
@@ -540,6 +542,7 @@ async function handleSend() {
   if (el) el.scrollTop = el.scrollHeight;
 
   abortController.value = new AbortController();
+  const ac = abortController.value; // P1-3：局部持有本次请求的控制器
   // 流式渲染节流：SSE token 频率远高于屏幕刷新率，每帧最多刷一次 DOM，
   // 避免每个 token 都全量跑 markdown-it + 代码高亮（长回答会卡）
   let pendingStream = '';
@@ -553,7 +556,7 @@ async function handleSend() {
       currentSessionId.value,
       content,
       useWebSearch.value,
-      abortController.value.signal,
+      ac.signal,
       {
         onSources: (sources) => {
           streamSources.value = sources;
@@ -587,9 +590,13 @@ async function handleSend() {
       images.length ? images : undefined,
     );
   } finally {
-    streaming.value = false;
-    abortController.value = null;
+    // P1-3：Stop 后立刻重发时，旧请求的 finally 晚到不能清掉新流的控制器与状态——
+    // 仅当 abortController.value 仍指向本次请求（ac）才复位
     stopThinkingTimer();
+    if (abortController.value === ac) {
+      streaming.value = false;
+      abortController.value = null;
+    }
   }
 }
 
@@ -704,14 +711,15 @@ onMounted(async () => {
   }
 });
 
-// KeepAlive 缓存：从「模型配置」页新增/修改模型后返回本页时，刷新模型列表，
-// 否则新绑定的模型要刷新页面才出现在模型下拉里
-onActivated(() => {
-  loadModelConfigs();
-});
-
+// 真正卸载（登出/退出）：中止进行中的 SSE，避免后台继续消耗 token（P1-4）
 onBeforeUnmount(() => {
   stopThinkingTimer();
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+  abortController.value?.abort();
+  abortController.value = null;
 });
 </script>
 
@@ -731,6 +739,7 @@ onBeforeUnmount(() => {
       :session-search="sessionSearch"
       :sidebar-open="sidebarOpen"
       :sidebar-collapsed="sidebarCollapsed"
+      :streaming="streaming"
       @update:session-search="sessionSearch = $event"
       @select="selectSession"
       @create="openNewSessionPicker"

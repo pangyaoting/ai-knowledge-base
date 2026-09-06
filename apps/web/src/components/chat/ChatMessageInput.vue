@@ -42,6 +42,13 @@ const emit = defineEmits<{
 
 const input = defineModel<string>('input', { default: '' });
 
+/** Enter 发送（P1-1：IME 组合中按回车是选候选词，不发送；Shift+Enter 换行由 .exact 排除） */
+function onEnterKey(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return; // 中文输入法候选词回车
+  e.preventDefault();
+  emit('send');
+}
+
 // ===== 模型下拉（fixed 定位，视口内自适应） =====
 const modelDropdownOpen = ref(false);
 const modelBtnRef = ref<HTMLElement | null>(null);
@@ -292,7 +299,7 @@ defineExpose({ focusTextarea });
         class="max-h-40 min-h-[44px] flex-1 resize-y rounded-md border border-input bg-background px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         placeholder="输入问题，Enter 发送，Shift+Enter 换行；可粘贴图片（需视觉模型识别）"
         :disabled="!props.currentSessionId"
-        @keydown.enter.exact.prevent="emit('send')"
+        @keydown.enter.exact="onEnterKey"
         @paste="emit('paste', $event)"
       />
       <Button v-if="isSendVisible" :disabled="!props.canSend" @click="emit('send')">

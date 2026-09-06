@@ -14,6 +14,8 @@ const props = defineProps<{
   sessionSearch: string;
   sidebarOpen: boolean;
   sidebarCollapsed: boolean;
+  /** 当前会话是否正在流式生成（P1-2：生成中禁止删除，避免回答推入已删会话） */
+  streaming: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -104,8 +106,18 @@ function kbNames(bound: ChatSession['knowledgeBases']): string {
         </span>
         <span class="shrink-0 text-xs text-muted-foreground">{{ s._count?.messages ?? 0 }}</span>
         <button
-          class="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-destructive"
-          title="删除会话"
+          class="shrink-0 rounded p-0.5 opacity-60 transition-opacity hover:opacity-100"
+          :class="
+            props.streaming && s.id === props.currentSessionId
+              ? 'cursor-not-allowed text-muted-foreground'
+              : 'hover:text-destructive'
+          "
+          :disabled="props.streaming && s.id === props.currentSessionId"
+          :title="
+            props.streaming && s.id === props.currentSessionId
+              ? '回答生成中，先停止或等完成再删除'
+              : '删除会话'
+          "
           @click.stop="emit('delete', s.id)"
         >
           <Trash2 class="h-3.5 w-3.5" />

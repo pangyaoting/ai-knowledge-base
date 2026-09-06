@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'ResearchAgentView' });
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount } from 'vue';
 import {
   PauseCircle,
   PlayCircle,
@@ -589,6 +589,11 @@ onMounted(async () => {
   }
   await loadModelConfigs();
 });
+
+// KeepAlive 缓存：切走时停 1Hz 界面时钟（倒计时不可见，纯耗电）；
+// 详情轮询/列表同步保留——它们只在有活跃任务时跑，且是后台完成通知的支撑
+onActivated(() => startClock());
+onDeactivated(() => stopClock());
 
 onBeforeUnmount(() => {
   stopPolling();
