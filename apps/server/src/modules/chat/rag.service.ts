@@ -335,6 +335,39 @@ export class RagService {
   }
 
   /**
+   * 单文档全文模式：解析/逐行讲解单个代码文件时，直接取该文件全部叶子块拼成全文。
+   * 检索只给 topK 片段必然覆盖不全（大文件后半段永远进不来）；
+   * 单文件通常 ≤ 阈值（HomeCosmos.vue 22k 字符），全文喂模型才能"逐行解析到底"。
+   * 返回 totalChars 供调用方判断是否超限（超限则退回检索模式）。
+   */
+  async loadDocumentFulltext(
+    userId: string,
+    documentId: string,
+    maxChars: number,
+  ): Promise<{ sources: RetrievalSource[]; totalChars: number }> {
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, knowledgeBase: { ownerId: userId } },
+      select: { id: true },
+    });
+    if (!doc) return { sources: [], totalChars: 0 };
+    const rows = await this.prisma.$queryRaw<
+      Array<{ document_id: string; filename: string; content: string; chunk_index: number }>
+    >`
+      SELECT d.id AS document_id, d.filename, c.content, c.chunk_index
+      FROM chunks c
+      JOIN documents d ON d.id = c.document_id
+      WHERE c.document_id = ${doc.id}
+        AND c.parent_id IS NULL
+      ORDER BY c.chunk_index
+    `;
+    const agg = aggregateFulltext(rows);
+    if (agg.totalChars > maxChars) {
+      return { sources: [], totalChars: agg.totalChars };
+    }
+    return agg;
+  }
+
+  /**
    * P0 全文模式：把绑定知识库的全部文本按文档分组取回（不走检索）。
    * 用于"需要看完整文档"的任务（逐行解析、全文总结、代码讲解）——检索只给片段，
    * 模型看不到全文必然答不全；文档总量小于阈值时全文喂模型更完整。

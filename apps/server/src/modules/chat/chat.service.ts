@@ -646,6 +646,36 @@ export class ChatService {
       );
     }
 
+    // 单文件全文通道：通读类意图（解析/逐行/讲解/代码/实现）+ 档案锁定集中恰好命中
+    // 一个代码文件 → 直接取该文件全文。检索只给 topK 片段，大文件后半段永远进不来；
+    // 单文件通常 ≤ 40000 字符阈值，全文注入才能"逐行解析到底"。
+    // 锁定集常含多个文档（docs 笔记 + 代码文件），只看其中的代码文件是否唯一。
+    if (locked.length > 0) {
+      const codeDocs = locked.filter((d) =>
+        /\.(ts|js|vue|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql)$/i.test(d.filename),
+      );
+      const readIntent =
+        /解析|逐行|讲解|通读|完整|代码|实现|原理|怎么(写|做|实现|来的)|如何(实现|工作)|源码/.test(
+          query,
+        );
+      if (readIntent && codeDocs.length === 1) {
+        const ft = await this.ragService.loadDocumentFulltext(
+          userId,
+          codeDocs[0].documentId,
+          this.fulltextMaxChars,
+        );
+        if (ft.sources.length > 0) {
+          this.logger.log(
+            `会话 ${sessionId} 单文件全文：${codeDocs[0].filename}（${ft.totalChars} 字符 ≤ 阈值）`,
+          );
+          return ft.sources;
+        }
+        this.logger.log(
+          `会话 ${sessionId} 单文件全文超限跳过（${ft.totalChars} > ${this.fulltextMaxChars}），退回检索`,
+        );
+      }
+    }
+
     // A+C 联动：档案命中文件 → 拉该文件真实符号实现（函数体），
     // 避免大文件里 script 实现区被模板片段挤掉 topK 导致模型脑补
     if (docIds.length > 0) {
