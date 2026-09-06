@@ -382,7 +382,7 @@ export class ChatService {
 
     // ④ 保存用户消息（含图片 data URL 数组；单图兼容字段存第一张）
     // content 可能来自粘贴/外部文本而夹带 \u0000 → 落库前清洗（PG text 禁止 NUL）
-    await this.prisma.chatMessage.create({
+    const savedUserMsg = await this.prisma.chatMessage.create({
       data: {
         sessionId,
         role: 'user',
@@ -441,6 +441,13 @@ export class ChatService {
         this.logger.log(`会话 ${sessionId} 被客户端中止`);
         return;
       }
+      // P2-7：模型调用失败 → 回滚刚落库的用户消息（回答没生成，留着会让前端"重试"重复落库）
+      // 检索阶段失败时用户消息还没建，无需处理；此处只在 LLM 阶段失败时回滚。
+      await this.prisma.chatMessage
+        .deleteMany({
+          where: { id: savedUserMsg.id, sessionId, role: 'user' },
+        })
+        .catch(() => undefined);
       const translated = this.translateLLMError(err, images.length > 0);
       this.logger.warn(
         `会话 ${sessionId} LLM 调用失败: ${(err as Error).message} → ${translated.message}`,

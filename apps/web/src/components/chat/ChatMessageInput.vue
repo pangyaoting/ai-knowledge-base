@@ -33,7 +33,7 @@ const emit = defineEmits<{
   (e: 'send'): void;
   (e: 'stop'): void;
   (e: 'open-edit-scope'): void;
-  (e: 'select-model', id: string, model: string): void;
+  (e: 'select-model', id: string | null, model: string | null): void;
   (e: 'set-reasoning', effort: string): void;
   (e: 'remove-image', i: number): void;
   (e: 'remove-file', i: number): void;
@@ -81,6 +81,24 @@ function onDocPointerDown(e: MouseEvent) {
   if (!modelBtnRef.value?.contains(t) && !modelDropdownRef.value?.contains(t)) {
     modelDropdownOpen.value = false;
   }
+}
+
+/** P2-11：选中具体模型后收起下拉（原来选完还开着，容易误触其它项） */
+function pickModel(configId: string, model: string) {
+  emit('select-model', configId, model);
+  modelDropdownOpen.value = false;
+}
+
+/** P2-11：跟随默认 = 解除会话级模型绑定（后端 modelConfigId 置 null），收起下拉 */
+function pickFollowDefault() {
+  emit('select-model', null, null);
+  modelDropdownOpen.value = false;
+}
+
+/** P2-11：选择推理等级后收起下拉 */
+function pickReasoning(effort: string) {
+  emit('set-reasoning', effort);
+  modelDropdownOpen.value = false;
 }
 
 onMounted(() => document.addEventListener('mousedown', onDocPointerDown));
@@ -159,6 +177,21 @@ defineExpose({ focusTextarea });
             去「模型配置」绑定自己的 API Key →
           </RouterLink>
           <template v-else>
+            <!-- P2-11：未绑定任何配置/会话跟随默认时，展示"跟随默认"项（当前为默认配置高亮） -->
+            <button
+              class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+              :class="!props.sessionModelConfigId ? 'text-primary' : ''"
+              :title="
+                '使用你在「模型配置」里设置的默认模型；当前默认：' +
+                (props.currentModelName || '未设置')
+              "
+              @click="pickFollowDefault"
+            >
+              <span class="min-w-0 flex-1 truncate">
+                跟随默认<template v-if="!props.sessionModelConfigId">（当前）</template>
+              </span>
+              <span v-if="!props.sessionModelConfigId" class="shrink-0 text-xs">✓</span>
+            </button>
             <p class="px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">选择模型</p>
             <!-- 平铺：每个配置 × 该配置下的全部模型名（同一 Key 多模型直接切换） -->
             <template v-for="c in props.modelConfigs" :key="c.id">
@@ -171,7 +204,7 @@ defineExpose({ focusTextarea });
                     ? 'text-primary'
                     : ''
                 "
-                @click="emit('select-model', c.id, m)"
+                @click="pickModel(c.id, m)"
               >
                 <span class="min-w-0 flex-1 truncate">{{ c.name }} / {{ m }}</span>
                 <span
@@ -194,7 +227,7 @@ defineExpose({ focusTextarea });
               :key="e.value"
               class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
               :class="props.currentReasoning === e.value ? 'text-primary' : ''"
-              @click="emit('set-reasoning', e.value)"
+              @click="pickReasoning(e.value)"
             >
               <span>{{ e.label }}</span>
               <span class="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">

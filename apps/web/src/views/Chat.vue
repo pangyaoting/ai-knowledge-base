@@ -9,6 +9,7 @@ import {
   PanelLeftOpen,
   FileText,
   X,
+  RefreshCw,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
@@ -142,6 +143,11 @@ async function onPickFile(files: File[]) {
       toast.info(`一次最多 ${MAX_FILES} 个文件`);
       break;
     }
+    // P2-10：与后端 FileInterceptor 限制一致（20MB），超限前端直接拒绝，不走网络请求
+    if (f.size > 20 * 1024 * 1024) {
+      toast.error(`「${f.name}」超过 20MB 上限，请压缩后重试`);
+      continue;
+    }
     try {
       const res = await extractFileText(f);
       if (fromSession && currentSessionId.value !== fromSession) {
@@ -150,6 +156,8 @@ async function onPickFile(files: File[]) {
         return;
       }
       pendingFiles.value.push({ name: res.filename, content: res.content });
+      // P2-10：后端对超长文件做了截断（30k 字符），明确告知用户避免误解为完整内容
+      if (res.truncated) toast.info(`「${res.filename}」过长已截断（仅保留前 3 万字符）`);
     } catch (err) {
       toast.error(`${f.name}：${(err as Error).message}`);
     }
@@ -212,7 +220,7 @@ async function loadModelConfigs() {
 }
 
 /** 切换当前会话的模型配置 + 具体模型名（null = 跟随用户默认配置） */
-async function selectModel(configId: string, model?: string | null) {
+async function selectModel(configId: string | null, model?: string | null) {
   if (!currentSessionId.value) return;
   try {
     await updateSessionModel(currentSessionId.value, configId, model ?? null);
@@ -523,16 +531,45 @@ async function handleSend() {
     !currentSessionId.value
   )
     return;
+  await sendPayload(question, images, files);
+}
+
+/** 失败重试上下文：发送失败后保留原内容，供"重试"一键重发（P2-7） */
+const retryDraft = ref<{
+  question: string;
+  images: string[];
+  files: Array<{ name: string; content: string }>;
+} | null>(null);
+/** 最近一次乐观渲染的用户消息 id（重试前需移除，避免与后端重发重复） */
+const lastOptimisticMsgId = ref<string | null>(null);
+
+/**
+ * 实际发送（输入框触发与失败重试共用）
+ * @param question 纯文本问题（不含文件块；文件内容单独传，发送时拼接）
+ * @param images 图片 data URL 列表
+ * @param files 待拼接的文件内容列表
+ * @param isRetry 是否为失败重试（重试时不移除旧的乐观消息——它已在失败处理中移除）
+ */
+async function sendPayload(
+  question: string,
+  images: string[],
+  files: Array<{ name: string; content: string }>,
+  isRetry = false,
+) {
+  const payloadImages = [...images];
+  const payloadFiles = [...files];
+  if (!currentSessionId.value) return;
+  if (!isRetry) retryDraft.value = null; // 新发送：清掉上次的失败草稿
 
   // 发图提示：当前模型不支持视觉但用户配置里有视觉模型 → 后端会自动路由
-  if (images.length > 0 && activeModelId.value && !VISION_RE.test(activeModelId.value)) {
+  if (payloadImages.length > 0 && activeModelId.value && !VISION_RE.test(activeModelId.value)) {
     const v = modelConfigs.value.find((c) => VISION_RE.test(c.model));
     if (v) toast.info(`图片将自动使用视觉模型 ${v.model} 识别，文字对话仍用当前模型`);
   }
 
   // 上传文件内容拼进消息（模型据此回答）
-  const fileBlock = files.length
-    ? `\n\n【上传文件内容】\n${files.map((f) => `--- ${f.name} ---\n${f.content}`).join('\n\n')}`
+  const fileBlock = payloadFiles.length
+    ? `\n\n【上传文件内容】\n${payloadFiles.map((f) => `--- ${f.name} ---\n${f.content}`).join('\n\n')}`
     : '';
   const content = question + fileBlock;
 
@@ -546,13 +583,15 @@ async function handleSend() {
   startThinkingTimer();
 
   // 乐观渲染：用户消息立即上屏（id 唯一，防止与历史消息 key 撞车导致图片 DOM 复用堆叠）
+  const optimisticId = `local-${Date.now()}-${++localMsgSeq}`;
+  lastOptimisticMsgId.value = optimisticId;
   messages.value.push({
-    id: `local-${Date.now()}-${++localMsgSeq}`,
+    id: optimisticId,
     sessionId: currentSessionId.value,
     role: 'user',
     content,
-    imageDataUrl: images[0] ?? null,
-    imageDataUrls: images.length ? images : null,
+    imageDataUrl: payloadImages[0] ?? null,
+    imageDataUrls: payloadImages.length ? payloadImages : null,
     sources: null,
     createdAt: new Date().toISOString(),
   });
@@ -606,10 +645,12 @@ async function handleSend() {
           loadSessions();
         },
         onError: (message) => {
+          // P2-7：失败时保留本次内容供"重试"（后端已回滚未成功的用户消息，前端可安全重发）
           error.value = message;
+          retryDraft.value = { question, images: payloadImages, files: payloadFiles };
         },
       },
-      images.length ? images : undefined,
+      payloadImages.length ? payloadImages : undefined,
     );
   } finally {
     // P1-3：Stop 后立刻重发时，旧请求的 finally 晚到不能清掉新流的控制器与状态——
@@ -620,6 +661,28 @@ async function handleSend() {
       abortController.value = null;
     }
   }
+}
+
+/** 失败"重试"：移除失败的乐观用户消息（后端已回滚，不重复），用原内容重新发送 */
+async function handleRetrySend() {
+  const d = retryDraft.value;
+  if (!d || streaming.value) return;
+  // 移除失败的乐观用户消息——后端失败时已回滚该消息，不删会残留一条假消息
+  if (lastOptimisticMsgId.value) {
+    messages.value = messages.value.filter((m) => m.id !== lastOptimisticMsgId.value);
+    lastOptimisticMsgId.value = null;
+  }
+  await sendPayload(d.question, d.images, d.files, true);
+}
+
+/** 失败"放弃"：清掉草稿与失败的乐观消息 */
+function handleDiscardFailed() {
+  retryDraft.value = null;
+  if (lastOptimisticMsgId.value) {
+    messages.value = messages.value.filter((m) => m.id !== lastOptimisticMsgId.value);
+    lastOptimisticMsgId.value = null;
+  }
+  error.value = '';
 }
 
 function handleStop() {
@@ -874,13 +937,32 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- 错误提示 -->
-          <p
+          <!-- 错误提示（P2-7：附 重试/放弃，发送失败内容不丢） -->
+          <div
             v-if="error"
-            class="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+            class="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
           >
-            {{ error }}
-          </p>
+            <span class="min-w-0 flex-1">{{ error }}</span>
+            <Button
+              v-if="retryDraft"
+              variant="default"
+              size="sm"
+              :disabled="streaming"
+              @click="handleRetrySend"
+            >
+              <RefreshCw class="mr-1 h-3.5 w-3.5" />
+              重试
+            </Button>
+            <Button
+              v-if="retryDraft"
+              variant="ghost"
+              size="sm"
+              :disabled="streaming"
+              @click="handleDiscardFailed"
+            >
+              放弃
+            </Button>
+          </div>
         </div>
       </div>
 
