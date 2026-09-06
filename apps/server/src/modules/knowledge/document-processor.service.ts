@@ -149,22 +149,29 @@ export class DocumentProcessor {
       // A 文件档案：所有入库文档生成档案（md 章节地图 / 代码符号清单），单独向量化
       await this.indexProfile(documentId, originalName, fileType, cleaned, codeSymbols);
 
-      // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）
-      const existing = await this.prisma.document.findFirst({
+      // 同名替换：新文档处理成功后再删旧版（失败不丢旧版）。
+      // P0-4：只删稳定态旧版（done/failed/replacing），不删 pending/processing——
+      // 并发同名上传时，处理中的对方文档绝不会被删（否则出现双双消失/孤儿 chunk/误删磁盘）。
+      // 后完成者覆盖先完成者（替换语义），记录与磁盘始终一致。
+      const olds = await this.prisma.document.findMany({
         where: {
           knowledgeBaseId,
           filename: originalName,
           id: { not: documentId },
+          status: { in: ['done', 'failed', 'replacing'] },
         },
+        select: { id: true, filepath: true },
       });
-      if (existing) {
-        await this.prisma.document.delete({ where: { id: existing.id } });
+      for (const old of olds) {
+        await this.prisma.document
+          .deleteMany({ where: { id: old.id, status: { in: ['done', 'failed', 'replacing'] } } })
+          .catch(() => undefined); // 幂等：对方可能已被另一并发任务删除
         try {
-          unlinkSync(storedPath(existing.filepath));
+          unlinkSync(storedPath(old.filepath));
         } catch {
           /* 文件可能已不存在，忽略 */
         }
-        this.logger.log(`同名文件替换: ${originalName}（旧文档 ${existing.id} 已删除）`);
+        this.logger.log(`同名文件替换: ${originalName}（旧文档 ${old.id} 已删除）`);
       }
 
       await this.prisma.document.update({

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from '../chat/rag.service';
 import { WebSearchService } from '../chat/web-search.service';
@@ -115,39 +116,67 @@ export class ReportProcessor {
     }
 
     try {
-      // 生成中是否被取消（P1-4）：被取消则抛标记错误，外层 catch 干净退出
+      // 生成中是否被取消/删除（P1-4/P0-1）：被取消或已被删除则抛标记错误，外层 catch 干净退出
       const ensureRunning = async () => {
         const cur = await this.prisma.report.findUnique({
           where: { id: reportId },
           select: { status: true },
         });
-        if (cur?.status === 'cancelled') {
+        if (!cur || cur.status === 'cancelled') {
           const e = new Error('报告已被用户取消') as Error & { cancelled?: boolean };
           e.cancelled = true;
           throw e;
         }
       };
 
-      // ① 拆解子问题
-      await this.prisma.report.update({
-        where: { id: reportId },
-        data: { status: 'processing', step: 1 },
-      });
+      // —— P0-1 取消竞态门控 ——
+      // 所有状态推进都走 updateMany(status ∈ pending/processing)：
+      // 排队期间/生成中被取消 → 0 行匹配 → 立即中止，绝不覆盖 cancelled、不继续扣 token。
+      const ACTIVE = ['pending', 'processing'];
+      const advance = (step: number, extra: Prisma.ReportUpdateManyMutationInput = {}) =>
+        this.prisma.report.updateMany({
+          where: { id: reportId, ownerId: userId, status: { in: ACTIVE } },
+          data: { status: 'processing', step, ...extra },
+        });
+
+      // ① 拆解子问题（入口预检：排队期间已被取消 → 0 行，直接结束，不开始生成）
+      const claimed = await advance(1);
+      if (claimed.count === 0) {
+        this.logger.log(`研究报告在排队期间已被取消，跳过生成: ${reportId}`);
+        return;
+      }
       const subQuestions = await this.splitTopic(target, report.topic);
       await ensureRunning();
 
-      // ② 每个子问题：检索（知识库 + 联网并行）+ 撰写小节（小节间并行，来源编号全局统一）
-      await this.prisma.report.update({ where: { id: reportId }, data: { step: 2 } });
+      // ② 每个子问题：检索（知识库 + 联网并行）+ 撰写小节。
+      //    小节用并发池而非 Promise.all：取消后尚未启动的小节直接跳过（止损），
+      //    已在跑的 LLM 调用无法硬断，跑完即止。
+      const step2 = await advance(2);
+      if (step2.count === 0) return;
       const sections: ReportSection[] = [];
       const sourceMap = new Map<string, ReportSource>();
-      await Promise.all(
-        subQuestions.map(async (question, index) => {
-          await ensureRunning(); // 每节开始前检查取消
-          // 弱点①补联网：知识库检索 + Tavily 网页搜索并行（报告不再只依赖库内资料）
+      let cancelledEarly = false;
+      const CONCURRENCY = Math.min(3, subQuestions.length);
+      let nextSection = 0;
+      const worker = async () => {
+        while (!cancelledEarly && nextSection < subQuestions.length) {
+          const index = nextSection++;
+          const question = subQuestions[index];
+          await ensureRunning().catch((e) => {
+            cancelledEarly = true;
+            throw e;
+          });
+          if (cancelledEarly) return;
           const [kbRows, webRows] = await Promise.all([
             this.ragService.retrieve(userId, question, undefined, 4),
             this.webSearchService.search(question, this.webResults),
           ]);
+          // 检索期间可能收到取消：再查一次，取消则不再调用 LLM
+          await ensureRunning().catch((e) => {
+            cancelledEarly = true;
+            throw e;
+          });
+          if (cancelledEarly) return;
           const sources = kbRows.map((s) => {
             const existing = sourceMap.get(s.chunkId);
             const num = existing?.number ?? sourceMap.size + 1;
@@ -163,17 +192,21 @@ export class ReportProcessor {
             return { ...s, num };
           });
           const content = await this.writeSection(target, question, sources, webRows);
+          if (cancelledEarly) return; // 撰写期间被取消：丢弃本节，不写入结果
           sections.push({ index, question, content });
-        }),
-      );
-      sections.sort((a, b) => a.index - b.index);
+        }
+      };
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
       await ensureRunning();
+      sections.sort((a, b) => a.index - b.index);
 
       // ③ 组装完整报告（引言/结论单独写，正文拼各小节原文——杜绝复述全文被截断）
-      await this.prisma.report.update({ where: { id: reportId }, data: { step: 3 } });
+      const step3 = await advance(3);
+      if (step3.count === 0) return;
       const content = await this.assembleReport(target, report.topic, sections);
-      await this.prisma.report.update({
-        where: { id: reportId },
+      // 汇总期间被取消：done 用条件更新，0 行 = 已 cancelled/failed → 不覆盖
+      const done = await this.prisma.report.updateMany({
+        where: { id: reportId, ownerId: userId, status: { in: ACTIVE } },
         data: {
           status: 'done',
           step: 4,
@@ -185,6 +218,10 @@ export class ReportProcessor {
           ),
         },
       });
+      if (done.count === 0) {
+        this.logger.log(`研究报告汇总完成前已被取消，放弃写入: ${reportId}`);
+        return;
+      }
       this.logger.log(`研究报告完成: ${reportId}，${sections.length} 节，${this.tokensUsed} token`);
     } catch (err) {
       // P1-4：用户主动取消 → 不覆盖成 failed（cancel 接口已置 cancelled）

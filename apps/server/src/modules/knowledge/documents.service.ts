@@ -122,10 +122,17 @@ export class DocumentsService {
     });
 
     // 同名旧文档立即标记"替换中"（列表显示"替换中"而非新旧并存被误认为"新增"；
-    // 新文档解析失败时旧文档自动恢复为 done，不丢数据）
+    // 新文档解析失败时旧文档自动恢复为 done，不丢数据）。
+    // P0-4：只标稳定态旧版（done/failed），绝不动 pending/processing——
+    // 否则两个并发同名上传会互相把对方标成 replacing，双双误删。
     await this.prisma.document
       .updateMany({
-        where: { knowledgeBaseId, filename: originalName, id: { not: document.id } },
+        where: {
+          knowledgeBaseId,
+          filename: originalName,
+          id: { not: document.id },
+          status: { in: ['done', 'failed'] },
+        },
         data: { status: 'replacing' },
       })
       .catch(() => undefined);

@@ -600,14 +600,15 @@ async function onReplaceFileChange(docId: string, file: File) {
   void handleReplace(docId, file);
 }
 
-/** 轮询等待指定文档处理完成（替换流程用） */
+/** 轮询等待指定文档处理完成（替换流程用）；返回最终文档对象（done/failed/超时），供调用方判断成败 */
 async function waitForDoc(id: string) {
   for (let i = 0; i < 60; i++) {
     await load();
     const d = list.value.find((x) => x.id === id);
-    if (!d || d.status === 'done' || d.status === 'failed') return;
+    if (!d || d.status === 'done' || d.status === 'failed') return d ?? null;
     await new Promise((r) => setTimeout(r, 2000));
   }
+  return list.value.find((x) => x.id === id) ?? null;
 }
 
 async function handleReplace(docId: string, file: File) {
@@ -630,7 +631,17 @@ async function handleReplace(docId: string, file: File) {
       toast.success('文件内容未变化，无需重新向量化');
       return;
     }
-    await waitForDoc(created.id);
+    // P0-3：新文档必须解析成功才删旧版；failed/超时未完成则保留旧文档并明确提示（替换失败不丢数据）
+    const finalDoc = await waitForDoc(created.id);
+    if (!finalDoc || finalDoc.status !== 'done') {
+      const reason =
+        finalDoc?.status === 'failed' && finalDoc.error
+          ? `：${finalDoc.error}`
+          : '（可能仍在排队或解析超时）';
+      await load();
+      toast.error(`新文档未成功解析，已保留原文档${reason}`);
+      return;
+    }
     // 新文档处理完成后删除旧文档（新名字与旧不同时；同名则由后端队列自动替换）
     if (created.filename !== oldDoc?.filename) {
       await deleteDocument(knowledgeBaseId, docId);
@@ -646,9 +657,9 @@ async function handleReplace(docId: string, file: File) {
 
 // ==================== 文件夹操作（重命名 / 删除） ====================
 
-/** 重命名文件夹 = 批量把其下所有文件的路径前缀换成新名 */
+/** 重命名文件夹 = 批量把其下所有文件的路径前缀换成新名（保留父目录层级，P0-2） */
 async function handleRenameFolder(node: DocTreeNode) {
-  const oldPath = node.path;
+  const oldPath = node.path; // 如 'src/utils'（完整相对路径）
   // eslint-disable-next-line no-alert
   const newName = window.prompt('输入新的文件夹名称：', node.name)?.trim();
   if (!newName || newName === node.name) return;
@@ -656,12 +667,17 @@ async function handleRenameFolder(node: DocTreeNode) {
     toast.error('文件夹名称不能包含路径分隔符');
     return;
   }
+  // 父目录前缀：顶层文件夹无前缀；嵌套文件夹保留父路径，改名只换末段
+  // 'src/utils' → parent 'src/'；'src' → parent ''
+  const slash = oldPath.lastIndexOf('/');
+  const parent = slash >= 0 ? oldPath.slice(0, slash + 1) : '';
+  const newDir = parent + newName; // 重命名后的目录前缀（如 'src/engine'）
   const docs = collectFolderFiles(node).filter((d) => d.filename.startsWith(oldPath + '/'));
   if (!docs.length) {
     toast.error('文件夹下没有文件');
     return;
   }
-  const targets = new Set(docs.map((d) => newName + d.filename.slice(oldPath.length)));
+  const targets = new Set(docs.map((d) => newDir + d.filename.slice(oldPath.length)));
   const conflict = list.value.find(
     (d) => targets.has(d.filename) && !docs.some((x) => x.id === d.id),
   );
@@ -678,7 +694,7 @@ async function handleRenameFolder(node: DocTreeNode) {
       const d = docs[idx];
       try {
         await updateDocument(knowledgeBaseId, d.id, {
-          filename: newName + d.filename.slice(oldPath.length),
+          filename: newDir + d.filename.slice(oldPath.length),
         });
       } catch {
         errors.push(d.filename);
