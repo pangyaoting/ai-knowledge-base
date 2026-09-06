@@ -429,7 +429,13 @@ async function handleReplace(docId: string, file: File) {
   try {
     const oldDoc = list.value.find((d) => d.id === docId);
     // 先提交新版本（后台队列处理），等新文档处理完成后再删旧版——避免中间真空期、失败不丢旧数据
-    const created = await uploadDocument(knowledgeBaseId, file);
+    // 关键：带上原文件的完整路径（filename），否则新文档会落在知识库根目录而非原文件夹
+    const created = await uploadDocument(
+      knowledgeBaseId,
+      file,
+      undefined,
+      oldDoc?.filename ?? file.name,
+    );
     // 增量向量化：内容没变 → 后端跳过，无需等待/删除
     if ('skipped' in created) {
       await load();
