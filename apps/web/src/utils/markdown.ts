@@ -116,6 +116,21 @@ const md = new MarkdownIt({
   },
 });
 
+// P2：AI 回答里的链接一律新标签页打开（否则点击整页跳走、丢失会话状态）
+const defaultLinkOpen =
+  md.renderer.rules.link_open ??
+  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  // 内部锚点/引用跳转不加 target（避免新开页）；外部 http(s) 链接一律新标签打开
+  const href = token.attrGet('href') ?? '';
+  if (/^https?:\/\//i.test(href) || href.startsWith('www.')) {
+    token.attrSet('target', '_blank');
+    token.attrSet('rel', 'noopener noreferrer');
+  }
+  return defaultLinkOpen(tokens, idx, options, env, self);
+};
+
 // 渲染结果缓存：AI 回答每条消息内容不变就不重复跑 markdown-it + 代码高亮
 // （消息组件用 computed 调用本函数，父组件任何状态更新都不会导致已渲染消息重新高亮）
 const renderCache = new Map<string, string>();

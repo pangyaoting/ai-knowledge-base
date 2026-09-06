@@ -30,7 +30,8 @@ import {
   askQuestion,
   extractFileText,
 } from '@/api/chat';
-import { renderMarkdown } from '@/utils/markdown';
+import { renderMarkdown, getCopyCode } from '@/utils/markdown';
+import { copyText } from '@/utils/clipboard';
 import { getKnowledgeBases } from '@/api/knowledge';
 import { getModelConfigs } from '@/api/model-configs';
 import type { KnowledgeBase } from '@/types/knowledge';
@@ -107,11 +108,21 @@ function removeImage(i: number) {
   pendingImages.value.splice(i, 1);
 }
 
-/** 选择本地图片（子组件传来 File[]）：压缩 → 加入待发送列表 */
+/** 选择本地图片（子组件传来 File[]）：压缩 → 加入待发送列表（P2：绑定发起时会话，切走不串台） */
 async function onPickImage(files: File[]) {
   if (!files.length) return;
+  const fromSession = currentSessionId.value; // 发起选择时的会话
   try {
     const imgs = await Promise.all(files.map(compressImage));
+    // 压缩是异步的：期间用户可能已切换会话——结果归属发起时会话，不污染当前会话输入
+    if (fromSession && currentSessionId.value !== fromSession) {
+      imageDrafts.value[fromSession] = [...(imageDrafts.value[fromSession] ?? []), ...imgs].slice(
+        0,
+        MAX_IMAGES,
+      );
+      toast.info('图片已加入原会话草稿（你已切换到其他会话）');
+      return;
+    }
     const room = MAX_IMAGES - pendingImages.value.length;
     pendingImages.value.push(...imgs.slice(0, Math.max(0, room)));
     if (imgs.length > room) toast.info(`一次最多 ${MAX_IMAGES} 张图片`);
@@ -125,6 +136,7 @@ const MAX_FILES = 5;
 const pendingFiles = ref<Array<{ name: string; content: string }>>([]);
 
 async function onPickFile(files: File[]) {
+  const fromSession = currentSessionId.value; // 发起选择时的会话（P2：提取是异步的，切走不串台）
   for (const f of files) {
     if (pendingFiles.value.length >= MAX_FILES) {
       toast.info(`一次最多 ${MAX_FILES} 个文件`);
@@ -132,6 +144,11 @@ async function onPickFile(files: File[]) {
     }
     try {
       const res = await extractFileText(f);
+      if (fromSession && currentSessionId.value !== fromSession) {
+        // 提取期间切走了会话：内容归属发起时会话（文件草稿未做跨会话持久化，提示用户回去重选即可）
+        toast.info(`「${res.filename}」内容已提取，请回到原会话重新添加（防止串台）`);
+        return;
+      }
       pendingFiles.value.push({ name: res.filename, content: res.content });
     } catch (err) {
       toast.error(`${f.name}：${(err as Error).message}`);
@@ -369,6 +386,10 @@ async function selectSession(id: string) {
   currentSessionId.value = id;
   error.value = '';
   messages.value = [];
+  // P2：切换会话后滚动状态重置——新会话默认停在最新消息（autoScroll=true），
+  // 并清掉上一个会话记录的历史位置（否则翻过历史的会话 B 会带偏会话 A 的恢复）
+  autoScroll = true;
+  savedChatScrollTop = 0;
   // 竞态防护：快速连续切换会话时，只采用最后一次请求的结果（避免旧会话消息覆盖当前会话）
   const reqNo = ++sessionReqNo;
   try {
@@ -621,6 +642,18 @@ function handleStop() {
   stopThinkingTimer();
 }
 
+/** 流式生成中的回答块点击（事件委托）：代码块"复制"按钮在生成过程中也可用（P2） */
+async function handleStreamClick(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  if (target.classList.contains('code-copy')) {
+    const code = getCopyCode(target);
+    if (code && (await copyText(code))) {
+      target.textContent = '已复制';
+      setTimeout(() => (target.textContent = '复制'), 1500);
+    }
+  }
+}
+
 /** 分支：基于该回答新建会话，预填其对应的问题 */
 async function handleBranch(idx: number) {
   if (streaming.value || !currentSessionId.value) return;
@@ -823,7 +856,12 @@ onBeforeUnmount(() => {
             <div class="w-full">
               <!-- 等待首个 token：蓝色文字 + 白色光条从左到右扫过（循环）+ 右侧计时 -->
               <ChatThinkingBar v-if="!streamContent" :thinking-seconds="thinkingSeconds" />
-              <div v-else class="markdown-body px-1" v-html="renderMarkdown(streamContent)" />
+              <div
+                v-else
+                class="markdown-body px-1"
+                @click="handleStreamClick"
+                v-html="renderMarkdown(streamContent)"
+              />
               <div
                 v-if="streamSources.kb.length || streamSources.web.length"
                 class="mt-2 text-xs text-muted-foreground"
