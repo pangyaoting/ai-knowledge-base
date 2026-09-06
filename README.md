@@ -92,7 +92,7 @@ apps/
     ├── components/ui/  # shadcn-vue 风格设计系统
     └── views/          # 登录/注册/知识库/文档/对话/研究/看板
 packages/shared/        # 前后端共享类型
-docs/                   # 项目规划与学习笔记（00-32）
+docs/                   # 完整笔记库（按主题分类，见 docs/README.md 索引）
 ```
 
 ## 📈 面试亮点速览
@@ -108,4 +108,4 @@ docs/                   # 项目规划与学习笔记（00-32）
 9. **安全**：bcryptjs + JWT 双 Token 轮换 + ownerId 数据隔离（越权 404）+ BYO Key AES-256-GCM 加密
 10. **工程化**：ESLint/Prettier/Husky/commitlint 全绿，Jest/Vitest 单测，GitHub Actions 自动构建部署
 
-> 简历项目描述与完整面试讲解脚本见 `docs/12-项目讲解与面试话术.md`
+> 简历项目描述与完整面试讲解脚本见 `docs/求职面试/12-项目讲解与面试话术.md`（全部笔记分类索引 → `docs/README.md`）
