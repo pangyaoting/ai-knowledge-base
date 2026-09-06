@@ -44,4 +44,10 @@ export class ResearchController {
   remove(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.reportService.remove(userId, id);
   }
+
+  @Post('reports/:id/cancel')
+  @ApiOperation({ summary: '取消生成中的报告' })
+  cancel(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.reportService.cancel(userId, id);
+  }
 }

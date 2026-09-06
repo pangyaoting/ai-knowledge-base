@@ -1,6 +1,6 @@
 // 研究报告相关类型（与后端 Report 模型对应）
 
-export type ReportStatus = 'pending' | 'processing' | 'done' | 'failed';
+export type ReportStatus = 'pending' | 'processing' | 'done' | 'failed' | 'cancelled';
 
 /** 报告引用来源（全局编号，可点击定位原文） */
 export interface ReportSource {

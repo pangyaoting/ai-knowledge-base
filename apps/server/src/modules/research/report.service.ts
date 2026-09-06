@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ReportQueueService } from './report-queue.service';
 import { CreateReportDto } from './dto/create-report.dto';
@@ -57,5 +57,17 @@ export class ReportService {
     await this.findOne(userId, id);
     await this.prisma.report.delete({ where: { id } });
     return { success: true };
+  }
+
+  /** 取消生成中的报告（P1-4）：标记 cancelled，processor 在节间检查后中止 */
+  async cancel(userId: string, id: string) {
+    const report = await this.findOne(userId, id);
+    if (!['pending', 'processing'].includes(report.status)) {
+      throw new BadRequestException('当前状态不可取消（仅生成中可取消）');
+    }
+    return this.prisma.report.update({
+      where: { id },
+      data: { status: 'cancelled' },
+    });
   }
 }

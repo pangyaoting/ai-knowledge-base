@@ -115,12 +115,26 @@ export class ReportProcessor {
     }
 
     try {
+      // 生成中是否被取消（P1-4）：被取消则抛标记错误，外层 catch 干净退出
+      const ensureRunning = async () => {
+        const cur = await this.prisma.report.findUnique({
+          where: { id: reportId },
+          select: { status: true },
+        });
+        if (cur?.status === 'cancelled') {
+          const e = new Error('报告已被用户取消') as Error & { cancelled?: boolean };
+          e.cancelled = true;
+          throw e;
+        }
+      };
+
       // ① 拆解子问题
       await this.prisma.report.update({
         where: { id: reportId },
         data: { status: 'processing', step: 1 },
       });
       const subQuestions = await this.splitTopic(target, report.topic);
+      await ensureRunning();
 
       // ② 每个子问题：检索（知识库 + 联网并行）+ 撰写小节（小节间并行，来源编号全局统一）
       await this.prisma.report.update({ where: { id: reportId }, data: { step: 2 } });
@@ -128,6 +142,7 @@ export class ReportProcessor {
       const sourceMap = new Map<string, ReportSource>();
       await Promise.all(
         subQuestions.map(async (question, index) => {
+          await ensureRunning(); // 每节开始前检查取消
           // 弱点①补联网：知识库检索 + Tavily 网页搜索并行（报告不再只依赖库内资料）
           const [kbRows, webRows] = await Promise.all([
             this.ragService.retrieve(userId, question, undefined, 4),
@@ -152,6 +167,7 @@ export class ReportProcessor {
         }),
       );
       sections.sort((a, b) => a.index - b.index);
+      await ensureRunning();
 
       // ③ 组装完整报告（引言/结论单独写，正文拼各小节原文——杜绝复述全文被截断）
       await this.prisma.report.update({ where: { id: reportId }, data: { step: 3 } });
@@ -171,6 +187,11 @@ export class ReportProcessor {
       });
       this.logger.log(`研究报告完成: ${reportId}，${sections.length} 节，${this.tokensUsed} token`);
     } catch (err) {
+      // P1-4：用户主动取消 → 不覆盖成 failed（cancel 接口已置 cancelled）
+      if ((err as Error & { cancelled?: boolean }).cancelled) {
+        this.logger.log(`研究报告已被用户取消: ${reportId}`);
+        return;
+      }
       this.logger.warn(`研究报告失败: ${reportId} → ${(err as Error).message}`);
       await this.prisma.report.update({
         where: { id: reportId },

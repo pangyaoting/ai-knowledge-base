@@ -21,3 +21,8 @@ export function createReport(data: { topic: string; knowledgeBaseIds?: string[] 
 export function deleteReport(id: string) {
   return request.delete<unknown, { success: boolean }>(`/research/reports/${id}`);
 }
+
+/** 取消生成中的报告 */
+export function cancelReport(id: string) {
+  return request.post<unknown, Report>(`/research/reports/${id}/cancel`);
+}

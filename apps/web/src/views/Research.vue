@@ -7,7 +7,7 @@ import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
 import { toast } from '@/composables/useToast';
-import { getReports, getReport, createReport, deleteReport } from '@/api/research';
+import { getReports, getReport, createReport, deleteReport, cancelReport } from '@/api/research';
 import { getKnowledgeBases } from '@/api/knowledge';
 import { getModelConfigs } from '@/api/model-configs';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
@@ -61,6 +61,8 @@ const progressText = computed(() => {
       return '已完成';
     case 'failed':
       return '生成失败';
+    case 'cancelled':
+      return '已取消';
     default:
       return '';
   }
@@ -133,7 +135,7 @@ function startPolling() {
       current.value = r;
       const i = reports.value.findIndex((x) => x.id === r.id);
       if (i >= 0) reports.value[i] = r;
-      if (r.status === 'done' || r.status === 'failed') stopPolling();
+      if (r.status === 'done' || r.status === 'failed' || r.status === 'cancelled') stopPolling();
     } catch {
       // P0-1：网络抖动不能停轮询——连续失败 3 次才停（后端仍可能正常生成）
       pollFails++;
@@ -183,6 +185,22 @@ async function handleRetryFailed() {
   error.value = '';
   await openKbs();
   void handleCreate();
+}
+
+/** 取消生成中的报告（P1-4） */
+async function handleCancelReport() {
+  const r = current.value;
+  if (!r) return;
+  try {
+    await cancelReport(r.id);
+    toast.success('已取消生成');
+    stopPolling();
+    await loadReports();
+    currentId.value = null;
+    current.value = null;
+  } catch (e) {
+    toast.error((e as Error).message);
+  }
 }
 
 async function handleCreate() {
@@ -460,7 +478,7 @@ onBeforeUnmount(stopPolling);
         </div>
 
         <div class="flex-1 overflow-y-auto">
-          <!-- 生成中：进度 -->
+          <!-- 生成中：进度 + 取消按钮（P1-4） -->
           <div
             v-if="generating"
             class="flex flex-col items-center justify-center py-24 text-center"
@@ -470,14 +488,22 @@ onBeforeUnmount(stopPolling);
             <p class="mt-1 text-xs text-muted-foreground">
               正在检索你的知识库资料并撰写章节，请稍候
             </p>
+            <Button variant="outline" size="sm" class="mt-6" @click="handleCancelReport">
+              取消生成
+            </Button>
           </div>
 
-          <!-- 失败 -->
+          <!-- 失败 / 已取消（都可重新生成，回填原主题） -->
           <div
-            v-else-if="current.status === 'failed'"
+            v-else-if="current.status === 'failed' || current.status === 'cancelled'"
             class="flex flex-col items-center justify-center py-24 text-center"
           >
-            <p class="text-sm text-destructive">生成失败：{{ current.error || '未知错误' }}</p>
+            <p v-if="current.status === 'cancelled'" class="text-sm text-muted-foreground">
+              生成已取消
+            </p>
+            <p v-else class="text-sm text-destructive">
+              生成失败：{{ current.error || '未知错误' }}
+            </p>
             <Button variant="outline" size="sm" class="mt-4" @click="handleRetryFailed">
               重新生成
             </Button>
