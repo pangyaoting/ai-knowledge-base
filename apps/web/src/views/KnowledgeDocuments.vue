@@ -166,6 +166,91 @@ function handleUploadDirIntoFolder(dirPath: string) {
   dirInput?.value?.click();
 }
 
+// ==================== 文件夹整体替换 ====================
+/** 待替换的目标文件夹（选完本地目录后走替换上传而非普通增量） */
+const pendingReplaceDir = ref<string | null>(null);
+let replacingFolder = false;
+
+/** 文件夹行"替换此文件夹"：用本地文件夹整体替换（内容归入目标路径，本地没有的旧文件删除） */
+function handleReplaceFolder(dirPath: string) {
+  if (replacingFolder) return;
+  const dir = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+  const existingCount = list.value.filter((d) => d.filename.startsWith(dir)).length;
+  // eslint-disable-next-line no-alert
+  if (
+    !window.confirm(
+      `用本地文件夹整体替换「${dirPath}」？\n\n该文件夹现有 ${existingCount} 个文档将按本地内容更新/删除（本地没有的旧文件会被删除）。继续？`,
+    )
+  ) {
+    return;
+  }
+  pendingReplaceDir.value = dir;
+  dirInput?.value?.click();
+}
+
+/** 替换上传：目标名 = 目标文件夹 + 本地相对路径（去所选目录名）；全部成功后删除本地已不存在的旧文件 */
+async function replaceFolderUpload(files: File[], dir: string) {
+  replacingFolder = true;
+  try {
+    const targets: Array<{ f: File; name: string }> = [];
+    for (const f of files) {
+      const wp = (f as File & { webkitRelativePath?: string }).webkitRelativePath;
+      let rel = wp || f.name;
+      if (wp) {
+        const i = rel.indexOf('/');
+        if (i >= 0) rel = rel.slice(i + 1); // 去所选目录名：内容直接归入目标文件夹
+      }
+      if (!rel) continue;
+      if (IGNORE_SEGMENT_RE.test('/' + rel) || IGNORE_SENSITIVE_RE.test(rel)) continue;
+      targets.push({ f, name: dir + rel });
+    }
+    if (targets.length === 0) {
+      toast.error('所选文件夹里没有可上传的文件');
+      return;
+    }
+    // 上传（并发）
+    const errors: string[] = [];
+    let next = 0;
+    const worker = async () => {
+      while (next < targets.length) {
+        const idx = next++;
+        if (idx >= targets.length) break;
+        const t = targets[idx];
+        try {
+          await uploadDocument(knowledgeBaseId, t.f, undefined, t.name);
+        } catch {
+          errors.push(t.name);
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(UPLOAD_CONCURRENCY, targets.length) }, () => worker()),
+    );
+    if (errors.length === targets.length) {
+      toast.error('替换上传全部失败，未删除任何旧文件');
+      return;
+    }
+    // 删除目标文件夹下、本地已不存在的旧文档（整体替换的最后一步）
+    const uploaded = new Set(targets.map((t) => t.name));
+    const stale = list.value.filter((d) => d.filename.startsWith(dir) && !uploaded.has(d.filename));
+    let deleted = 0;
+    for (const d of stale) {
+      try {
+        await deleteDocument(knowledgeBaseId, d.id);
+        deleted++;
+      } catch {
+        /* 忽略单个删除失败 */
+      }
+    }
+    await load();
+    toast.success(
+      `文件夹已替换：上传 ${targets.length - errors.length} 个，删除旧文件 ${deleted} 个`,
+    );
+  } finally {
+    replacingFolder = false;
+  }
+}
+
 function onFileChange(e: Event) {
   const input = e.target as HTMLInputElement | null;
   const files = input?.files ? Array.from(input.files) : [];
@@ -180,7 +265,12 @@ function onFileChange(e: Event) {
 function onDirChange(e: Event) {
   const input = e.target as HTMLInputElement | null;
   const files = input?.files ? Array.from(input.files) : [];
-  if (files.length) {
+  const target = pendingReplaceDir.value;
+  pendingReplaceDir.value = null;
+  if (files.length && target) {
+    // 文件夹"替换"流程：整体替换目标文件夹（区别于普通增量上传）
+    void replaceFolderUpload(files, target);
+  } else if (files.length) {
     addPendingFiles(files);
   } else if (input) {
     console.warn('未读取到所选文件（事件目标异常），请重试或强刷页面');
@@ -839,6 +929,7 @@ onBeforeUnmount(stopParsePoll);
                 @delete-folder="handleDeleteFolder"
                 @upload-folder="(node) => handleUploadIntoFolder(node.path)"
                 @upload-dir-folder="(node) => handleUploadDirIntoFolder(node.path)"
+                @replace-folder="(node) => handleReplaceFolder(node.path)"
               />
             </template>
 
@@ -862,6 +953,7 @@ onBeforeUnmount(stopParsePoll);
                 @delete-folder="handleDeleteFolder"
                 @upload-folder="(node) => handleUploadIntoFolder(node.path)"
                 @upload-dir-folder="(node) => handleUploadDirIntoFolder(node.path)"
+                @replace-folder="(node) => handleReplaceFolder(node.path)"
               />
             </template>
           </tbody>

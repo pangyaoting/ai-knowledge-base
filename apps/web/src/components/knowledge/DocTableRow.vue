@@ -11,6 +11,7 @@ import {
   Folder,
   FolderUp,
   FolderTree,
+  Replace,
 } from 'lucide-vue-next';
 import { fileIconOf, fileBadgeOf } from '@/utils/file-icons';
 import type { DocTreeNode } from '@/utils/doc-tree';
@@ -34,6 +35,7 @@ const emit = defineEmits<{
   (e: 'delete-folder', node: DocTreeNode): void;
   (e: 'upload-folder', node: DocTreeNode): void;
   (e: 'upload-dir-folder', node: DocTreeNode): void;
+  (e: 'replace-folder', node: DocTreeNode): void;
 }>();
 
 const statusText: Record<string, string> = {
@@ -133,6 +135,13 @@ function onReplaceChange(e: Event, docId: string) {
             @click.stop="emit('upload-dir-folder', node)"
           >
             <FolderTree class="h-4 w-4" />
+          </button>
+          <button
+            class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            :title="'替换此文件夹：用本地文件夹整体替换（内容归入本路径，旧文件删除）'"
+            @click.stop="emit('replace-folder', node)"
+          >
+            <Replace class="h-4 w-4" />
           </button>
           <button
             class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
