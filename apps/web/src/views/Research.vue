@@ -485,6 +485,22 @@ onBeforeUnmount(stopPolling);
           >
             <Loader2 class="h-8 w-8 animate-spin text-primary" />
             <p class="mt-4 text-sm font-medium">{{ progressText }}</p>
+            <!-- P2-12 步骤指示器：拆解 → 检索撰写 → 汇总 -->
+            <div class="mt-5 flex items-center gap-2 text-xs">
+              <template v-for="(name, i) in ['拆解问题', '检索与撰写', '汇总报告']" :key="name">
+                <span
+                  class="rounded-full px-2.5 py-1 transition-colors"
+                  :class="
+                    (current.step ?? 0) >= i + 1
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'bg-muted/60 text-muted-foreground'
+                  "
+                >
+                  {{ name }}
+                </span>
+                <span v-if="i < 2" class="text-muted-foreground/50">›</span>
+              </template>
+            </div>
             <p class="mt-1 text-xs text-muted-foreground">
               正在检索你的知识库资料并撰写章节，请稍候
             </p>
