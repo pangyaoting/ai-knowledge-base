@@ -171,25 +171,26 @@ function handleUploadDirIntoFolder(dirPath: string) {
 const pendingReplaceDir = ref<string | null>(null);
 let replacingFolder = false;
 
-/** 文件夹行"替换此文件夹"：用本地文件夹整体替换（内容归入目标路径，本地没有的旧文件删除） */
+/** 文件夹行"替换此文件夹"：直接弹出目录选择（文件选择器必须由用户手势直接触发，
+ *  不能先 confirm 再 click——浏览器会拦截）；选完目录后再确认执行 */
 function handleReplaceFolder(dirPath: string) {
   if (replacingFolder) return;
-  const dir = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
-  const existingCount = list.value.filter((d) => d.filename.startsWith(dir)).length;
-  // eslint-disable-next-line no-alert
-  if (
-    !window.confirm(
-      `用本地文件夹整体替换「${dirPath}」？\n\n该文件夹现有 ${existingCount} 个文档将按本地内容更新/删除（本地没有的旧文件会被删除）。继续？`,
-    )
-  ) {
-    return;
-  }
-  pendingReplaceDir.value = dir;
+  pendingReplaceDir.value = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
   dirInput?.value?.click();
 }
 
 /** 替换上传：目标名 = 目标文件夹 + 本地相对路径（去所选目录名）；全部成功后删除本地已不存在的旧文件 */
 async function replaceFolderUpload(files: File[], dir: string) {
+  // 已选好本地目录，此刻确认执行（替换含删除，需用户明确同意）
+  const existingCount = list.value.filter((d) => d.filename.startsWith(dir)).length;
+  // eslint-disable-next-line no-alert
+  if (
+    !window.confirm(
+      `用所选文件夹替换「${dir}」？\n\n该文件夹现有 ${existingCount} 个文档：同名将更新，本地没有的旧文件将被删除。继续？`,
+    )
+  ) {
+    return;
+  }
   replacingFolder = true;
   try {
     const targets: Array<{ f: File; name: string }> = [];
