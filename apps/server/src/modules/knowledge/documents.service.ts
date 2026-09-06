@@ -352,8 +352,14 @@ export class DocumentsService {
       if (!cleaned) {
         throw new BadRequestException('内容为空，无法入库');
       }
-      // 只更新知识库内部（重新分块 + 向量化），不改写磁盘文件——
-      // 知识库与本地文件分离：编辑内容/改名都不影响上传的原文件（下载拿到的始终是原始文件）
+      // 纯文本类（md/txt/代码）：编辑即真实改文件——写回磁盘，保证查看/下载/再次编辑看到新内容
+      // （docx/pdf 只能抽取纯文本编辑，写回会破坏原格式 → 保持只更新索引，查看原文件仍为原格式内容）
+      const isPlainText = ['md', 'markdown', 'txt', 'code'].includes(doc.fileType);
+      if (isPlainText) {
+        writeFileSync(storedPath(doc.filepath), dto.content, 'utf8');
+        data.fileSize = Buffer.byteLength(dto.content, 'utf8');
+      }
+      // 重新分块 + 向量化（向量库同步更新，之后按新内容检索）
       // md 文档走结构化分块（按标题分节、表格保表头，块带章节路径——P1）
       const structuredChunks = doc.fileType === 'md' ? splitStructuredMd(cleaned) : undefined;
       const chunkCount = await this.processor.indexText(
@@ -363,7 +369,9 @@ export class DocumentsService {
         structuredChunks,
       );
       data.status = 'done';
-      this.logger.log(`文档内容已编辑并重新向量化: ${doc.filename} → ${chunkCount} 个 chunk`);
+      this.logger.log(
+        `文档内容已编辑并重新向量化: ${doc.filename} → ${chunkCount} 个 chunk${isPlainText ? '（已写回原文件）' : ''}`,
+      );
     }
 
     return this.prisma.document.update({
