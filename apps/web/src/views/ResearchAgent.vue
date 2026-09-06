@@ -113,9 +113,8 @@ const remainingText = computed(() => {
   return m > 0 ? `剩余 ${m} 分钟` : `剩余 ${s} 秒`;
 });
 
-/** 是否在轮询（未结束，或已停止但阶段报告还没写完；取消的任务不会再有报告，不轮询） */
-const polling = computed(() => {
-  const t = current.value;
+/** 任务是否仍在活跃（需要被跟踪/轮询）：未结束，或已停止但阶段报告还没写完；取消的任务不再有报告，不跟踪 */
+function isActiveTask(t: AgentTask | null): boolean {
   if (!t) return false;
   return (
     t.status === 'pending' ||
@@ -123,7 +122,58 @@ const polling = computed(() => {
     t.status === 'running' ||
     (t.status === 'stopped' && !t.report && t.stopReason !== 'cancelled')
   );
-});
+}
+
+/** 是否在轮询当前任务（未结束，或已停止但阶段报告还没写完；取消的任务不会再有报告，不轮询） */
+const polling = computed(() => isActiveTask(current.value));
+
+/**
+ * P1-5 多任务列表同步：
+ * 详情轮询只跟当前选中的任务；若列表里还有其他活跃任务（研究中/待确认/排队中），
+ * 它们的状态会过期（比如另一个任务早完成了，侧边栏还显示"研究中"）。
+ * 方案：只要列表中存在活跃任务，就每 10s 静默整表刷新一次，让所有任务状态保持新鲜。
+ * 全部结束后自动停（不再发请求）。
+ */
+let listSyncTimer: ReturnType<typeof setInterval> | null = null;
+
+function syncListIfNeeded() {
+  // 只有「列表里存在非当前选中任务的活跃任务」时才需要整表同步：
+  // 当前选中任务由详情轮询覆盖，单任务运行时不发多余请求；
+  // 并发/后台任务（研究中/待确认/排队中）的状态才需要列表级同步兜底
+  const hasOtherActive = tasks.value.some((t) => isActiveTask(t) && t.id !== currentId.value);
+  if (!hasOtherActive) {
+    if (listSyncTimer) {
+      clearInterval(listSyncTimer);
+      listSyncTimer = null;
+    }
+    return;
+  }
+  if (listSyncTimer) return; // 已在跑
+  listSyncTimer = setInterval(async () => {
+    try {
+      const all = await getAgentTasks();
+      tasks.value = all;
+      const stillOtherActive = tasks.value.some((t) => isActiveTask(t) && t.id !== currentId.value);
+      if (!stillOtherActive) {
+        // 其他活跃任务都结束了 → 停表，不再发请求
+        if (listSyncTimer) {
+          clearInterval(listSyncTimer);
+          listSyncTimer = null;
+        }
+      }
+    } catch {
+      // 网络抖动：忽略本次，下轮再试（与 P0-1 详情轮询容错一致）
+    }
+  }, 10_000);
+}
+
+/** 停止列表同步（页面卸载时） */
+function stopListSync() {
+  if (listSyncTimer) {
+    clearInterval(listSyncTimer);
+    listSyncTimer = null;
+  }
+}
 
 const stopReasonText: Record<string, string> = {
   budget_exhausted: '预算用尽',
@@ -174,6 +224,8 @@ async function loadTasks() {
   loading.value = true;
   try {
     tasks.value = await getAgentTasks();
+    // P1-5：列表里存在活跃任务 → 启动列表级同步（其它未选中任务状态不落后）
+    syncListIfNeeded();
   } catch (e) {
     toast.error((e as Error).message);
   } finally {
@@ -205,6 +257,8 @@ async function selectTask(id: string) {
 /** 轮询进度（2.5s），结束或阶段报告出来后停止；长任务结束时弹系统通知（P2-11） */
 function startPolling() {
   stopPolling();
+  // P1-5：详情轮询启动前先评估一次列表同步（列表可能有多个活跃任务需要一起跟踪）
+  syncListIfNeeded();
   // 记住进入轮询时的状态，用于检测「非终态 → 终态」转移，只在状态真正变化那一刻通知一次
   let lastStatus: AgentTask['status'] | undefined = current.value?.status;
   let lastHadReport = Boolean(current.value?.report);
@@ -248,6 +302,8 @@ function stopPolling() {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  // P1-5：详情轮询停了（当前任务已结束/出错），若列表还有其他活跃任务，列表同步器要继续跑
+  syncListIfNeeded();
 }
 
 function startClock() {
@@ -525,6 +581,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   stopPolling();
   stopClock();
+  stopListSync();
 });
 </script>
 
