@@ -93,6 +93,18 @@ export class ReportProcessor {
   }
 
   /** 执行报告生成（任何异常把报告标记为 failed，不阻塞队列） */
+  /** 从 report.kbScope 取限定检索的文档范围（kbScope: { scope, knowledgeBaseIds }；specific 无 ID 时退化为全库） */
+  private scopeDocIds(report: { kbScope: unknown }): string[] | undefined {
+    const scope = (report.kbScope ?? null) as {
+      scope?: string;
+      knowledgeBaseIds?: string[];
+    } | null;
+    if (scope?.scope === 'specific' && scope.knowledgeBaseIds?.length) {
+      return scope.knowledgeBaseIds;
+    }
+    return undefined;
+  }
+
   async processReport(data: ReportJobData) {
     const { userId, reportId } = data;
     this.tokensUsed = 0;
@@ -168,7 +180,7 @@ export class ReportProcessor {
           });
           if (cancelledEarly) return;
           const [kbRows, webRows] = await Promise.all([
-            this.ragService.retrieve(userId, question, undefined, 4),
+            this.ragService.retrieve(userId, question, this.scopeDocIds(report), 4),
             this.webSearchService.search(question, this.webResults),
           ]);
           // 检索期间可能收到取消：再查一次，取消则不再调用 LLM

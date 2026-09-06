@@ -162,8 +162,18 @@ export class AgentRunner {
       }
       const endAtMs = new Date(task.endAt).getTime();
       if (Date.now() >= endAtMs) {
-        // 排队太久导致时间窗已过：直接按"时间到"收尾（无成果）
-        await this.finish(taskId, 'time_exhausted', 'stopped', null, null, null, null, null);
+        // 排队太久导致时间窗已过：直接按"时间到"收尾（无成果）——
+        // report 给说明而非 null，前端才不会无限轮询（P1-2）
+        await this.finish(
+          taskId,
+          'time_exhausted',
+          'stopped',
+          '# 研究未启动\n\n排队时间过长，到达设定的结束时间时任务仍未开始，已自动结束。可删除后重新创建，或续时后重试。',
+          [],
+          null,
+          null,
+          null,
+        );
         return;
       }
 
@@ -710,9 +720,22 @@ export class AgentRunner {
     sources: Array<{ number: number; title: string; url: string }>;
     summary: string | null;
   }> {
-    // 没有任何研究内容 → 不组装
+    // 没有任何研究内容（极早停止 / 预算在首篇笔记前耗尽 / 时间到且无产出）：
+    // 不返回 null（null 会让前端 isActiveTask 永远判活跃 → 无限轮询），
+    // 改落一段说明性"报告"，用户看到原因、轮询自然停止（P1-2）
     const hasContent = progress.directions.some((d) => d.sectionContent || d.notes);
-    if (!hasContent) return { report: null, sources: [], summary: null };
+    if (!hasContent) {
+      return {
+        report:
+          '> ⚠️ 本次研究在产出任何内容之前就结束了（预算耗尽 / 到达设定时间 / 手动停止），没有可整理的研究笔记。\n\n' +
+          '你可以：\n' +
+          '- 点击右上角「继续研究」追加预算或时间后重跑（会重新从研究方向开始）；\n' +
+          '- 或删除本任务后重新创建。\n\n' +
+          '> 提示：研究任务需要联网检索并精读若干网页后才开始沉淀笔记，预算/时间设置过小或过早停止都会导致无产出。',
+        sources: [],
+        summary: '研究在产出内容前结束，无可用报告',
+      };
+    }
 
     const topic = task.goal?.trim() || '自主探索研究报告';
     const titles = progress.directions

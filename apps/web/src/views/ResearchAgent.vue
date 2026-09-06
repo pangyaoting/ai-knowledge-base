@@ -258,6 +258,7 @@ async function selectTask(id: string) {
 /** 轮询进度（2.5s），结束或阶段报告出来后停止；长任务结束时弹系统通知（P2-11） */
 function startPolling() {
   stopPolling();
+  pollFails = 0;
   // P1-5：详情轮询启动前先评估一次列表同步（列表可能有多个活跃任务需要一起跟踪）
   syncListIfNeeded();
   // 记住进入轮询时的状态，用于检测「非终态 → 终态」转移，只在状态真正变化那一刻通知一次
@@ -267,6 +268,7 @@ function startPolling() {
     if (!currentId.value) return;
     try {
       const t = await getAgentTask(currentId.value);
+      pollFails = 0;
       const prevStatus = lastStatus;
       const prevHadReport = lastHadReport;
       current.value = t;
@@ -293,10 +295,15 @@ function startPolling() {
       }
       if (!polling.value) stopPolling();
     } catch {
-      stopPolling();
+      // P1-6：与 Research.vue 对齐——网络抖动不能停轮询，连续失败 3 次才停
+      pollFails++;
+      if (pollFails >= 3) stopPolling();
     }
   }, 2500);
 }
+
+/** 连续轮询失败计数（网络抖动自动恢复，连续 3 次才判定中断） */
+let pollFails = 0;
 
 function stopPolling() {
   if (pollTimer) {
@@ -371,6 +378,9 @@ async function handleCreate() {
     return;
   }
   creating.value = true;
+  // P2-11/P1-7：通知权限必须在用户点击的同步阶段请求（浏览器激活窗口内）——
+  // 放在 await 之后会超窗，Chrome 静默拒绝并永久 denied。拒绝也不影响研究。
+  void ensureNotifyPermission();
   try {
     const task = await createAgentTask({
       mode: mode.value,
@@ -382,8 +392,6 @@ async function handleCreate() {
     tasks.value.unshift(task);
     await selectTask(task.id);
     toast.success('研究任务已创建，正在拆解研究方向...');
-    // P2-11：研究可能要几十分钟，顺手问一次通知权限（拒绝也不影响使用）
-    void ensureNotifyPermission();
   } catch (err) {
     toast.error((err as Error).message);
   } finally {
@@ -398,12 +406,15 @@ async function handleStop() {
   // P0-3：awaiting_confirm（待确认方向）也能停止（=取消拆解，后端 agent-task 合法支持）
   if (!t || !['pending', 'running', 'awaiting_confirm'].includes(t.status)) return;
   try {
-    current.value = await stopAgentTask(t.id);
-    toast.success(
-      t.status === 'awaiting_confirm'
-        ? '已取消该任务（方向确认阶段，未开始研究）'
-        : '已请求停止，正在整理成正式报告...',
-    );
+    const stopped = await stopAgentTask(t.id);
+    current.value = stopped;
+    // P1-2 文案修正：pending/awaiting_confirm 停止 = 取消（无报告产出，不会"整理"）；
+    // 只有 running 中停止才会补写正式报告
+    if (stopped.stopReason === 'cancelled') {
+      toast.success('任务已取消（尚未开始研究，无报告产出）');
+    } else {
+      toast.success('已请求停止，正在整理成正式报告...');
+    }
     startPolling();
   } catch (e) {
     toast.error((e as Error).message);

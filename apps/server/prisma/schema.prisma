@@ -185,6 +185,7 @@ model Report {
   content    String? // 最终 Markdown 报告
   sections   Json? // [{ index, question, content }]
   sources    Json? // [{ number, documentId, chunkIndex, filename, similarity }]
+  kbScope    Json?   @map("kb_scope") // 创建时的检索范围 { scope: 'all'|'specific', knowledgeBaseIds?: [] }（失败重试回填用）
   error      String? // 失败原因
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")

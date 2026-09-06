@@ -18,6 +18,12 @@ export interface ReportSection {
   content: string;
 }
 
+/** 报告创建时的检索范围（失败重试精确回填用） */
+export interface ReportKbScope {
+  scope: 'all' | 'specific';
+  knowledgeBaseIds: string[];
+}
+
 export interface Report {
   id: string;
   topic: string;
@@ -27,6 +33,8 @@ export interface Report {
   content: string | null;
   sections: ReportSection[] | null;
   sources: ReportSource[] | null;
+  /** 创建时的检索范围（null = 旧报告无记录，重试按全库处理） */
+  kbScope: ReportKbScope | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;

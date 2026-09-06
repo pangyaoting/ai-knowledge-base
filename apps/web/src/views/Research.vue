@@ -206,7 +206,7 @@ async function handleNew() {
   await openKbs();
 }
 
-/** 失败后"重新生成"：回填原主题（检索范围在失败时未被清空，沿用）→ 直接重新提交 */
+/** 失败后"重新生成"：回填原主题 + 原检索范围（P1-7：kbScope 精确回填，不再退化成全库）→ 直接重新提交 */
 async function handleRetryFailed() {
   const r = current.value;
   if (!r) return;
@@ -214,6 +214,15 @@ async function handleRetryFailed() {
   currentId.value = null;
   current.value = null;
   error.value = '';
+  // 回填失败时记录的检索范围（旧报告无 kbScope 时按全库）
+  const ks = r.kbScope;
+  if (ks) {
+    scope.value = ks.scope === 'specific' ? 'specific' : 'all';
+    pickingKbIds.value = ks.scope === 'specific' ? [...(ks.knowledgeBaseIds ?? [])] : [];
+  } else {
+    scope.value = 'all';
+    pickingKbIds.value = [];
+  }
   await openKbs();
   void handleCreate();
 }
@@ -237,7 +246,15 @@ async function handleCancelReport() {
 async function handleCreate() {
   const t = topic.value.trim();
   if (!t || creating.value) return;
+  // 防绕过按钮：specific 范围必须有选中的知识库（否则直发空数组 = 全库检索，语义不符）
+  if (scope.value === 'specific' && pickingKbIds.value.length === 0) {
+    toast.error('请至少选择一个知识库（指定范围下不能全库检索）');
+    return;
+  }
   creating.value = true;
+  // P2-11/P1-7：通知权限必须在用户点击的同步阶段请求（浏览器激活窗口内）——
+  // 放在 await 之后会超窗，Chrome 静默拒绝并永久 denied。拒绝也不影响生成。
+  void ensureNotifyPermission();
   try {
     const kbIds = scope.value === 'specific' ? [...pickingKbIds.value] : [];
     const report = await createReport({ topic: t, knowledgeBaseIds: kbIds });
@@ -245,8 +262,6 @@ async function handleCreate() {
     topic.value = '';
     pickingKbIds.value = [];
     await selectReport(report.id);
-    // P2-11：生成可能要几分钟，顺手问一次通知权限（拒绝也不影响使用）
-    void ensureNotifyPermission();
   } catch (e) {
     toast.error((e as Error).message);
   } finally {

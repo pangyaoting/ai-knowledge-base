@@ -28,7 +28,15 @@ export class ReportService {
       }
     }
     const report = await this.prisma.report.create({
-      data: { ownerId: userId, topic: dto.topic.trim() },
+      data: {
+        ownerId: userId,
+        topic: dto.topic.trim(),
+        // P1-7：持久化创建时的检索范围——失败后"重新生成"可精确回填同一范围（不退化成全库）
+        kbScope: {
+          scope: kbIds ? 'specific' : 'all',
+          knowledgeBaseIds: kbIds ?? [],
+        },
+      },
     });
     await this.queueService.addReportJob({ userId, reportId: report.id });
     return report;
