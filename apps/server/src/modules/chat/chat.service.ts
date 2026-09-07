@@ -467,6 +467,8 @@ export class ChatService {
     // 大文件(>300 行)首问 → 总览（函数地图，快）；追问"逐行讲解 XX" → 单函数深挖；
     // 小文件 → 整篇深解析。全程用 AST 符号表给真实行号，不再让模型"对着无行号全文瞎写"。
     let parseMode: 'overview' | 'deep' | 'full' = 'full';
+    // 用户显式要"完整/每行/整个文件"时，跳过总览直接整篇逐行（尊重显式意图）
+    let wholeFileExplicit = false;
     if (wantsCodeWalkthrough) {
       // 目标全文字档：优先问题点名文件（单文件全文通道产物 similarity===null）；
       // 未点名但带函数名追问 → 从上一轮助手内容里推断它解析的文件
@@ -512,6 +514,9 @@ export class ChatService {
         // 剥掉分块块头行（"文件: xxx"）再定位行号——否则行号整体偏移、文本混入分页标记
         const fileContent = stripChunkHeaders(docSrc.content);
         const lineCount = fileContent.split('\n').length;
+        wholeFileExplicit =
+          /完整|整个文件|全文|全部行|全部代码|每一行|每行/.test(question) &&
+          fileContent.length <= 200_000; // 超大文件显式整篇会撑爆上下文 → 仍走总览
         const symbols = extractSymbols(docSrc.filename, fileContent);
         const target = symbols.find((s) => nameTokens.includes(s.name.toLowerCase())) ?? null;
         if (target && deepIntent) {
@@ -547,8 +552,9 @@ export class ChatService {
           this.logger.log(
             `解析深挖：${docSrc.filename} ${target.name}（L${target.startLine}-${target.endLine}）`,
           );
-        } else if (lineCount > 300) {
+        } else if (lineCount > 300 && !wholeFileExplicit) {
           // 大文件首问 → 总览：只给函数地图 + 头部注释，引导追问深挖
+          // （用户显式要求完整/每行时跳过总览，走下方整篇逐行）
           parseMode = 'overview';
           const head = numberLines(fileContent.split('\n').slice(0, 40).join('\n'));
           const map = symbols
@@ -574,7 +580,7 @@ export class ChatService {
           ];
           this.logger.log(`解析总览：${docSrc.filename}（${lineCount} 行 > 300，转总览模式）`);
         } else {
-          // 小文件整篇：带行号注入，一轮深解析到底
+          // 整篇：带行号注入（小文件一轮深解析；大文件 + 显式"完整/每行" → 逐行输出，可分批继续）
           parseMode = 'full';
           kbSources = [
             {
@@ -586,6 +592,9 @@ export class ChatService {
               similarity: null,
             },
           ];
+          this.logger.log(
+            `解析整篇：${docSrc.filename}（${lineCount} 行${wholeFileExplicit ? '，显式整篇逐行' : ''}）`,
+          );
         }
       }
     }
@@ -612,7 +621,12 @@ export class ChatService {
       history,
       useKnowledgeBase,
       images,
-      { walkthrough: wantsCodeWalkthrough, continuation: isContinuation, parseMode },
+      {
+        walkthrough: wantsCodeWalkthrough,
+        continuation: isContinuation,
+        parseMode,
+        lineByLine: parseMode === 'full' && wholeFileExplicit,
+      },
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
@@ -832,6 +846,7 @@ export class ChatService {
       walkthrough?: boolean;
       continuation?: boolean;
       parseMode?: 'overview' | 'deep' | 'full';
+      lineByLine?: boolean;
     },
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
@@ -892,6 +907,15 @@ export class ChatService {
           '3. 公式/算法（如开普勒、多普勒、插值）要讲清数学含义与数值来源；',
           '4. 若用户问的是具体行为（如"遮挡顺序""怎么工作"），先直接回答行为，再用行号佐证；',
           '5. 结尾给 2-3 条小结（这个函数的精髓/坑），不要大表格。',
+        );
+      } else if (opts?.lineByLine) {
+        // 用户显式要求"每行代码 + 注释"的完整逐行输出（大文件也会整篇注入）
+        systemParts.push(
+          '用户要求把整个文件逐行输出并加注释。要求：',
+          '1. 格式：按文件顺序逐行/每 10-20 行一组，代码块内为 `行号: 真实代码`，每组代码块下方写对应行的注释（这一行在做什么/为什么/注意点）；',
+          '2. 必须覆盖到当前能够输出的最末尾，严禁用省略号/“跳过”省略任何行的代码与注释；',
+          '3. 行号与代码必须与资料完全一致（资料已带真实行号），不得自编行号或代码；',
+          '4. 开头一句话说明总行数与本次覆盖范围；若一次到输出上限还没写完，结尾写「已达输出上限，回复 继续 从断点接着输出」的提示（系统会自动附加），不要自行总结收尾。',
         );
       } else {
         systemParts.push(
