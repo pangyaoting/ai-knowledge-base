@@ -147,3 +147,25 @@ export function askQuestion(
     },
   });
 }
+
+// ==================== 会话记忆（记忆模块 A 管理） ====================
+
+export interface SessionMemoryInfo {
+  memoryEnabled: boolean;
+  summary: string | null;
+  summaryAt: string | null;
+  memoryRounds: number;
+}
+
+/** 查看会话记忆状态（滚动摘要 / 开关 / 原文窗口） */
+export function getSessionMemory(sessionId: string) {
+  return request.get<unknown, SessionMemoryInfo>(`/chat/sessions/${sessionId}/memory`);
+}
+
+/** 会话记忆管理：清空滚动摘要 / 停用或启用记忆 */
+export function updateSessionMemory(
+  sessionId: string,
+  body: { clearSummary?: boolean; memoryEnabled?: boolean },
+) {
+  return request.patch<unknown, SessionMemoryInfo>(`/chat/sessions/${sessionId}/memory`, body);
+}

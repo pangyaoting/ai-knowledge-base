@@ -2,10 +2,11 @@
 defineOptions({ name: 'ChatMessageInput' });
 
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { Send, Square, X, ImagePlus, FileText, Cpu, Database } from 'lucide-vue-next';
+import { Send, Square, X, ImagePlus, FileText, Cpu, Database, Brain } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import { MAX_IMAGES_PER_MESSAGE } from '@/types/chat';
 import type { ModelConfig } from '@/types/model-config';
+import { getSessionMemory, updateSessionMemory, type SessionMemoryInfo } from '@/api/chat';
 
 const maxImages = MAX_IMAGES_PER_MESSAGE;
 
@@ -80,6 +81,61 @@ function onDocPointerDown(e: MouseEvent) {
   const t = e.target as Node;
   if (!modelBtnRef.value?.contains(t) && !modelDropdownRef.value?.contains(t)) {
     modelDropdownOpen.value = false;
+  }
+}
+
+// ===== 会话记忆面板（记忆模块 A 管理：查看摘要 / 清空 / 停用） =====
+const memOpen = ref(false);
+const memBusy = ref(false);
+const memInfo = ref<SessionMemoryInfo | null>(null);
+const memMsg = ref('');
+const memBtnRef = ref<HTMLElement | null>(null);
+const memPos = ref({ top: 0, left: 0 });
+
+async function toggleMemoryPanel() {
+  if (!props.currentSessionId) return;
+  if (memOpen.value) {
+    memOpen.value = false;
+    return;
+  }
+  const el = memBtnRef.value;
+  if (el) {
+    const r = el.getBoundingClientRect();
+    const h = 240;
+    const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+    memPos.value = { top, left: Math.min(Math.max(8, r.left), window.innerWidth - 340) };
+  }
+  memOpen.value = true;
+  memBusy.value = true;
+  memMsg.value = '';
+  memInfo.value = null;
+  try {
+    memInfo.value = await getSessionMemory(props.currentSessionId);
+  } catch (e) {
+    memMsg.value = (e as Error).message || '读取记忆失败';
+  } finally {
+    memBusy.value = false;
+  }
+}
+
+async function memAction(clear: boolean, enabled?: boolean) {
+  if (!props.currentSessionId) return;
+  memBusy.value = true;
+  memMsg.value = '';
+  try {
+    memInfo.value = await updateSessionMemory(props.currentSessionId, {
+      ...(clear ? { clearSummary: true } : {}),
+      ...(enabled !== undefined ? { memoryEnabled: enabled } : {}),
+    });
+    memMsg.value = clear
+      ? '已清空记忆（聊天记录仍完整保留）'
+      : enabled === false
+        ? '已停用本会话记忆'
+        : '已启用本会话记忆';
+  } catch (e) {
+    memMsg.value = (e as Error).message || '操作失败';
+  } finally {
+    memBusy.value = false;
   }
 }
 
@@ -236,6 +292,63 @@ defineExpose({ focusTextarea });
               <span v-if="props.currentReasoning === e.value" class="shrink-0 text-xs">✓</span>
             </button>
           </template>
+        </div>
+      </div>
+
+      <!-- 会话记忆（记忆模块 A 管理） -->
+      <div v-if="props.currentSessionId" class="relative shrink-0">
+        <button
+          ref="memBtnRef"
+          class="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-foreground transition-colors hover:bg-muted"
+          :title="'会话记忆：查看滚动摘要 / 清空 / 停用'"
+          @click="toggleMemoryPanel"
+        >
+          <Brain class="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span>记忆</span>
+        </button>
+        <!-- 记忆面板 -->
+        <div
+          v-if="memOpen"
+          class="fixed z-50 w-[320px] rounded-lg border bg-card p-3 text-xs shadow-lg"
+          :style="{ top: memPos.top + 'px', left: memPos.left + 'px' }"
+        >
+          <p class="mb-1 font-medium text-foreground">
+            会话记忆
+            <span
+              v-if="memInfo"
+              class="ml-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            >
+              {{ memInfo.memoryEnabled ? '已启用' : '已停用' }} · 原文窗口
+              {{ memInfo.memoryRounds }} 轮
+            </span>
+          </p>
+          <p class="mb-2 text-[11px] leading-relaxed text-muted-foreground">
+            早期对话会被自动浓缩成「滚动摘要」注入，防止长对话失忆；最新几轮始终保留原文。
+          </p>
+          <div v-if="memBusy" class="py-2 text-center text-muted-foreground">加载中…</div>
+          <template v-else-if="memInfo">
+            <p class="mb-1 text-[11px] font-medium text-muted-foreground">当前摘要：</p>
+            <pre
+              class="max-h-28 overflow-auto whitespace-pre-wrap rounded border bg-muted/30 p-2 text-[11px] leading-relaxed text-foreground"
+              >{{ memInfo.summary || '（暂无摘要——聊几轮后会自动生成）' }}</pre>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+              <button
+                class="rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1 text-[11px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                :disabled="memBusy || !memInfo.summary"
+                @click="memAction(true)"
+              >
+                清空摘要
+              </button>
+              <button
+                class="rounded-md border px-2 py-1 text-[11px] transition-colors hover:bg-muted disabled:opacity-50"
+                :disabled="memBusy"
+                @click="memAction(false, memInfo.memoryEnabled ? false : true)"
+              >
+                {{ memInfo.memoryEnabled ? '停用记忆' : '启用记忆' }}
+              </button>
+            </div>
+          </template>
+          <p v-if="memMsg" class="mt-2 text-[11px] text-primary">{{ memMsg }}</p>
         </div>
       </div>
     </div>
