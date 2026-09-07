@@ -89,6 +89,9 @@ const activeBaseURL = computed(
 /** 当前模型是否支持推理等级（不支持则隐藏整个区块） */
 const showReasoning = computed(() => supportsReasoning(activeBaseURL.value, activeModelKey.value));
 
+/** 模型下拉最大高度（px）：内容自适应到该上限，超出后面板内部滚动（对话/研究一致） */
+const MODEL_DROPDOWN_MAX_H = 422;
+
 function toggleModelDropdown() {
   if (modelDropdownOpen.value) {
     modelDropdownOpen.value = false;
@@ -99,7 +102,7 @@ function toggleModelDropdown() {
   if (el) {
     const r = el.getBoundingClientRect();
     const vh = window.innerHeight;
-    const estH = Math.min(vh * 0.7, estimateDropdownHeight());
+    const estH = Math.min(MODEL_DROPDOWN_MAX_H, estimateDropdownHeight());
     const top = r.bottom + 6 + estH > vh ? Math.max(8, r.top - estH - 6) : r.bottom + 6;
     const left = Math.min(Math.max(8, r.left), window.innerWidth - 248);
     modelDropdownPos.value = { top, left };
@@ -115,7 +118,7 @@ function positionModelDropdown() {
   if (!btn || !dd) return;
   const r = btn.getBoundingClientRect();
   const vh = window.innerHeight;
-  const h = Math.min(dd.scrollHeight, vh * 0.7);
+  const h = Math.min(dd.scrollHeight, MODEL_DROPDOWN_MAX_H);
   const top = r.bottom + 6 + h > vh ? Math.max(8, r.top - h - 6) : r.bottom + 6;
   modelDropdownPos.value = { top, left: Math.min(Math.max(8, r.left), window.innerWidth - 248) };
 }
@@ -268,7 +271,7 @@ defineExpose({ focusTextarea });
         <div
           v-if="modelDropdownOpen"
           ref="modelDropdownRef"
-          class="fixed z-50 max-h-[70vh] w-60 overflow-y-auto rounded-lg border bg-card py-1 shadow-lg"
+          class="fixed z-50 max-h-[422px] w-60 overflow-y-auto rounded-lg border bg-card py-1 shadow-lg"
           :style="{ top: modelDropdownPos.top + 'px', left: modelDropdownPos.left + 'px' }"
           @click.stop
         >
