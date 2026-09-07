@@ -149,6 +149,7 @@ model ChatSession {
   reasoningEffort  String?       @map("reasoning_effort") // 推理等级：low(关闭≈最低) / high / max；null=默认
   summary          String? // 会话内滚动摘要：早期对话压缩，每轮随 prompt 注入，解决"3 轮后失忆"
   summaryAt        DateTime?     @map("summary_at") // 上次折叠时间（幂等 / 防并发重复折叠）
+  memoryEnabled    Boolean       @default(true) @map("memory_enabled") // 记忆开关：false = 停用本会话的摘要折叠与注入
   messages         ChatMessage[]
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")

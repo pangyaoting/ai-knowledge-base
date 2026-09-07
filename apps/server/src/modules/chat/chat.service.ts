@@ -190,6 +190,51 @@ export class ChatService {
     });
   }
 
+  /** 会话记忆管理：查看记忆状态（摘要 / 开关 / 原文窗口） */
+  async getSessionMemory(userId: string, sessionId: string) {
+    await this.getSession(userId, sessionId);
+    // 注：memoryEnabled 为新列，本地 prisma client 未重生成 → 类型用 any 兼容（CI 生成后真实存在）
+    const prismaAny = this.prisma as any;
+    const s = (await prismaAny.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { memoryEnabled: true, summary: true, summaryAt: true },
+    })) as {
+      memoryEnabled?: boolean | null;
+      summary?: string | null;
+      summaryAt?: Date | null;
+    } | null;
+    return {
+      memoryEnabled: s?.memoryEnabled !== false,
+      summary: s?.summary ?? null,
+      summaryAt: s?.summaryAt ?? null,
+      memoryRounds: this.memoryRounds,
+    };
+  }
+
+  /** 会话记忆管理：清空滚动摘要 / 停用或启用记忆（聊天记录始终保留） */
+  async updateSessionMemory(
+    userId: string,
+    sessionId: string,
+    dto: { clearSummary?: boolean; memoryEnabled?: boolean },
+  ) {
+    await this.getSession(userId, sessionId);
+    const data: Record<string, unknown> = {};
+    if (dto.clearSummary) {
+      data.summary = null;
+      data.summaryAt = null;
+    }
+    if (dto.memoryEnabled !== undefined) {
+      data.memoryEnabled = dto.memoryEnabled;
+    }
+    if (Object.keys(data).length > 0) {
+      await (this.prisma.chatSession as { update: (a: unknown) => Promise<unknown> }).update({
+        where: { id: sessionId },
+        data,
+      });
+    }
+    return this.getSessionMemory(userId, sessionId);
+  }
+
   /** 我的会话列表（带消息数、最后一条消息预览、绑定的知识库）；q 时按标题/消息内容全文检索 */
   async listSessions(userId: string, q?: string) {
     const keyword = q?.trim();
@@ -331,6 +376,8 @@ export class ChatService {
     imageDataUrls?: string[],
   ) {
     const session = await this.getSession(userId, sessionId);
+    // 记忆开关（false = 本会话停用摘要折叠与注入，历史原文窗口照常）
+    const memoryOn = (session as { memoryEnabled?: boolean | null }).memoryEnabled !== false;
     const images = (imageDataUrls ?? []).filter((u) => !!u && u.length > 0);
     // 只发图片（不带文字）也允许：content 为空但有图片
     if (!(question ?? '').trim() && images.length === 0) {
@@ -632,7 +679,9 @@ export class ChatService {
         continuation: isContinuation,
         parseMode,
         lineByLine: parseMode === 'full' && wholeFileExplicit,
-        summary: (session as { summary?: string | null }).summary ?? undefined,
+        summary: memoryOn
+          ? ((session as { summary?: string | null }).summary ?? undefined)
+          : undefined,
       },
     );
 
@@ -807,8 +856,10 @@ export class ChatService {
       },
     });
 
-    // 记忆模块 A：回答落库后投递"滚动摘要折叠"任务（异步，不阻塞本轮响应）
-    await this.memorySummaryService.schedule(sessionId);
+    // 记忆模块 A：回答落库后投递"滚动摘要折叠"任务（异步，不阻塞本轮响应；停用时不投递）
+    if (memoryOn) {
+      await this.memorySummaryService.schedule(sessionId);
+    }
 
     // ⑦ 第一条提问时自动生成会话标题
     if (session.title === '新对话') {

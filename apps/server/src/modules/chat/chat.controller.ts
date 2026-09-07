@@ -22,6 +22,7 @@ import { ChatService } from './chat.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { UpdateSessionKbsDto } from './dto/update-session-kbs.dto';
 import { UpdateSessionModelDto } from './dto/update-session-model.dto';
+import { UpdateSessionMemoryDto } from './dto/update-session-memory.dto';
 import { AskDto } from './dto/ask.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -88,6 +89,25 @@ export class ChatController {
       dto.model,
       dto.reasoningEffort,
     );
+  }
+
+  @Get('sessions/:id/memory')
+  @ApiOperation({ summary: '查看会话记忆状态（滚动摘要/开关/窗口）' })
+  getSessionMemory(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) sessionId: string,
+  ) {
+    return this.chatService.getSessionMemory(userId, sessionId);
+  }
+
+  @Patch('sessions/:id/memory')
+  @ApiOperation({ summary: '会话记忆管理：清空滚动摘要 / 停用或启用记忆' })
+  updateSessionMemory(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) sessionId: string,
+    @Body() dto: UpdateSessionMemoryDto,
+  ) {
+    return this.chatService.updateSessionMemory(userId, sessionId, dto);
   }
 
   @Get('sessions/:id/export')
