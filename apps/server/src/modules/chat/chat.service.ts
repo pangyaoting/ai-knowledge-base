@@ -13,6 +13,15 @@ import {
   type DocType,
 } from '../knowledge/utils/document-parser';
 import { CreateSessionDto } from './dto/create-session.dto';
+import { extractSymbols } from '../knowledge/utils/code-indexer';
+
+/** 给代码文本加行号（1-based；解析时让模型引用真实行号，避免"未标行号"） */
+function numberLines(content: string, startLine = 1): string {
+  return content
+    .split('\n')
+    .map((l, i) => `${i + startLine}: ${l}`)
+    .join('\n');
+}
 
 interface StreamWriter {
   (event: 'sources' | 'delta' | 'done' | 'error', data: unknown): void;
@@ -68,6 +77,12 @@ export class ChatService {
   private get continueMaxTokens(): number {
     const v = Number(this.configService.get<string>('PARSE_CONTINUE_MAX_TOKENS', '20000'));
     return Number.isFinite(v) && v > 0 ? v : 20000;
+  }
+
+  /** 总览快通道输出上限（.env 可配 PARSE_OVERVIEW_MAX_TOKENS，默认 4000——总览只需函数地图级篇幅） */
+  private get overviewMaxTokens(): number {
+    const v = Number(this.configService.get<string>('PARSE_OVERVIEW_MAX_TOKENS', '4000'));
+    return Number.isFinite(v) && v > 0 ? v : 4000;
   }
 
   // ==================== 会话管理 ====================
@@ -434,6 +449,132 @@ export class ChatService {
       );
     }
 
+    // ── A+B：代码解析三级模式 ─────────────────────────────────────────
+    // 大文件(>300 行)首问 → 总览（函数地图，快）；追问"逐行讲解 XX" → 单函数深挖；
+    // 小文件 → 整篇深解析。全程用 AST 符号表给真实行号，不再让模型"对着无行号全文瞎写"。
+    let parseMode: 'overview' | 'deep' | 'full' = 'full';
+    if (wantsCodeWalkthrough) {
+      // 目标全文字档：优先问题点名文件（单文件全文通道产物 similarity===null）；
+      // 未点名但带函数名追问 → 从上一轮助手内容里推断它解析的文件
+      let docSrc = kbSources.find(
+        (s) =>
+          s.similarity === null &&
+          namedFile &&
+          s.filename.toLowerCase().endsWith(namedFile.toLowerCase()),
+      );
+      if (!docSrc) docSrc = kbSources.find((s) => s.similarity === null && s.chunkIndex === -1);
+      const nameTokens = (question.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []).map((t) =>
+        t.toLowerCase(),
+      );
+      const deepIntent =
+        /逐行|详细|展开|深挖|讲讲|讲清楚|具体|细节|为什么|怎么实现|如何实现|接着解析/.test(
+          question,
+        );
+      if (!docSrc && deepIntent && nameTokens.length > 0) {
+        const histFile = lastAssistant?.content.match(
+          /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/i,
+        )?.[1];
+        if (histFile) {
+          const ft = await this.ragService.loadDocumentByNameFulltext(
+            userId,
+            histFile,
+            kbScope,
+            this.fulltextMaxChars,
+          );
+          docSrc = ft.sources.find((s) => s.similarity === null && s.chunkIndex === -1);
+          if (docSrc) {
+            kbSources = ft.sources;
+            retrievalMode = 'fulltext';
+            this.logger.log(`解析深挖：从历史推断目标文件 ${histFile}`);
+          }
+        }
+      }
+      // 只有"代码文件整篇"才走 A+B 三级模式；md/无目标 → 维持原样（full 或检索片段）
+      if (
+        docSrc &&
+        /\.(ts|js|vue|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql)$/i.test(docSrc.filename) &&
+        docSrc.content
+      ) {
+        const fileContent = docSrc.content;
+        const lineCount = fileContent.split('\n').length;
+        const symbols = extractSymbols(docSrc.filename, fileContent);
+        const target = symbols.find((s) => nameTokens.includes(s.name.toLowerCase())) ?? null;
+        if (target && deepIntent) {
+          // 深挖：注入带行号的完整函数体 + 文件内其它出现位置（调用点）
+          parseMode = 'deep';
+          const lines = fileContent.split('\n');
+          const body = lines.slice(target.startLine - 1, target.endLine).join('\n');
+          const elsewhere = lines
+            .map((l, i) => ({ l, i: i + 1 }))
+            .filter(
+              ({ l, i }) =>
+                (i < target.startLine || i > target.endLine) && l.includes(`${target.name}(`),
+            )
+            .slice(0, 12)
+            .map(({ l, i }) => `L${i}: ${l.trim()}`);
+          const head = numberLines(lines.slice(0, 8).join('\n'));
+          kbSources = [
+            {
+              chunkId: `${docSrc.documentId}:${target.name}`,
+              content: [
+                `文件：${docSrc.filename}（共 ${lineCount} 行）`,
+                head,
+                `\n## ${target.name} 完整源码（L${target.startLine}-${target.endLine}）`,
+                numberLines(body, target.startLine),
+                elsewhere.length ? `\n## 文件内其它出现位置\n${elsewhere.join('\n')}` : '',
+              ].join('\n'),
+              chunkIndex: target.startLine - 1,
+              documentId: docSrc.documentId,
+              filename: docSrc.filename,
+              similarity: null,
+            },
+          ];
+          this.logger.log(
+            `解析深挖：${docSrc.filename} ${target.name}（L${target.startLine}-${target.endLine}）`,
+          );
+        } else if (lineCount > 300) {
+          // 大文件首问 → 总览：只给函数地图 + 头部注释，引导追问深挖
+          parseMode = 'overview';
+          const head = numberLines(fileContent.split('\n').slice(0, 40).join('\n'));
+          const map = symbols
+            .map(
+              (s) =>
+                `- L${s.startLine}-${s.endLine} ${s.kind} ${s.name}: ${s.signature
+                  .replace(
+                    /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|class|interface|type|enum)\s*/,
+                    '',
+                  )
+                  .slice(0, 90)}`,
+            )
+            .join('\n');
+          kbSources = [
+            {
+              chunkId: `${docSrc.documentId}:overview`,
+              content: `文件：${docSrc.filename}（共 ${lineCount} 行）\n\n## 符号表（AST 提取，行号为真实行号）\n${map || '（未提取到符号）'}\n\n## 文件头部（前 40 行）\n${head}`,
+              chunkIndex: -1,
+              documentId: docSrc.documentId,
+              filename: docSrc.filename,
+              similarity: null,
+            },
+          ];
+          this.logger.log(`解析总览：${docSrc.filename}（${lineCount} 行 > 300，转总览模式）`);
+        } else {
+          // 小文件整篇：带行号注入，一轮深解析到底
+          parseMode = 'full';
+          kbSources = [
+            {
+              chunkId: docSrc.documentId,
+              content: numberLines(fileContent),
+              chunkIndex: -1,
+              documentId: docSrc.documentId,
+              filename: docSrc.filename,
+              similarity: null,
+            },
+          ];
+        }
+      }
+    }
+
     writer('sources', { kb: kbSources, web: webSources, mode: retrievalMode });
 
     // ④ 保存用户消息（含图片 data URL 数组；单图兼容字段存第一张）
@@ -456,7 +597,7 @@ export class ChatService {
       history,
       useKnowledgeBase,
       images,
-      { walkthrough: wantsCodeWalkthrough, continuation: isContinuation },
+      { walkthrough: wantsCodeWalkthrough, continuation: isContinuation, parseMode },
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
@@ -470,19 +611,24 @@ export class ChatService {
     const onAbort = () => abortController.abort();
     signal.addEventListener('abort', onAbort, { once: true });
 
-    // 输出上限：续写轮 = PARSE_CONTINUE_MAX_TOKENS（默认 20000）；解析类 = PARSE_MAX_TOKENS（16000）；
-    // 普通问答不设限，保持完整回答能力。
+    // 输出上限：续写轮 = PARSE_CONTINUE_MAX_TOKENS（20000）；总览快通道 = PARSE_OVERVIEW_MAX_TOKENS（4000）；
+    // 深挖/整篇 = PARSE_MAX_TOKENS（16000）；普通问答不设限。
     const maxTokens = isContinuation
       ? this.continueMaxTokens
-      : wantsCodeWalkthrough
-        ? this.parseMaxTokens
-        : undefined;
+      : parseMode === 'overview'
+        ? this.overviewMaxTokens
+        : wantsCodeWalkthrough
+          ? this.parseMaxTokens
+          : undefined;
 
     // 每次尝试的附加参数；attempts[0] = 主尝试，附加参数被上游拒绝时 attempts[1] 去参重试
     type ExtraParams = { reasoning_effort?: string };
     const extras: ExtraParams = {};
-    if (session.reasoningEffort) {
-      // 解析与普通问答一致：思考深度跟随会话档位（low=关闭 / high/max=深度思考）
+    if (parseMode === 'overview') {
+      // 总览只是把符号表整理成"函数地图"，不需要深度思考 → 强制 low 快通道（40 秒级）
+      extras.reasoning_effort = 'low';
+    } else if (session.reasoningEffort) {
+      // 深挖/整篇/普通问答：思考深度跟随会话档位（low=关闭 / high/max=深度思考）
       extras.reasoning_effort = session.reasoningEffort;
     }
     const attempts: ExtraParams[] = Object.keys(extras).length ? [extras, {}] : [{}];
@@ -667,7 +813,11 @@ export class ChatService {
     history: Array<{ role: string; content: string }>,
     useKnowledgeBase: boolean,
     imageDataUrls: string[],
-    opts?: { walkthrough?: boolean; continuation?: boolean },
+    opts?: {
+      walkthrough?: boolean;
+      continuation?: boolean;
+      parseMode?: 'overview' | 'deep' | 'full';
+    },
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
     // - 使用知识库：强调以知识库资料为准，标注 [来源N]
@@ -705,25 +855,41 @@ export class ChatService {
         '上一轮回答因长度上限被截断，用户回复「继续」：请严格接着上一轮末尾的内容继续输出（从断点续写），保持上一轮的回答排版风格，不要重复已经写过的内容，不要重新开头。',
       );
     }
-    // 代码解析格式规范（用户定制）：用户要求"解析/讲解代码"时，按固定排版输出，
-    // 避免"代码一段配一句话"的碎片式排版。规范经浓缩以提升模型遵循度（完整版见 docs）。
+    // 代码解析格式规范：A+B 三级模式各自一套（总览/深挖/整篇）。
+    // A 标准（三模式通用）：贴出的代码必须完整（禁省略号跳过）、讲解必须落到行号与具体行为、禁空话凑数。
     const wantsCodeWalkthrough = opts?.walkthrough ?? ChatService.wantsCodeWalkthrough(question);
+    const parseMode = opts?.parseMode ?? 'full';
     // 续写轮不重新注入排版规范（接着上一轮风格写即可），避免"从头再来"
     if (wantsCodeWalkthrough && !opts?.continuation) {
-      systemParts.push(
-        '用户要求解析代码时，必须按以下固定排版输出（这是格式要求，非内容要求）：',
-        '1. 开头：`**[文件名]** 完整解析` + 分隔线 `---`；',
-        '2. 按逻辑模块分段（如"状态管理""事件处理"），每段用 `##`/`###` 标题，标注行号范围后给指定语言的完整代码块；',
-        '3. 每段代码块后按需包含：`**功能说明**`（一句话）、`**技术实现**`（技术/API + 关键逻辑要点）、`**设计意图**`（为何这样设计）、`**注意事项**`（⚠️ 要点）；',
-        '4. 变量/函数名用反引号、重要概念用**粗体**、文件名用**文件名**、警告用⚠️；',
-        '5. 模块间用 `---` 分隔；',
-        '6. **结尾必须有总结表格**：`| 功能模块 | 核心变量/函数 | 主要作用 | 关键技术点 |` 逐行填写各模块；',
-        '7. 严禁使用"代码块 + 单句解释"的逐行穿插排版；',
-        '8. **篇幅控制（重要）**：你有输出上限，超长文件（>500 行）不要逐模块完整展开——' +
-          '优先讲清 核心结构、关键算法/交互、文件整体流程；次要模块用总结表格一笔带过。' +
-          '若篇幅紧张，宁可精简正文也要保证结尾总结表格完整。控制在 1 分钟能读完的篇幅，' +
-          '避免为了"完整"而输出巨量内容。',
-      );
+      if (parseMode === 'overview') {
+        systemParts.push(
+          '用户要求解析一个大文件（>300 行）。本次只输出【总览】，不要尝试逐函数深讲：',
+          '1. 开头：`**[文件名]** 代码总览` + 一句话说明该文件做什么、用什么技术栈；',
+          '2. 用表格列出主要函数/模块：`| 行号 | 函数/模块 | 干什么 | 关键技术点 |`——作用必须具体到真实行为，禁止"处理相关逻辑""实现相应功能"这类空话；',
+          '3. 用 3-5 句话讲清文件整体流程（谁调用谁、每帧/事件触发顺序）；',
+          '4. 结尾固定一句引导：`想深入哪个函数，回复「逐行讲解 <函数名>」。`',
+        );
+      } else if (parseMode === 'deep') {
+        systemParts.push(
+          '用户要逐行/详细深挖一个具体函数（已注入该函数带行号的完整源码）。要求：',
+          '1. 直接对着行号逐段讲解，格式：`**L237-L242 鼠标引力源**` 标题 + 对应代码行 + 讲清「这行在算什么、为什么这么写、不这么写会怎样」；',
+          '2. 贴出的代码必须与资料一致且完整，严禁用省略号跳过任何真实逻辑；',
+          '3. 公式/算法（如开普勒、多普勒、插值）要讲清数学含义与数值来源；',
+          '4. 若用户问的是具体行为（如"遮挡顺序""怎么工作"），先直接回答行为，再用行号佐证；',
+          '5. 结尾给 2-3 条小结（这个函数的精髓/坑），不要大表格。',
+        );
+      } else {
+        systemParts.push(
+          '用户要求解析代码（整篇/片段）。按以下要求输出（格式要求，非内容要求）：',
+          '1. 开头：`**[文件名]** 完整解析` + `---`；按逻辑模块分段，每段 `##`/`###` 标题 + 真实行号范围 + 完整代码块；',
+          '2. 贴出的代码必须与资料一致且完整，严禁用省略号跳过真实逻辑；',
+          '3. 讲解必须落到具体代码与行号：每个关键语句讲清「在做什么、为什么这样写」，严禁用空话（如"实现相关功能""进行相应处理"）凑数；',
+          '4. 每段后可按需给：**功能说明**（一句话）、**技术实现**（技术/API+关键点）、**设计意图**、**注意事项**（⚠️）；',
+          '5. 变量/函数名用反引号、文件名用**文件名**、模块间用 `---` 分隔；',
+          '6. 结尾必须有总结表格：`| 功能模块 | 核心变量/函数 | 主要作用 | 关键技术点 |`；',
+          '7. 篇幅控制：超长内容优先讲清 核心结构与整体流程，宁可精简次要模块也要保证已讲部分真实、表格完整。',
+        );
+      }
       // 批1-5：本次没检索到任何代码、历史里也没有用户贴的代码 → 老实要代码，别硬编
       if (kbSources.length === 0) {
         systemParts.push(
