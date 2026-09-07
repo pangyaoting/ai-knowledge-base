@@ -29,6 +29,7 @@ model User {
   reports        Report[]
   agentTasks     AgentTask[]
   modelConfigs   ModelConfig[]
+  memories       UserMemory[]
 
   @@map("users")
 }
@@ -150,6 +151,7 @@ model ChatSession {
   summary          String? // 会话内滚动摘要：早期对话压缩，每轮随 prompt 注入，解决"3 轮后失忆"
   summaryAt        DateTime?     @map("summary_at") // 上次折叠时间（幂等 / 防并发重复折叠）
   memoryEnabled    Boolean       @default(true) @map("memory_enabled") // 记忆开关：false = 停用本会话的摘要折叠与注入
+  memoryExtractAt  DateTime?     @map("memory_extract_at") // 用户事实抽取游标（记忆模块 B）：上次已抽取到哪条消息（增量防重复调用）
   messages         ChatMessage[]
   createdAt        DateTime      @default(now()) @map("created_at")
   updatedAt        DateTime      @updatedAt @map("updated_at")
@@ -278,4 +280,24 @@ model AgentTask {
 
   @@index([ownerId])
   @@map("agent_tasks")
+}
+
+// ==================== 用户事实记忆（记忆模块 B） ====================
+// 跨会话持久记忆：从对话中抽取"关于用户的事实"（偏好/背景/目标…），
+// 每轮提问注入 top-N，让新会话也"记得用户是谁"。
+// category: general / preference / background / goal；去重按 content 精确匹配；上限 50 条。
+// sourceSessionId 不建 FK：会话删除不级联删记忆（记忆跨会话复用）。
+
+model UserMemory {
+  id               String   @id @default(uuid())
+  ownerId          String   @map("owner_id")
+  content          String // 事实内容（一句话，如"用户是 2024 级前端方向学生，2027 年 1 月求职"）
+  category         String   @default("general") // general / preference / background / goal
+  sourceSessionId  String?  @map("source_session_id") // 抽取来源会话（仅溯源用）
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("user_memories")
 }

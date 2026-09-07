@@ -38,6 +38,7 @@ redis-data/
 # 临时测试/CI 目录
 .e2e*/
 .tmp-ci*/
+.qatest/
 
 # Windows 批处理启动脚本
 start-backend.bat

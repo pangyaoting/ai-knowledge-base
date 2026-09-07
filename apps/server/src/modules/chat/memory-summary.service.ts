@@ -78,7 +78,9 @@ export class MemorySummaryService implements OnApplicationBootstrap, OnApplicati
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },
           removeOnComplete: true,
-          removeOnFail: 100,
+          // 失败即移除：同 jobId 入队会命中"已存在"的失败 job 而不新建（BullMQ 去重语义），
+          // 若保留失败 job，一次模型报错后该会话的摘要折叠将永久停摆（历史修复）。
+          removeOnFail: true,
         },
       );
     } catch (err) {

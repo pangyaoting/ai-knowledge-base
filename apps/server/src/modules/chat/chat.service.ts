@@ -15,6 +15,7 @@ import {
 import { CreateSessionDto } from './dto/create-session.dto';
 import { extractSymbols } from '../knowledge/utils/code-indexer';
 import { MemorySummaryService } from './memory-summary.service';
+import { MemoryFactService } from './memory-fact.service';
 
 /** 给代码文本加行号（1-based；解析时让模型引用真实行号，避免"未标行号"） */
 function numberLines(content: string, startLine = 1): string {
@@ -66,6 +67,7 @@ export class ChatService {
     private modelConfigService: ModelConfigService,
     private configService: ConfigService,
     private memorySummaryService: MemorySummaryService,
+    private memoryFactService: MemoryFactService,
   ) {}
 
   /** 历史原文窗口（轮数，.env MEMORY_ROUNDS 可调，默认 3 轮 = 6 条；更早的靠滚动摘要兜底） */
@@ -428,6 +430,22 @@ export class ChatService {
     });
     history.reverse();
 
+    // 记忆模块 B：跨会话用户事实（最近 top-3，供 buildPrompt 置顶注入；停用记忆不带）
+    // 记忆是尽力而为的增强：查询失败（如表未就绪）不阻塞问答，降级为不带记忆
+    let userFacts: Array<{ category: string; content: string }> = [];
+    if (memoryOn) {
+      try {
+        userFacts = await (this.prisma as any).userMemory.findMany({
+          where: { ownerId: userId },
+          orderBy: { createdAt: 'desc' },
+          take: 3,
+          select: { content: true, category: true },
+        });
+      } catch (err) {
+        this.logger.warn(`用户事实读取失败(忽略，本轮回退无记忆): ${(err as Error).message}`);
+      }
+    }
+
     // ② 多轮查询改写（指代消解）：有历史时，先把问题改写为"独立完整"的问法再检索。
     //    例如第二问"它的原理是什么" → "【上一轮主题】的原理是什么"。
     //    改写只影响【检索】，回答仍用用户的原问题（不改变对话语义）。
@@ -682,6 +700,7 @@ export class ChatService {
         summary: memoryOn
           ? ((session as { summary?: string | null }).summary ?? undefined)
           : undefined,
+        facts: userFacts,
       },
     );
 
@@ -856,9 +875,10 @@ export class ChatService {
       },
     });
 
-    // 记忆模块 A：回答落库后投递"滚动摘要折叠"任务（异步，不阻塞本轮响应；停用时不投递）
+    // 记忆模块 A+B：回答落库后投递"滚动摘要折叠 + 用户事实抽取"任务（异步，不阻塞本轮响应；停用时不投递）
     if (memoryOn) {
       await this.memorySummaryService.schedule(sessionId);
+      await this.memoryFactService.schedule(sessionId);
     }
 
     // ⑦ 第一条提问时自动生成会话标题
@@ -909,6 +929,7 @@ export class ChatService {
       parseMode?: 'overview' | 'deep' | 'full';
       lineByLine?: boolean;
       summary?: string; // 会话内滚动摘要（记忆模块 A）：早期对话浓缩，注入在历史原文之前
+      facts?: Array<{ category: string; content: string }>; // 跨会话用户事实 top-3（记忆模块 B）：置顶注入
     },
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
@@ -1036,12 +1057,20 @@ export class ChatService {
       .map((m) => `${m.role === 'user' ? '用户' : '助手'}：${m.content}`)
       .join('\n');
 
+    // 记忆模块 B：跨会话用户事实（放在最前——但只在纯对话/非资料问题时自然贴合，不喧宾夺主）
+    const userFactText = opts?.facts?.length
+      ? `【用户记忆（跨会话记住的关于你的事实；仅在贴合你的身份/偏好/目标时自然使用，勿生硬复述，更不可据此编造资料）】\n${opts.facts
+          .map((f) => `- [${f.category}] ${f.content}`)
+          .join('\n')}`
+      : '';
+
     // 记忆模块 A：早期对话的滚动摘要（放在历史原文前，时间线：梗概 → 近几轮原文 → 问题）
     const memoryText = opts?.summary
       ? `【历史摘要（早期对话浓缩；最新几轮的原文见下方）】\n${opts.summary}`
       : '';
 
     const userPrompt = [
+      userFactText,
       sourceText ? `【参考资料】\n${sourceText}` : '',
       memoryText,
       history.length ? `【历史对话】\n${historyText}` : '',
