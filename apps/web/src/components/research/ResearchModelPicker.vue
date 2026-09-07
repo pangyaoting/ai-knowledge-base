@@ -45,18 +45,35 @@ const stale = computed(() => {
 function toggle() {
   open.value = !open.value;
   if (open.value) {
-    position();
+    // 先按内容估算摆位（防闪烁），面板渲染后再按真实高度精修
+    positionEstimate();
     nextTick(() => position());
   }
 }
 
+/** 打开前按内容粗估高度定摆位（内容自适应，封顶 70vh；防 0,0 闪现） */
+function positionEstimate() {
+  const btn = btnRef.value;
+  if (!btn) return;
+  const r = btn.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const rows = props.modelConfigs.reduce(
+    (n, c) => n + ((c.models ?? []).length ? c.models!.length : 1),
+    0,
+  );
+  const est = Math.min(vh * 0.7, rows * 34 + 80);
+  const top = r.bottom + 6 + est > vh ? Math.max(8, r.top - est - 6) : r.bottom + 6;
+  pos.value = { top, left: Math.min(Math.max(8, r.left), window.innerWidth - 264) };
+}
+
+/** 按面板真实高度精修摆位（内容超出 70vh 时面板内部滚动，视口内不溢出） */
 function position() {
   const btn = btnRef.value;
   const panel = panelRef.value;
   if (!btn || !panel) return;
   const r = btn.getBoundingClientRect();
   const vh = window.innerHeight;
-  const h = Math.min(panel.scrollHeight, vh * 0.6);
+  const h = Math.min(panel.scrollHeight, vh * 0.7);
   const top = r.bottom + 6 + h > vh ? Math.max(8, r.top - h - 6) : r.bottom + 6;
   const left = Math.min(Math.max(8, r.left), window.innerWidth - 264);
   pos.value = { top, left };
@@ -102,7 +119,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocPointerDown
     <div
       v-if="open"
       ref="panelRef"
-      class="fixed z-50 max-h-[60vh] w-64 overflow-y-auto rounded-lg border bg-card py-1 shadow-lg"
+      class="fixed z-50 max-h-[70vh] w-64 overflow-y-auto rounded-lg border bg-card py-1 shadow-lg"
       :style="{ top: pos.top + 'px', left: pos.left + 'px' }"
       @click.stop
     >
