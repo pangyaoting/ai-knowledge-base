@@ -14,6 +14,7 @@ import {
 } from '../knowledge/utils/document-parser';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { extractSymbols } from '../knowledge/utils/code-indexer';
+import { MemorySummaryService } from './memory-summary.service';
 
 /** 给代码文本加行号（1-based；解析时让模型引用真实行号，避免"未标行号"） */
 function numberLines(content: string, startLine = 1): string {
@@ -47,8 +48,6 @@ function parseImageUrls(raw: string | null): string[] | null {
   }
 }
 
-const HISTORY_ROUNDS = 6; // 历史对话最多保留最近 3 轮（6 条）
-
 /** 截断标记：finish_reason=length 时追加到回答尾部；历史带此标记 + 用户回复"继续" → 续写模式 */
 const TRUNCATION_HINT = '已达输出上限';
 
@@ -66,7 +65,14 @@ export class ChatService {
     private webSearchService: WebSearchService,
     private modelConfigService: ModelConfigService,
     private configService: ConfigService,
+    private memorySummaryService: MemorySummaryService,
   ) {}
+
+  /** 历史原文窗口（轮数，.env MEMORY_ROUNDS 可调，默认 3 轮 = 6 条；更早的靠滚动摘要兜底） */
+  private get memoryRounds(): number {
+    const v = Number(this.configService.get<string>('MEMORY_ROUNDS', '3'));
+    return Number.isFinite(v) && v >= 1 && v <= 10 ? Math.floor(v) : 3;
+  }
 
   /** 全文模式字符上限（.env 可配 FULLTEXT_MAX_CHARS，默认 40000 ≈ 安全落在模型上下文内） */
   private get fulltextMaxChars(): number {
@@ -371,7 +377,7 @@ export class ChatService {
     const history = await this.prisma.chatMessage.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
-      take: HISTORY_ROUNDS,
+      take: this.memoryRounds * 2, // 最近 N 轮原文；更早内容折叠进 session.summary 兜底
     });
     history.reverse();
 
@@ -626,6 +632,7 @@ export class ChatService {
         continuation: isContinuation,
         parseMode,
         lineByLine: parseMode === 'full' && wholeFileExplicit,
+        summary: (session as { summary?: string | null }).summary ?? undefined,
       },
     );
 
@@ -800,6 +807,9 @@ export class ChatService {
       },
     });
 
+    // 记忆模块 A：回答落库后投递"滚动摘要折叠"任务（异步，不阻塞本轮响应）
+    await this.memorySummaryService.schedule(sessionId);
+
     // ⑦ 第一条提问时自动生成会话标题
     if (session.title === '新对话') {
       const title = question.replace(/\s+/g, '').slice(0, 20);
@@ -847,6 +857,7 @@ export class ChatService {
       continuation?: boolean;
       parseMode?: 'overview' | 'deep' | 'full';
       lineByLine?: boolean;
+      summary?: string; // 会话内滚动摘要（记忆模块 A）：早期对话浓缩，注入在历史原文之前
     },
   ): { system: string; messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } {
     // 按模式切换系统提示词：
@@ -974,8 +985,14 @@ export class ChatService {
       .map((m) => `${m.role === 'user' ? '用户' : '助手'}：${m.content}`)
       .join('\n');
 
+    // 记忆模块 A：早期对话的滚动摘要（放在历史原文前，时间线：梗概 → 近几轮原文 → 问题）
+    const memoryText = opts?.summary
+      ? `【历史摘要（早期对话浓缩；最新几轮的原文见下方）】\n${opts.summary}`
+      : '';
+
     const userPrompt = [
       sourceText ? `【参考资料】\n${sourceText}` : '',
+      memoryText,
       history.length ? `【历史对话】\n${historyText}` : '',
       '【用户问题】',
       // 只发图片时没有文字问题 → 给模型一个明确指令（否则模型只看到"【用户问题】"空标题）
