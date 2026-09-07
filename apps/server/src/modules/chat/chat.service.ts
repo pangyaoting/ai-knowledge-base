@@ -23,6 +23,15 @@ function numberLines(content: string, startLine = 1): string {
     .join('\n');
 }
 
+/** 剥掉代码分块时插入的"文件: xxx"块头行——它们不是真实源码行，
+ *  会让 AST 行号与注入文本整体偏移（实测总览/深挖行号 +3 且混入分页标记）。 */
+function stripChunkHeaders(content: string): string {
+  return content
+    .split('\n')
+    .filter((l) => !/^\s*文件:\s*\S/.test(l))
+    .join('\n');
+}
+
 interface StreamWriter {
   (event: 'sources' | 'delta' | 'done' | 'error', data: unknown): void;
 }
@@ -425,9 +434,14 @@ export class ChatService {
         retrievalMode = 'retrieval';
       }
     }
-    // 解析类/续写类/符号问答默认不联网——解析对象与答案都在代码里，联网教程只会添乱拖慢
+    // 解析类/续写类/符号问答/点名文件默认不联网——答案在代码/知识库里，联网只会添乱拖慢
     const webSources =
-      useWebSearch && canRetrieve && !wantsCodeWalkthrough && !isContinuation && !symbolAskNoWeb
+      useWebSearch &&
+      canRetrieve &&
+      !wantsCodeWalkthrough &&
+      !isContinuation &&
+      !symbolAskNoWeb &&
+      !namedFile
         ? await this.webSearchService.search(searchQuery)
         : [];
 
@@ -479,7 +493,7 @@ export class ChatService {
             userId,
             histFile,
             kbScope,
-            this.fulltextMaxChars,
+            10_000_000, // 深挖需要按真实行号切函数体，不限注入上限（切片后注入量很小）
           );
           docSrc = ft.sources.find((s) => s.similarity === null && s.chunkIndex === -1);
           if (docSrc) {
@@ -495,7 +509,8 @@ export class ChatService {
         /\.(ts|js|vue|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql)$/i.test(docSrc.filename) &&
         docSrc.content
       ) {
-        const fileContent = docSrc.content;
+        // 剥掉分块块头行（"文件: xxx"）再定位行号——否则行号整体偏移、文本混入分页标记
+        const fileContent = stripChunkHeaders(docSrc.content);
         const lineCount = fileContent.split('\n').length;
         const symbols = extractSymbols(docSrc.filename, fileContent);
         const target = symbols.find((s) => nameTokens.includes(s.name.toLowerCase())) ?? null;
@@ -979,35 +994,69 @@ export class ChatService {
     target: ChatTarget,
     sessionId: string,
   ): Promise<RetrievalSource[]> {
-    // 单文件全文通道（最高优先）：通读类意图 + 问题点名了代码文件名（"解析 HomeCosmos.vue"）
-    // → 直接取该文件全文。必须放在 symbolLookup 之前——"HomeCosmos.vue" 里的 HomeCosmos
-    // 会被符号检索当组件名命中，提前 return 导致全文通道永远轮不到。
-    // 检索只给 topK 片段，大文件后半段（绘制/blend/透镜）永远进不来；
-    // 单文件通常 ≤ 40000 字符阈值，全文注入才能"逐行解析到底"。
-    const namedFile = query.match(
-      /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/i,
+    // 单文件按名直查（最高优先）：问题点名代码文件名 → 直接按文件名取该文件。
+    // 不再要求"通读意图"——实测教训：问"chat.service.ts 有哪些方法"这类非解析问法，
+    // 只靠向量召回会漏掉大部分 chunk（只命中 import 头块答非所问），文件名本身是最强信号。
+    // 只问单个文件时走此通道；同时点名两个文件（对比类）→ 跳过，交给后续多路检索。
+    const namedFileMatches = query.match(
+      /([A-Za-z0-9_\-]+\.(?:vue|ts|js|tsx|jsx|py|go|rs|java|c|cpp|cs|sh|sql))/gi,
     );
-    const readIntent =
-      /解析|逐行|讲解|通读|完整|代码|实现|原理|怎么(写|做|实现|来的)|如何(实现|工作)|源码/.test(
-        query,
-      );
-    if (namedFile && readIntent) {
+    const namedFile = namedFileMatches?.[0] ?? null;
+    if (namedFile && (namedFileMatches?.length ?? 0) === 1) {
+      // 不限上限取回全文（供行号/符号定位用；是否整篇注入由大小决定）
       const ft = await this.ragService.loadDocumentByNameFulltext(
         userId,
-        namedFile[1],
+        namedFile,
         kbScope,
-        this.fulltextMaxChars,
+        10_000_000,
       );
-      if (ft.sources.length > 0) {
+      const doc = ft.sources[0];
+      if (doc) {
+        const clean = stripChunkHeaders(doc.content);
+        if (clean.length <= this.fulltextMaxChars) {
+          this.logger.log(
+            `会话 ${sessionId} 单文件按名直查：${namedFile}（${clean.length} 字符 ≤ 阈值，整篇注入）`,
+          );
+          return [
+            {
+              chunkId: doc.chunkId,
+              content: clean,
+              chunkIndex: -1,
+              documentId: doc.documentId,
+              filename: doc.filename,
+              similarity: null,
+            },
+          ];
+        }
+        // 大文件：AST 现场解析符号清单 + 文件头（答"有哪些方法/函数/结构"足够，不撑爆上下文；
+        // 不依赖 DB 符号表——服务器 code_symbols 曾为 0 行）
+        const symbols = extractSymbols(doc.filename, clean);
+        const lines = clean.split('\n');
+        const head = numberLines(lines.slice(0, 30).join('\n'));
+        const map = symbols
+          .map(
+            (s) =>
+              `- L${s.startLine}-${s.endLine} ${s.kind} ${s.name}: ${s.signature
+                .replace(
+                  /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|class|interface|type|enum)\s*/,
+                  '',
+                )
+                .slice(0, 100)}`,
+          )
+          .join('\n');
         this.logger.log(
-          `会话 ${sessionId} 单文件全文：${namedFile[1]}（${ft.totalChars} 字符 ≤ 阈值）`,
+          `会话 ${sessionId} 单文件大文件按名直查：${namedFile}（${clean.length} 字符 > 阈值，注入符号清单 ${symbols.length} 个）`,
         );
-        return ft.sources;
-      }
-      if (ft.totalChars > 0) {
-        this.logger.log(
-          `会话 ${sessionId} 单文件全文超限跳过（${ft.totalChars} > ${this.fulltextMaxChars}），退回后续检索`,
-        );
+        return [
+          {
+            chunkId: `${doc.documentId}:${namedFile}:map`,
+            content: `文件：${doc.filename}（共 ${lines.length} 行，超过单次注入上限，已转为符号清单）\n\n## 符号清单（AST 现场解析）\n${map || '（未提取到符号）'}\n\n## 文件头部\n${head}`,
+            chunkIndex: -1,
+            documentId: doc.documentId,
+            filename: doc.filename,
+            similarity: null,
+          },
+        ];
       }
     }
 

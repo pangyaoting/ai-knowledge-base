@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import type { NestApplication } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { join } from 'node:path';
@@ -10,7 +11,11 @@ import { AVATAR_DIR } from './common/paths';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestApplication>(AppModule);
+
+  // 图片问答按 data URL(base64) 随 JSON 提交：AskDto 允许单图 6MB，
+  // 必须放开 bodyParser 默认 100KB 限制，否则大图直接 413/500（P0-1 实测复现）。
+  app.useBodyParser('json', { limit: '20mb' });
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('SERVER_PORT', 3000);
