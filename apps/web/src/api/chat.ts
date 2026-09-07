@@ -43,7 +43,7 @@ export function updateSessionKnowledgeBases(
   });
 }
 
-/** 修改会话绑定的模型配置/模型名与推理等级（null = 跟随默认；reasoningEffort: low/high/max） */
+/** 修改会话绑定的模型配置/模型名与推理等级（null = 解除绑定，会话未选模型；reasoningEffort: low/high/max） */
 export function updateSessionModel(
   sessionId: string,
   modelConfigId: string | null,

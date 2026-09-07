@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { Loader2, Cpu, Plus, Trash2, Star, Pencil, FlaskConical, Info } from 'lucide-vue-next';
+import { Loader2, Cpu, Plus, Trash2, Pencil, FlaskConical, Info } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Skeleton from '@/components/ui/Skeleton.vue';
 import ModelConfigForm from '@/components/ModelConfigForm.vue';
 import { toast } from '@/composables/useToast';
 import { confirmDialog } from '@/composables/useConfirm';
-import {
-  getModelConfigs,
-  deleteModelConfig,
-  updateModelConfig,
-  testModelConfig,
-} from '@/api/model-configs';
+import { getModelConfigs, deleteModelConfig, testModelConfig } from '@/api/model-configs';
 import type { ModelConfig } from '@/types/model-config';
 
 const configs = ref<ModelConfig[]>([]);
@@ -58,16 +53,6 @@ async function handleDelete(id: string, name: string) {
     if (editingId.value === id) editingId.value = null;
     await loadConfigs();
     toast.success(`配置「${name}」已删除`);
-  } catch (e) {
-    toast.error((e as Error).message);
-  }
-}
-
-async function handleSetDefault(id: string) {
-  try {
-    await updateModelConfig(id, { isDefault: true });
-    await loadConfigs();
-    toast.success('已设为默认配置');
   } catch (e) {
     toast.error((e as Error).message);
   }
@@ -169,15 +154,7 @@ onMounted(loadConfigs);
           class="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3"
         >
           <div class="min-w-0 flex-1">
-            <p class="flex items-center gap-2 text-sm font-medium">
-              {{ c.name }}
-              <span
-                v-if="c.isDefault"
-                class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary"
-              >
-                默认
-              </span>
-            </p>
+            <p class="flex items-center gap-2 text-sm font-medium">{{ c.name }}</p>
             <p class="mt-0.5 truncate text-xs text-muted-foreground">
               {{ c.baseURL }} · {{ c.model }} · Key: {{ c.apiKeyMasked }}
             </p>
@@ -201,14 +178,6 @@ onMounted(loadConfigs);
             >
               <Loader2 v-if="testingId === c.id" class="h-4 w-4 animate-spin" />
               <FlaskConical v-else class="h-4 w-4" />
-            </button>
-            <button
-              v-if="!c.isDefault"
-              class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="设为默认"
-              @click="handleSetDefault(c.id)"
-            >
-              <Star class="h-4 w-4" />
             </button>
             <button
               class="rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

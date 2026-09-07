@@ -13,13 +13,15 @@ export function getAgentTask(id: string) {
   return request.get<unknown, AgentTask>(`/research-agent/tasks/${id}`);
 }
 
-/** 创建自主研究任务（异步执行，立即返回 pending） */
+/** 创建自主研究任务（异步执行，立即返回 pending；modelConfigId/model = 页面所选模型的快照） */
 export function createAgentTask(data: {
   mode: 'targeted' | 'open';
   goal?: string;
   startAt?: string;
   endAt?: string;
   tokenBudget: number;
+  modelConfigId?: string;
+  model?: string;
 }) {
   // datetime-local 是本地时间无时区，转成 UTC ISO，避免服务器时区解析偏差
   const payload: Record<string, unknown> = { ...data };

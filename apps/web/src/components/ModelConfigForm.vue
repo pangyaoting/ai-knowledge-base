@@ -28,7 +28,7 @@ const configForm = reactive({
   name: props.editing?.name ?? '',
   baseURL: props.editing?.baseURL ?? 'https://api.deepseek.com',
   apiKey: '', // 编辑时留空 = 保留原 Key
-  // 选中的模型名列表（同一 Key 多模型；第一项 = 默认模型）
+  // 选中的模型名列表（同一 Key 多模型；第一项 = 主模型）
   selected: props.editing?.models?.length
     ? [...(props.editing.models as string[])]
     : props.editing?.model
@@ -62,7 +62,7 @@ function toggleModelPicker() {
   }
 }
 
-/** 下拉多选：点一下勾选/取消（选中的都在 selected 里，第一个为默认模型） */
+/** 下拉多选：点一下勾选/取消（选中的都在 selected 里，第一个为主模型） */
 function toggleModel(m: string) {
   const i = configForm.selected.indexOf(m);
   if (i >= 0) configForm.selected.splice(i, 1);
@@ -122,7 +122,7 @@ async function saveConfig() {
   }
   savingConfig.value = true;
   configError.value = '';
-  // 默认模型 = 第一个选中的；models = 全部选中（去重保序）
+  // 主模型 = 第一个选中的；models = 全部选中（去重保序）
   const model = modelList[0];
   const models = [...new Set(modelList)];
   try {
@@ -170,7 +170,7 @@ async function saveConfig() {
         <Input v-model="configForm.name" placeholder="如：我的 DeepSeek" />
       </div>
       <div class="space-y-1.5">
-        <Label>模型（可多选，第一个为默认；同一 Key 可挂多个模型）</Label>
+        <Label>模型（可多选，第一个为主模型；同一 Key 可挂多个模型）</Label>
         <!-- 下拉多选：点开自动加载该接口的模型列表，勾选即选中 -->
         <div class="relative">
           <button
@@ -181,7 +181,7 @@ async function saveConfig() {
             <span class="min-w-0 truncate text-left">
               {{
                 configForm.selected.length
-                  ? `${configForm.selected.length} 个模型（默认 ${configForm.selected[0]}）`
+                  ? `${configForm.selected.length} 个模型（主模型 ${configForm.selected[0]}）`
                   : loadingModels
                     ? '加载模型列表…'
                     : '点击选择模型'
@@ -240,7 +240,7 @@ async function saveConfig() {
             v-for="m in configForm.selected"
             :key="m"
             class="inline-flex items-center gap-1 rounded-full border bg-muted/60 px-2 py-0.5 font-mono text-xs"
-            :title="m === configForm.selected[0] ? '默认模型' : ''"
+            :title="m === configForm.selected[0] ? '主模型' : ''"
           >
             {{ m }}
             <button

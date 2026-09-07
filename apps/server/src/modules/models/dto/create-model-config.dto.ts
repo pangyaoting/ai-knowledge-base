@@ -1,7 +1,6 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -36,7 +35,7 @@ export class CreateModelConfigDto {
   @IsNotEmpty({ message: '请填写 API Key' })
   apiKey!: string;
 
-  @ApiProperty({ example: 'deepseek-chat', description: '默认模型名' })
+  @ApiProperty({ example: 'deepseek-chat', description: '主模型名（该配置默认选中的模型）' })
   @IsString({ message: '模型名格式不正确' })
   @IsNotEmpty({ message: '请填写模型名' })
   @MaxLength(100, { message: '模型名最多100个字符' })
@@ -52,9 +51,4 @@ export class CreateModelConfigDto {
   @ArrayMaxSize(20, { message: '一个配置最多 20 个模型' })
   @IsString({ each: true, message: '模型名格式不正确' })
   models?: string[];
-
-  @ApiProperty({ example: false, description: '是否设为默认（新建会话默认使用）', required: false })
-  @IsOptional()
-  @IsBoolean({ message: 'isDefault 格式不正确' })
-  isDefault?: boolean;
 }

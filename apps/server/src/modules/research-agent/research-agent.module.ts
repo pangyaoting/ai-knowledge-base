@@ -4,7 +4,7 @@ import { AgentTaskService } from './agent-task.service';
 import { AgentRunner } from './agent-runner.service';
 import { AgentQueueService } from './agent-queue.service';
 import { ChatModule } from '../chat/chat.module'; // 复用 WebSearchService（联网搜索 + 正文提取）
-import { ModelsModule } from '../models/models.module'; // 解析用户默认模型配置（BYO key）
+import { ModelsModule } from '../models/models.module'; // 按任务行快照解析模型配置（BYO key）
 
 @Module({
   imports: [ChatModule, ModelsModule],

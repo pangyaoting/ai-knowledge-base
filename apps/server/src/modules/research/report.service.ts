@@ -14,7 +14,7 @@ export class ReportService {
     private queueService: ReportQueueService,
   ) {}
 
-  /** 创建研究报告任务（立即返回 pending） */
+  /** 创建研究报告任务（立即返回 pending；模型快照随创建写入） */
   async create(userId: string, dto: CreateReportDto) {
     const kbIds = dto.knowledgeBaseIds?.length ? dto.knowledgeBaseIds : undefined;
     // 归属校验：绑定的知识库必须都属于当前用户
@@ -27,10 +27,21 @@ export class ReportService {
         throw new NotFoundException('知识库不存在');
       }
     }
-    const report = await this.prisma.report.create({
+    // 模型快照校验：配置必须存在且属于当前用户（无默认配置兜底 → 创建即失败，不留坏任务）
+    if (dto.modelConfigId) {
+      const cfg = await this.prisma.modelConfig.findFirst({
+        where: { id: dto.modelConfigId, ownerId: userId },
+        select: { id: true },
+      });
+      if (!cfg) throw new BadRequestException('所选模型配置不存在或不属于你');
+    }
+    // 注：快照列为新加列，本地 client 未重生成 → any 兼容（CI/部署端 generate 后真实存在）
+    const report = await (this.prisma.report as any).create({
       data: {
         ownerId: userId,
         topic: dto.topic.trim(),
+        modelConfigId: dto.modelConfigId ?? null,
+        model: dto.model?.trim() || null,
         // P1-7：持久化创建时的检索范围——失败后"重新生成"可精确回填同一范围（不退化成全库）
         kbScope: {
           scope: kbIds ? 'specific' : 'all',

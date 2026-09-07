@@ -18,4 +18,23 @@ export class CreateReportDto {
   @IsArray({ message: '知识库ID列表格式不正确' })
   @IsUUID('4', { each: true, message: '知识库ID格式不正确' })
   knowledgeBaseIds?: string[];
+
+  @ApiProperty({
+    example: 'uuid',
+    description: '生成所用模型的配置ID（模型快照；页面顶部选择器选定后随创建提交）',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID('4', { message: '模型配置ID格式不正确' })
+  modelConfigId?: string;
+
+  @ApiProperty({
+    example: 'deepseek-chat',
+    description: '生成所用模型名（与 modelConfigId 同存为快照）',
+    required: false,
+  })
+  @IsOptional()
+  @IsString({ message: '模型名格式不正确' })
+  @MaxLength(100, { message: '模型名最多100个字符' })
+  model?: string;
 }

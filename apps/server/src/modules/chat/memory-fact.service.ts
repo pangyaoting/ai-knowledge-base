@@ -136,13 +136,12 @@ export class MemoryFactService implements OnApplicationBootstrap, OnApplicationS
     const inputMsgs = newMsgs.slice(-RECENT_MSGS);
     const lastMinedAt = (newMsgs[newMsgs.length - 1] as { createdAt: Date }).createdAt;
 
-    const target =
-      (await this.modelConfigService.resolveForChat(
-        session.ownerId,
-        session.modelConfigId,
-        session.model,
-      )) ?? (await this.modelConfigService.resolveDefaultForUser(session.ownerId));
-    if (!target) return; // 无可用模型配置 → 跳过（用户没绑 key，本来也没法答）
+    const target = await this.modelConfigService.resolveForChat(
+      session.ownerId,
+      session.modelConfigId,
+      session.model,
+    );
+    if (!target) return; // 会话未选模型/配置已删 → 跳过（记忆尽力而为，聊天原文全量在库）
 
     const inputText = inputMsgs
       .map(

@@ -13,8 +13,13 @@ export function getReport(id: string) {
   return request.get<unknown, Report>(`/research/reports/${id}`);
 }
 
-/** 创建研究报告任务（异步生成，立即返回 pending） */
-export function createReport(data: { topic: string; knowledgeBaseIds?: string[] }) {
+/** 创建研究报告任务（异步生成，立即返回 pending；modelConfigId/model = 页面所选模型的快照） */
+export function createReport(data: {
+  topic: string;
+  knowledgeBaseIds?: string[];
+  modelConfigId?: string;
+  model?: string;
+}) {
   return request.post<unknown, Report>('/research/reports', data);
 }
 

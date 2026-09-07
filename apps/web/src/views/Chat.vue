@@ -184,32 +184,35 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 // 模型配置（BYO 大模型 API）：会话可选用户自带的 key
 const modelConfigs = ref<ModelConfig[]>([]);
 
-const defaultModelConfigId = computed(
-  () => modelConfigs.value.find((c) => c.isDefault)?.id ?? null,
-);
-
 /** 视觉模型名启发式（与后端一致）：vision / VL / 4V / Omni / GLM-4V 等 */
 const VISION_RE = /vision|[-/]vl\b|vl[-.\d]|4v|omni|glm-4v|internvl|minicpm/i;
 
-/** 当前会话实际使用的模型名（会话绑定配置+模型 → 默认配置；用于发图时判断是否会自动路由） */
+/** 当前会话实际使用的模型名（会话绑定了才有；未绑 = null。用于发图时判断是否会自动路由） */
 const activeModelId = computed(() => {
-  const sid = currentSession.value?.modelConfigId;
-  if (sid) return currentSession.value?.model ?? null;
-  return modelConfigs.value.find((c) => c.isDefault)?.model ?? null;
+  const s = currentSession.value;
+  if (!s?.modelConfigId) return null;
+  return s.model ?? s.modelConfig?.model ?? null;
 });
 
-/** 当前会话使用的模型显示名（配置名 / 模型名；未绑定 = 跟随默认配置） */
+/** 当前会话使用的模型显示名（配置名 / 模型名；未绑定 = "未选模型"，提问时会提示先选） */
 const currentModelName = computed(() => {
-  const sid = currentSession.value?.modelConfigId;
-  if (sid) {
-    const c = modelConfigs.value.find((x) => x.id === sid);
-    if (c)
-      return currentSession.value?.model && currentSession.value.model !== c.model
-        ? `${c.name} / ${currentSession.value.model}`
-        : c.name;
+  const s = currentSession.value;
+  if (s?.modelConfigId) {
+    const c = modelConfigs.value.find((x) => x.id === s.modelConfigId);
+    if (c) return s.model && s.model !== c.model ? `${c.name} / ${s.model}` : c.name;
   }
-  return modelConfigs.value.find((c) => c.isDefault)?.name ?? '未绑定模型';
+  return '未选模型';
 });
+
+/**
+ * 新建会话的模型载荷：复制"当前正在看的会话"最后选的模型（无默认配置概念）。
+ * 当前会话未绑定 → 新会话也不绑定（首次/未选时提问会提示先选模型）。
+ * 分支/复制创建的会话同理，创建后就与来源会话完全独立。
+ */
+function newSessionModelPayload(): { modelConfigId?: string; model?: string } {
+  const s = currentSession.value;
+  return s?.modelConfigId ? { modelConfigId: s.modelConfigId, model: s.model ?? undefined } : {};
+}
 
 async function loadModelConfigs() {
   try {
@@ -219,7 +222,7 @@ async function loadModelConfigs() {
   }
 }
 
-/** 切换当前会话的模型配置 + 具体模型名（null = 跟随用户默认配置） */
+/** 切换当前会话的模型配置 + 具体模型名（null = 解除绑定，会话未选模型） */
 async function selectModel(configId: string | null, model?: string | null) {
   if (!currentSessionId.value) return;
   try {
@@ -412,7 +415,7 @@ async function handleNewSession() {
   if (streaming.value) return;
   try {
     const session = await createChatSession({
-      ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+      ...newSessionModelPayload(),
     });
     sessionSearch.value = '';
     await loadSessions();
@@ -465,7 +468,7 @@ async function confirmCreateSession() {
       const session = await createChatSession({
         knowledgeBaseIds: ids,
         useKnowledgeBase: useKb,
-        ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+        ...newSessionModelPayload(),
       });
       sessionSearch.value = '';
       await loadSessions();
@@ -747,7 +750,7 @@ async function handleBranch(idx: number) {
   }
   try {
     const session = await createChatSession({
-      ...(defaultModelConfigId.value ? { modelConfigId: defaultModelConfigId.value } : {}),
+      ...newSessionModelPayload(),
       ...(seedMessages.length ? { seedMessages } : {}),
     });
     sessionSearch.value = '';

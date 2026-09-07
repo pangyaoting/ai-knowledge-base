@@ -1,12 +1,24 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatMessageInput' });
 
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { Send, Square, X, ImagePlus, FileText, Cpu, Database, Brain } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import { MAX_IMAGES_PER_MESSAGE } from '@/types/chat';
 import type { ModelConfig } from '@/types/model-config';
 import { getSessionMemory, updateSessionMemory, type SessionMemoryInfo } from '@/api/chat';
+
+/**
+ * 推理等级（reasoning_effort）支持白名单（与后端一致）：仅 DeepSeek 官方 / OpenAI 官方推理系
+ * 接受该参数；硅基流动等网关大多不认 → 不支持的模型直接隐藏推理等级区，避免误导与每轮 400 重试。
+ */
+function supportsReasoning(baseURL: string, model: string): boolean {
+  const url = baseURL.toLowerCase();
+  const m = model.toLowerCase();
+  if (url.includes('api.deepseek.com')) return true;
+  if (url.includes('openai.com')) return /gpt-5|o[1-9]\b/.test(m);
+  return false;
+}
 
 const maxImages = MAX_IMAGES_PER_MESSAGE;
 
@@ -59,29 +71,73 @@ const modelBtnRef = ref<HTMLElement | null>(null);
 const modelDropdownRef = ref<HTMLElement | null>(null);
 const modelDropdownPos = ref({ top: 0, left: 0 });
 
+/** 当前会话生效的模型名（绑定配置下的具体模型；未选/配置已删 → 空） */
+const activeModelKey = computed(() => {
+  if (!props.sessionModelConfigId) return '';
+  const c = props.modelConfigs.find((x) => x.id === props.sessionModelConfigId);
+  if (!c) return '';
+  return props.sessionModel && (c.models ?? [c.model]).includes(props.sessionModel)
+    ? props.sessionModel
+    : c.model;
+});
+
+/** 当前会话生效配置的 baseURL（推理白名单判定用） */
+const activeBaseURL = computed(
+  () => props.modelConfigs.find((x) => x.id === props.sessionModelConfigId)?.baseURL ?? '',
+);
+
+/** 当前模型是否支持推理等级（不支持则隐藏整个区块） */
+const showReasoning = computed(() => supportsReasoning(activeBaseURL.value, activeModelKey.value));
+
 function toggleModelDropdown() {
   if (modelDropdownOpen.value) {
     modelDropdownOpen.value = false;
     return;
   }
+  // 先按内容估算摆位（防闪烁），打开后再按真实高度精修
   const el = modelBtnRef.value;
   if (el) {
     const r = el.getBoundingClientRect();
-    const itemH = 38;
-    const h = Math.min(400, props.modelConfigs.length * itemH + 190);
-    const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+    const vh = window.innerHeight;
+    const estH = Math.min(vh * 0.7, estimateDropdownHeight());
+    const top = r.bottom + 6 + estH > vh ? Math.max(8, r.top - estH - 6) : r.bottom + 6;
     const left = Math.min(Math.max(8, r.left), window.innerWidth - 248);
     modelDropdownPos.value = { top, left };
   }
   modelDropdownOpen.value = true;
+  nextTick(() => positionModelDropdown());
+}
+
+/** 按真实内容高度精修摆位（内容超高时面板内部滚动，视口内不溢出） */
+function positionModelDropdown() {
+  const btn = modelBtnRef.value;
+  const dd = modelDropdownRef.value;
+  if (!btn || !dd) return;
+  const r = btn.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const h = Math.min(dd.scrollHeight, vh * 0.7);
+  const top = r.bottom + 6 + h > vh ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+  modelDropdownPos.value = { top, left: Math.min(Math.max(8, r.left), window.innerWidth - 248) };
+}
+
+/** 估算下拉内容高度：每模型一行 + 区块标题/推理区等固定开销 */
+function estimateDropdownHeight(): number {
+  const modelRows = props.modelConfigs.reduce(
+    (n, c) => n + ((c.models ?? []).length ? c.models!.length : 1),
+    0,
+  );
+  const section = 20; // "选择模型"区块标题
+  const reasoning = showReasoning.value ? 120 : 0; // 推理等级区块
+  return modelRows * 34 + 60 + section + reasoning;
 }
 
 function onDocPointerDown(e: MouseEvent) {
-  if (!modelDropdownOpen.value) return;
+  if (!modelDropdownOpen.value && !memOpen.value) return;
   const t = e.target as Node;
-  if (!modelBtnRef.value?.contains(t) && !modelDropdownRef.value?.contains(t)) {
-    modelDropdownOpen.value = false;
-  }
+  const inModel = modelBtnRef.value?.contains(t) || modelDropdownRef.value?.contains(t);
+  const inMem = memBtnRef.value?.contains(t) || memPanelRef.value?.contains(t);
+  if (!inModel) modelDropdownOpen.value = false;
+  if (!inMem) memOpen.value = false;
 }
 
 // ===== 会话记忆面板（记忆模块 A 管理：查看摘要 / 清空 / 停用） =====
@@ -90,6 +146,7 @@ const memBusy = ref(false);
 const memInfo = ref<SessionMemoryInfo | null>(null);
 const memMsg = ref('');
 const memBtnRef = ref<HTMLElement | null>(null);
+const memPanelRef = ref<HTMLElement | null>(null);
 const memPos = ref({ top: 0, left: 0 });
 
 async function toggleMemoryPanel() {
@@ -142,12 +199,6 @@ async function memAction(clear: boolean, enabled?: boolean) {
 /** P2-11：选中具体模型后收起下拉（原来选完还开着，容易误触其它项） */
 function pickModel(configId: string, model: string) {
   emit('select-model', configId, model);
-  modelDropdownOpen.value = false;
-}
-
-/** P2-11：跟随默认 = 解除会话级模型绑定（后端 modelConfigId 置 null），收起下拉 */
-function pickFollowDefault() {
-  emit('select-model', null, null);
   modelDropdownOpen.value = false;
 }
 
@@ -233,21 +284,6 @@ defineExpose({ focusTextarea });
             去「模型配置」绑定自己的 API Key →
           </RouterLink>
           <template v-else>
-            <!-- P2-11：未绑定任何配置/会话跟随默认时，展示"跟随默认"项（当前为默认配置高亮） -->
-            <button
-              class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-              :class="!props.sessionModelConfigId ? 'text-primary' : ''"
-              :title="
-                '使用你在「模型配置」里设置的默认模型；当前默认：' +
-                (props.currentModelName || '未设置')
-              "
-              @click="pickFollowDefault"
-            >
-              <span class="min-w-0 flex-1 truncate">
-                跟随默认<template v-if="!props.sessionModelConfigId">（当前）</template>
-              </span>
-              <span v-if="!props.sessionModelConfigId" class="shrink-0 text-xs">✓</span>
-            </button>
             <p class="px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">选择模型</p>
             <!-- 平铺：每个配置 × 该配置下的全部模型名（同一 Key 多模型直接切换） -->
             <template v-for="c in props.modelConfigs" :key="c.id">
@@ -272,25 +308,28 @@ defineExpose({ focusTextarea });
                 >
               </button>
             </template>
-            <p class="border-t px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">
-              推理等级（思考越多越准也越贵）
-            </p>
-            <p class="px-3 pb-1 text-[10px] text-muted-foreground/70">
-              不设置 = 模型默认（V4 默认会简单思考）；部分模型不支持该参数，报错时请选「关闭」
-            </p>
-            <button
-              v-for="e in REASONING_OPTIONS"
-              :key="e.value"
-              class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-              :class="props.currentReasoning === e.value ? 'text-primary' : ''"
-              @click="pickReasoning(e.value)"
-            >
-              <span>{{ e.label }}</span>
-              <span class="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
-                {{ e.desc }}
-              </span>
-              <span v-if="props.currentReasoning === e.value" class="shrink-0 text-xs">✓</span>
-            </button>
+            <!-- 推理等级：仅当前模型支持 reasoning_effort 时展示（白名单，与后端一致） -->
+            <template v-if="showReasoning">
+              <p class="border-t px-3 pb-1 pt-2 text-[10px] font-medium text-muted-foreground">
+                推理等级（思考越多越准也越贵）
+              </p>
+              <p class="px-3 pb-1 text-[10px] text-muted-foreground/70">
+                不设置 = 模型默认（V4 默认会简单思考）；部分模型不支持该参数，报错时请选「关闭」
+              </p>
+              <button
+                v-for="e in REASONING_OPTIONS"
+                :key="e.value"
+                class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
+                :class="props.currentReasoning === e.value ? 'text-primary' : ''"
+                @click="pickReasoning(e.value)"
+              >
+                <span>{{ e.label }}</span>
+                <span class="min-w-0 flex-1 truncate text-right text-xs text-muted-foreground">
+                  {{ e.desc }}
+                </span>
+                <span v-if="props.currentReasoning === e.value" class="shrink-0 text-xs">✓</span>
+              </button>
+            </template>
           </template>
         </div>
       </div>
@@ -309,6 +348,7 @@ defineExpose({ focusTextarea });
         <!-- 记忆面板 -->
         <div
           v-if="memOpen"
+          ref="memPanelRef"
           class="fixed z-50 w-[320px] rounded-lg border bg-card p-3 text-xs shadow-lg"
           :style="{ top: memPos.top + 'px', left: memPos.left + 'px' }"
         >

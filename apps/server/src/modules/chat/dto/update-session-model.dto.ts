@@ -5,11 +5,11 @@ import { ApiProperty } from '@nestjs/swagger';
 export const REASONING_EFFORTS = ['low', 'high', 'max'] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
-/** 修改会话绑定的模型配置 + 具体模型名 + 推理等级（null = 回退系统默认模型/默认推理） */
+/** 修改会话绑定的模型配置 + 具体模型名 + 推理等级（null = 解除绑定，会话未选模型） */
 export class UpdateSessionModelDto {
   @ApiProperty({
     example: 'uuid',
-    description: '模型配置ID；null/不传 = 使用系统默认模型',
+    description: '模型配置ID；null/不传 = 解除绑定（会话未选模型，提问时会提示先选）',
     required: false,
     nullable: true,
   })
@@ -19,7 +19,7 @@ export class UpdateSessionModelDto {
 
   @ApiProperty({
     example: 'deepseek-chat',
-    description: '该配置下选中的模型名（同一配置可切换多个模型；不传 = 用配置默认 model）',
+    description: '该配置下选中的模型名（同一配置可切换多个模型；不传 = 用该配置主 model）',
     required: false,
     nullable: true,
   })

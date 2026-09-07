@@ -32,9 +32,26 @@ import {
   deleteAgentTask,
 } from '@/api/research-agent';
 import { getModelConfigs } from '@/api/model-configs';
+import ResearchModelPicker, {
+  type SelectedModel,
+} from '@/components/research/ResearchModelPicker.vue';
 import { notifyUser, ensureNotifyPermission } from '@/utils/notify';
 import type { AgentTask, AgentMode, AgentDirection } from '@/types/research-agent';
 import type { ModelConfig } from '@/types/model-config';
+
+/** localStorage 键：本页（自主研究 Agent）常驻的研究模型（各自独立记忆） */
+const AGENT_MODEL_KEY = 'research.agentModel';
+
+function loadStoredModel(): SelectedModel | null {
+  try {
+    const raw = localStorage.getItem(AGENT_MODEL_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as SelectedModel;
+    return v?.configId && v?.model ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 // ==================== 预算档位 ====================
 
@@ -66,6 +83,12 @@ const customTokens = ref(200_000); // 自定义档位 token 数
 const creating = ref(false);
 
 const modelConfigs = ref<ModelConfig[]>([]);
+/** 页面常驻的研究模型：本页新建的所有任务都用它；首次使用需先在页面选择 */
+const agentModel = ref<SelectedModel | null>(loadStoredModel());
+watch(agentModel, (v) => {
+  if (v) localStorage.setItem(AGENT_MODEL_KEY, JSON.stringify(v));
+  else localStorage.removeItem(AGENT_MODEL_KEY);
+});
 const extendOpen = ref(false);
 const extending = ref(false);
 const confirming = ref(false);
@@ -237,6 +260,10 @@ async function loadTasks() {
 async function loadModelConfigs() {
   try {
     modelConfigs.value = await getModelConfigs();
+    // 配置被删 → 记忆的模型失效，视同未选（让用户重新选择）
+    if (agentModel.value && !modelConfigs.value.some((c) => c.id === agentModel.value?.configId)) {
+      agentModel.value = null;
+    }
   } catch {
     modelConfigs.value = [];
   }
@@ -377,6 +404,11 @@ async function handleCreate() {
     toast.error('定向研究需要填写研究目标');
     return;
   }
+  // 无默认配置：必须先在本页顶部选择研究模型（创建即快照，之后改选择不影响本任务）
+  if (!agentModel.value || !modelConfigs.value.some((c) => c.id === agentModel.value?.configId)) {
+    toast.error('请先选择研究使用的模型（页面顶部「研究模型」）');
+    return;
+  }
   creating.value = true;
   // P2-11/P1-7：通知权限必须在用户点击的同步阶段请求（浏览器激活窗口内）——
   // 放在 await 之后会超窗，Chrome 静默拒绝并永久 denied。拒绝也不影响研究。
@@ -388,6 +420,8 @@ async function handleCreate() {
       startAt: startAt.value,
       endAt: endAt.value,
       tokenBudget: selectedTokens.value,
+      modelConfigId: agentModel.value!.configId,
+      model: agentModel.value!.model,
     });
     tasks.value.unshift(task);
     await selectTask(task.id);
@@ -615,6 +649,13 @@ onBeforeUnmount(() => {
 
     <!-- 右侧：新建 / 进度 / 报告 -->
     <main class="flex flex-1 flex-col overflow-hidden">
+      <!-- 页面常驻研究模型：本页新建的所有任务都用页面当前选择的模型（首次需先选） -->
+      <div class="flex items-center gap-2 border-b bg-card/50 px-4 py-1.5">
+        <ResearchModelPicker v-model="agentModel" label="研究模型" :model-configs="modelConfigs" />
+        <p class="hidden text-[11px] text-muted-foreground lg:block">
+          新建任务会把所选模型快照进任务；之后在此修改只影响新任务
+        </p>
+      </div>
       <!-- ========== 新建表单 ========== -->
       <AgentCreateForm
         v-if="!currentId"

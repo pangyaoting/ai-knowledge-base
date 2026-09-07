@@ -1,12 +1,4 @@
-import {
-  ArrayMaxSize,
-  IsArray,
-  IsBoolean,
-  IsOptional,
-  IsString,
-  IsUrl,
-  MaxLength,
-} from 'class-validator';
+import { ArrayMaxSize, IsArray, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateModelConfigDto {
@@ -42,9 +34,4 @@ export class UpdateModelConfigDto {
   @ArrayMaxSize(20, { message: '一个配置最多 20 个模型' })
   @IsString({ each: true, message: '模型名格式不正确' })
   models?: string[];
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  @IsBoolean({ message: 'isDefault 格式不正确' })
-  isDefault?: boolean;
 }

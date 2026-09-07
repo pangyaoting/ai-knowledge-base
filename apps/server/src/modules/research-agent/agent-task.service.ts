@@ -25,6 +25,8 @@ export interface PublicAgentTask {
   tokensUsed: number;
   searchRounds: number;
   pagesRead: number;
+  modelConfigId: string | null;
+  model: string | null;
   status: string;
   stopReason: string | null;
   directions: Array<{ title: string; question: string; status: string; rounds: number }>;
@@ -59,6 +61,9 @@ export class AgentTaskService {
     tokensUsed: number;
     searchRounds: number;
     pagesRead: number;
+    // 注：快照列为新加列，本地 prisma client 未重生成时行类型缺失 → 可选 + ?? null 兜底
+    modelConfigId?: string | null;
+    model?: string | null;
     status: string;
     stopReason: string | null;
     progress: unknown;
@@ -96,6 +101,8 @@ export class AgentTaskService {
       tokensUsed: task.tokensUsed,
       searchRounds: task.searchRounds,
       pagesRead: task.pagesRead,
+      modelConfigId: task.modelConfigId ?? null,
+      model: task.model ?? null,
       status: task.status,
       stopReason: task.stopReason,
       directions,
@@ -127,7 +134,16 @@ export class AgentTaskService {
     if (endAt.getTime() <= startAt.getTime()) {
       throw new BadRequestException('结束时间必须晚于开始时间');
     }
-    const task = await this.prisma.agentTask.create({
+    // 模型快照校验：配置必须存在且属于当前用户（无默认配置兜底 → 创建即失败，不留坏任务）
+    if (dto.modelConfigId) {
+      const cfg = await this.prisma.modelConfig.findFirst({
+        where: { id: dto.modelConfigId, ownerId: userId },
+        select: { id: true },
+      });
+      if (!cfg) throw new BadRequestException('所选模型配置不存在或不属于你');
+    }
+    // 注：快照列为新加列，本地 client 未重生成 → any 兼容（CI/部署端 generate 后真实存在）
+    const task = await (this.prisma.agentTask as any).create({
       data: {
         ownerId: userId,
         mode: dto.mode,
@@ -135,6 +151,8 @@ export class AgentTaskService {
         startAt,
         endAt,
         tokenBudget: dto.tokenBudget,
+        modelConfigId: dto.modelConfigId ?? null,
+        model: dto.model?.trim() || null,
       },
     });
     // startAt 在未来 → 延迟入队，到点自动开跑

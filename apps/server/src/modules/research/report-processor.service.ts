@@ -31,7 +31,7 @@ interface ReportSource {
  * ① 主题拆解成 3~5 个子问题 → ② 每个子问题检索知识库 + 撰写小节（并行）
  * → ③ 汇总成完整 Markdown 报告（引言/正文/结论，保留 [来源N] 标注）。
  * 报告耗时 1~2 分钟，所以走异步队列；status/step 供前端轮询进度。
- * BYO 强依赖：所有 LLM 调用都使用用户自己的默认模型配置，token 由用户承担；
+ * BYO 强依赖：所有 LLM 调用都使用报告行快照的模型配置，token 由用户承担；
  * 未绑定配置 → 报告直接标记 failed 并提示先去「模型配置」绑定。
  */
 @Injectable()
@@ -113,15 +113,25 @@ export class ReportProcessor {
     });
     if (!report) return;
 
-    // BYO：必须先绑定用户自己的默认模型配置，否则不消耗系统任何 token
-    const target = await this.modelConfigService.resolveDefaultForUser(userId);
+    // 模型快照（无默认配置兜底）：创建报告时页面选定的配置+模型已快照在报告行上；
+    // 配置被删/失效 → 快速失败 + 明确报错（不留半成品、不静默换模型）
+    // 注：快照列为新加列，本地 client 未重生成 → 行类型用 any 兼容（CI 生成后真实存在）
+    const reportSnap = report as unknown as {
+      modelConfigId?: string | null;
+      model?: string | null;
+    };
+    const target = await this.modelConfigService.resolveForChat(
+      userId,
+      reportSnap.modelConfigId ?? null,
+      reportSnap.model ?? null,
+    );
     if (!target) {
       await this.prisma.report.update({
         where: { id: reportId },
         data: {
           status: 'failed',
           error:
-            '请先在「模型配置」绑定你自己的大模型 API Key（个人中心入口已移动到导航栏「模型配置」），再重新生成报告。',
+            '生成报告所用的模型不可用（配置可能已被删除）。请回到「研究报告」页顶部重新选择模型后重试。',
         },
       });
       return;

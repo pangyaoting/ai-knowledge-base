@@ -130,13 +130,12 @@ export class MemorySummaryService implements OnApplicationBootstrap, OnApplicati
       .join('\n')
       .slice(0, FOLD_CHAR_CAP);
 
-    const target =
-      (await this.modelConfigService.resolveForChat(
-        session.ownerId,
-        session.modelConfigId,
-        session.model,
-      )) ?? (await this.modelConfigService.resolveDefaultForUser(session.ownerId));
-    if (!target) return; // 无可用模型配置 → 跳过（用户没绑 key，本来也没法答）
+    const target = await this.modelConfigService.resolveForChat(
+      session.ownerId,
+      session.modelConfigId,
+      session.model,
+    );
+    if (!target) return; // 会话未选模型/配置已删 → 跳过（记忆尽力而为，聊天原文全量在库）
 
     const client = new OpenAI({ apiKey: target.apiKey, baseURL: target.baseURL });
     const res = await client.chat.completions.create({

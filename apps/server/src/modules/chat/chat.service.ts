@@ -4,7 +4,12 @@ import OpenAI from 'openai';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RagService, RetrievalSource } from './rag.service';
 import { WebSearchService, WebSource } from './web-search.service';
-import { ModelConfigService, ChatTarget, isVisionModelName } from '../models/model-config.service';
+import {
+  ModelConfigService,
+  ChatTarget,
+  isVisionModelName,
+  supportsReasoningEffort,
+} from '../models/model-config.service';
 import {
   cleanText,
   detectFileType,
@@ -390,23 +395,22 @@ export class ChatService {
     // 会话绑定的知识库 id 列表（空 = 检索该用户全部知识库）
     const kbIds = session.knowledgeBases.map((k) => k.knowledgeBaseId);
 
-    // 模型目标（BYO 强依赖）：会话绑定的配置（含选中的模型名）→ 用户的默认配置 → 都没有则提示先绑定 Key。
-    // 所有 token 消耗由用户自己的 Key 承担，系统不提供兜底模型。
-    const target =
-      (await this.modelConfigService.resolveForChat(
-        userId,
-        session.modelConfigId,
-        session.model,
-      )) ?? (await this.modelConfigService.resolveDefaultForUser(userId));
+    // 模型目标（BYO 强依赖，无默认配置兜底）：会话必须显式绑定一份配置（含选中的模型名）。
+    // 没绑/配置已被删除 → 未选模型，提示用户先选；所有 token 消耗由用户自己的 Key 承担。
+    const target = await this.modelConfigService.resolveForChat(
+      userId,
+      session.modelConfigId,
+      session.model,
+    );
     if (!target) {
       writer('error', {
         message:
-          '使用前请先在「模型配置」里绑定你自己的大模型 API Key（设置 → 模型配置，或对话页右上角「模型」入口）。绑定后本会话所有 AI 消耗都由你的 Key 承担。',
+          '本会话还没有选择模型：请点击对话上方的「模型」按钮选择要使用的模型（首次使用需先在「模型配置」里绑定你自己的大模型 API Key）。本会话所有 AI 消耗都由你的 Key 承担。',
       });
       return;
     }
     // 带图自动路由：当前模型不支持视觉时，自动换用用户配置里的视觉模型
-    // （如 deepseek-v4-flash-vision-exp、Qwen3-VL）——文本对话仍用会话/默认模型，
+    // （如 deepseek-v4-flash-vision-exp、Qwen3-VL）——文本对话仍用会话选中的模型，
     // 两个模型各司其职，不用手动切换；没有视觉配置则保持原模型（报错会提示切换）
     if (images.length > 0 && !isVisionModelName(target.model)) {
       const visionTarget = await this.modelConfigService.resolveVisionForUser(userId);
@@ -705,7 +709,7 @@ export class ChatService {
     );
 
     // ⑤ DeepSeek 流式生成，逐字转发为 SSE delta 事件
-    // 模型目标已在开头解析（会话绑定 → 用户默认配置），token 全部由用户自己的 Key 承担。
+    // 模型目标已在开头解析（会话绑定的配置+模型），token 全部由用户自己的 Key 承担。
     // 思考策略（方案 B，2026-09 实测修正）：v4-flash 对 thinking.budget_tokens 参数是"接受但
     // 静默忽略"（实测思考仍烧 7000+ token），无法靠"思考预算"约束 → 删掉该假参数，
     // 回到"会话档位说了算"（high/max=深度思考，low=关闭，默认=模型默认），
@@ -725,15 +729,19 @@ export class ChatService {
           ? this.parseMaxTokens
           : undefined;
 
-    // 每次尝试的附加参数；attempts[0] = 主尝试，附加参数被上游拒绝时 attempts[1] 去参重试
+    // 每次尝试的附加参数；attempts[0] = 主尝试，附加参数被上游拒绝时 attempts[1] 去参重试。
+    // 推理等级仅对"接受 reasoning_effort"的提供商/模型发送（白名单，与前端下拉显隐一致）；
+    // 白名单外的模型一律不带 → 省掉每轮一次"上游 400 → 去参重试"的无效请求。
     type ExtraParams = { reasoning_effort?: string };
     const extras: ExtraParams = {};
-    if (parseMode === 'overview') {
-      // 总览只是把符号表整理成"函数地图"，不需要深度思考 → 强制 low 快通道（40 秒级）
-      extras.reasoning_effort = 'low';
-    } else if (session.reasoningEffort) {
-      // 深挖/整篇/普通问答：思考深度跟随会话档位（low=关闭 / high/max=深度思考）
-      extras.reasoning_effort = session.reasoningEffort;
+    if (supportsReasoningEffort(target.baseURL, target.model)) {
+      if (parseMode === 'overview') {
+        // 总览只是把符号表整理成"函数地图"，不需要深度思考 → 强制 low 快通道（40 秒级）
+        extras.reasoning_effort = 'low';
+      } else if (session.reasoningEffort) {
+        // 深挖/整篇/普通问答：思考深度跟随会话档位（low=关闭 / high/max=深度思考）
+        extras.reasoning_effort = session.reasoningEffort;
+      }
     }
     const attempts: ExtraParams[] = Object.keys(extras).length ? [extras, {}] : [{}];
 
@@ -801,8 +809,9 @@ export class ChatService {
         }
       }
 
-      // 批1-8：仍为空 → 关闭思考自动降级重试一次（正文必须有，思考不是必要环节）
-      if (!lastErr && !answer.trim()) {
+      // 批1-8：仍为空 → 关闭思考自动降级重试一次（正文必须有，思考不是必要环节；
+      // 仅对支持 reasoning_effort 的模型做——不支持的模型发参只会再 400 一次）
+      if (!lastErr && !answer.trim() && supportsReasoningEffort(target.baseURL, target.model)) {
         this.logger.warn(`会话 ${sessionId} 生成结果为空，关闭思考自动重试一次`);
         try {
           const out = await runAttempt({ reasoning_effort: 'low' });

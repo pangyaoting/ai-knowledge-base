@@ -111,7 +111,7 @@ onMounted(async () => {
               {{
                 modelConfigs.length === 0
                   ? '第一步：绑定你自己的大模型 API Key'
-                  : `已绑定 ${modelConfigs.length} 个模型配置（默认：${modelConfigs.find((c) => c.isDefault)?.name ?? '未设置'}）`
+                  : `已绑定 ${modelConfigs.length} 个模型配置：对话、研究报告、自主研究时各自选择要用的模型`
               }}
             </p>
             <p class="mt-1 text-sm" :class="isDark ? 'text-slate-400' : 'text-slate-500'">

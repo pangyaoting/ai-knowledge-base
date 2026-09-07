@@ -1,11 +1,14 @@
 <script setup lang="ts">
 defineOptions({ name: 'ResearchView' });
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { FileText, Plus, Trash2, Loader2, BookOpen, Sparkles, Download } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
+import ResearchModelPicker, {
+  type SelectedModel,
+} from '@/components/research/ResearchModelPicker.vue';
 import { toast } from '@/composables/useToast';
 import { confirmDialog } from '@/composables/useConfirm';
 import { getReports, getReport, createReport, deleteReport, cancelReport } from '@/api/research';
@@ -17,6 +20,20 @@ import { notifyUser, ensureNotifyPermission } from '@/utils/notify';
 import type { Report, ReportSource } from '@/types/research';
 import type { KnowledgeBase } from '@/types/knowledge';
 import type { ModelConfig } from '@/types/model-config';
+
+/** localStorage 键：本页（研究报告）常驻的研究模型（各自独立记忆） */
+const REPORT_MODEL_KEY = 'research.reportModel';
+
+function loadStoredModel(): SelectedModel | null {
+  try {
+    const raw = localStorage.getItem(REPORT_MODEL_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as SelectedModel;
+    return v?.configId && v?.model ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 // ==================== 状态 ====================
 const reports = ref<Report[]>([]);
@@ -31,15 +48,33 @@ const kbs = ref<KnowledgeBase[]>([]);
 const scope = ref<'all' | 'specific'>('all'); // 检索范围：全部 / 指定
 const pickingKbIds = ref<string[]>([]);
 
-// BYO：报告生成使用用户默认模型配置（未绑定则无法生成，用于前端引导提示）
+// BYO：本页（研究报告）使用的模型 = 页面顶部选择器选定（无默认配置概念）
 const modelConfigs = ref<ModelConfig[]>([]);
+/** 页面常驻的研究模型：本页新建的所有报告都用它；首次使用需先在页面选择 */
+const reportModel = ref<SelectedModel | null>(loadStoredModel());
+watch(reportModel, (v) => {
+  if (v) localStorage.setItem(REPORT_MODEL_KEY, JSON.stringify(v));
+  else localStorage.removeItem(REPORT_MODEL_KEY);
+});
 async function loadModelConfigs() {
   try {
     modelConfigs.value = await getModelConfigs();
+    // 配置被删 → 记忆的模型失效，视同未选（让用户重新选择）
+    if (
+      reportModel.value &&
+      !modelConfigs.value.some((c) => c.id === reportModel.value?.configId)
+    ) {
+      reportModel.value = null;
+    }
   } catch {
     modelConfigs.value = [];
   }
 }
+
+/** 是否已选择本页研究模型（未选则创建前引导先选） */
+const hasReportModel = computed(
+  () => !!reportModel.value && modelConfigs.value.some((c) => c.id === reportModel.value?.configId),
+);
 
 // 文档预览抽屉（点击来源定位原文）
 const previewDocId = ref<string | null>(null);
@@ -246,6 +281,11 @@ async function handleCancelReport() {
 async function handleCreate() {
   const t = topic.value.trim();
   if (!t || creating.value) return;
+  // 无默认配置：必须先在本页顶部选择研究模型（创建即快照，之后改选择不影响本份）
+  if (!hasReportModel.value) {
+    toast.error('请先选择报告使用的模型（页面顶部「报告模型」）');
+    return;
+  }
   // 防绕过按钮：specific 范围必须有选中的知识库（否则直发空数组 = 全库检索，语义不符）
   if (scope.value === 'specific' && pickingKbIds.value.length === 0) {
     toast.error('请至少选择一个知识库（指定范围下不能全库检索）');
@@ -257,7 +297,12 @@ async function handleCreate() {
   void ensureNotifyPermission();
   try {
     const kbIds = scope.value === 'specific' ? [...pickingKbIds.value] : [];
-    const report = await createReport({ topic: t, knowledgeBaseIds: kbIds });
+    const report = await createReport({
+      topic: t,
+      knowledgeBaseIds: kbIds,
+      modelConfigId: reportModel.value!.configId,
+      model: reportModel.value!.model,
+    });
     reports.value.unshift(report);
     topic.value = '';
     pickingKbIds.value = [];
@@ -441,6 +486,13 @@ onBeforeUnmount(stopPolling);
 
     <!-- 右侧：新建 / 进度 / 报告内容 -->
     <main class="flex flex-1 flex-col overflow-hidden">
+      <!-- 页面常驻研究模型：本页新建的所有报告都用页面当前选择的模型（首次需先选） -->
+      <div class="flex items-center gap-2 border-b bg-card/50 px-4 py-1.5">
+        <ResearchModelPicker v-model="reportModel" label="报告模型" :model-configs="modelConfigs" />
+        <p class="hidden text-[11px] text-muted-foreground lg:block">
+          新建报告会把所选模型快照进任务；之后在此修改只影响新报告
+        </p>
+      </div>
       <!-- 新建表单（没有当前报告或点了新建） -->
       <div
         v-if="!currentId"

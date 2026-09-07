@@ -50,7 +50,7 @@ export class CreateSessionDto {
 
   @ApiProperty({
     example: 'uuid',
-    description: '会话绑定的用户模型配置ID（不传 = 系统默认模型）',
+    description: '会话绑定的用户模型配置ID（不传 = 会话未绑定模型，提问时会提示先选模型）',
     required: false,
   })
   @IsOptional()

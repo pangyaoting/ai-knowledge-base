@@ -181,19 +181,21 @@ model SessionKnowledgeBase {
 // 异步生成：创建任务立即返回，worker 后台执行，前端轮询 status/step 展示进度。
 
 model Report {
-  id         String   @id @default(uuid())
-  ownerId    String   @map("owner_id")
-  topic      String // 研究主题
-  status     String   @default("pending") // pending / processing / done / failed
-  step       Int      @default(0) // 进度步骤：1=拆解子问题 2=检索撰写章节 3=汇总成报告
-  tokensUsed Int      @default(0) @map("tokens_used") // 生成消耗的 token 总数（数据看板统计用）
-  content    String? // 最终 Markdown 报告
-  sections   Json? // [{ index, question, content }]
-  sources    Json? // [{ number, documentId, chunkIndex, filename, similarity }]
-  kbScope    Json?   @map("kb_scope") // 创建时的检索范围 { scope: 'all'|'specific', knowledgeBaseIds?: [] }（失败重试回填用）
-  error      String? // 失败原因
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  ownerId       String   @map("owner_id")
+  topic         String // 研究主题
+  status        String   @default("pending") // pending / processing / done / failed
+  step          Int      @default(0) // 进度步骤：1=拆解子问题 2=检索撰写章节 3=汇总成报告
+  tokensUsed    Int      @default(0) @map("tokens_used") // 生成消耗的 token 总数（数据看板统计用）
+  modelConfigId String?  @map("model_config_id") // 创建时的模型快照（配置 id；无 FK：配置删除 → 解析失败快速报错）
+  model         String? // 创建时的模型快照（模型名；与 modelConfigId 同存，worker 解析 key 用）
+  content       String? // 最终 Markdown 报告
+  sections      Json? // [{ index, question, content }]
+  sources       Json? // [{ number, documentId, chunkIndex, filename, similarity }]
+  kbScope       Json?   @map("kb_scope") // 创建时的检索范围 { scope: 'all'|'specific', knowledgeBaseIds?: [] }（失败重试回填用）
+  error         String? // 失败原因
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
@@ -204,7 +206,8 @@ model Report {
 // ==================== 用户模型配置（BYO 大模型 API） ====================
 // 用户自带大模型 key（Cherry Studio 思路）：token 由用户买单，平台零成本。
 // apiKey 用 AES-256-GCM 加密存储（密钥在服务端 env），接口永不返回明文。
-// 会话可选一个配置：回答走用户的 key/baseURL/model；不配置则回退系统默认。
+// 无"默认配置"概念：会话/报告/Agent 各自显式绑定（或快照）一份配置+模型；
+// 会话删除配置 → FK SetNull 回未绑定；报告/Agent 快照无 FK → 解析失败快速报错。
 // 嵌入/检索仍用系统 key（保证检索质量一致、成本可控）。
 
 model ModelConfig {
@@ -213,9 +216,8 @@ model ModelConfig {
   name      String // 备注名，如"我的 DeepSeek"
   baseURL   String   @default("https://api.deepseek.com") @map("base_url") // OpenAI 兼容接口地址
   apiKey    String   @map("api_key") // AES-GCM 密文（iv:tag:data base64）
-  model     String // 默认模型名，如 deepseek-chat
+  model     String // 主模型名（该配置下第一个/默认选中的模型），如 deepseek-chat
   models    String[] @default([]) // 该配置下的全部模型名（同一 Key 多模型；空 = 只用 model）
-  isDefault Boolean  @default(false) @map("is_default") // 新建会话默认使用
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -254,14 +256,16 @@ model ChatMessage {
 // progress 是续跑断点：各方向研究笔记、已精读 URL、已用搜索词、已缓存小节正文。
 
 model AgentTask {
-  id           String    @id @default(uuid())
-  ownerId      String    @map("owner_id")
-  mode         String    @default("targeted") // targeted=定向研究（有目标）/ open=自主探索（无目标，从知识库挖掘方向）
-  goal         String? // 研究目标（open 模式为空）
-  startAt      DateTime  @map("start_at") // 时间窗开始
-  endAt        DateTime  @map("end_at") // 时间窗结束（停止硬上限）
-  tokenBudget  Int       @map("token_budget") // token 预算上限（停止硬上限）
-  tokensUsed   Int       @default(0) @map("tokens_used") // 已消耗 token（续跑时累加）
+  id            String    @id @default(uuid())
+  ownerId       String    @map("owner_id")
+  mode          String    @default("targeted") // targeted=定向研究（有目标）/ open=自主探索（无目标，从知识库挖掘方向）
+  goal          String? // 研究目标（open 模式为空）
+  modelConfigId String?   @map("model_config_id") // 创建时的模型快照（配置 id；无 FK：配置删除 → 解析失败快速报错）
+  model         String? // 创建时的模型快照（模型名；与 modelConfigId 同存，worker 解析 key 用）
+  startAt       DateTime  @map("start_at") // 时间窗开始
+  endAt         DateTime  @map("end_at") // 时间窗结束（停止硬上限）
+  tokenBudget   Int       @map("token_budget") // token 预算上限（停止硬上限）
+  tokensUsed    Int       @default(0) @map("tokens_used") // 已消耗 token（续跑时累加）
   searchRounds Int       @default(0) @map("search_rounds") // 已执行的联网搜索轮数
   pagesRead    Int       @default(0) @map("pages_read") // 已精读页面数
   status       String    @default("pending") // pending / running / stopped / done / failed

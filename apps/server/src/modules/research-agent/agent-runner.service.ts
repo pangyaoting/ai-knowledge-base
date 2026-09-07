@@ -96,7 +96,7 @@ const ASSEMBLY_BUDGET = 12000;
  * 用户手动停止随时生效。停止后保留阶段成果；续时/加预算后从 progress 断点续跑
  * （已精读的 URL 跳过、已完成方向不重复写、已缓存小节正文直接复用）。
  *
- * BYO 强依赖：所有 LLM 调用走用户默认模型配置，token 由用户承担，系统零成本。
+ * BYO 强依赖：所有 LLM 调用走任务行快照的模型配置，token 由用户承担，系统零成本。
  */
 @Injectable()
 export class AgentRunner {
@@ -119,15 +119,23 @@ export class AgentRunner {
     // 任务被删除 / 已被手动停止且未续跑 → 直接跳过；failed 允许重跑（BullMQ 瞬时错误重试）
     if (!task || !['pending', 'running', 'failed'].includes(task.status)) return;
 
-    // BYO：必须先绑定用户默认模型配置，否则不消耗系统任何 token
-    const target = await this.modelConfigService.resolveDefaultForUser(userId);
+    // 模型快照（无默认配置兜底）：创建任务时页面选定的配置+模型已快照在任务行上；
+    // 配置被删/失效 → 快速失败 + 明确报错（不留半成品、不静默换模型）
+    // 注：快照列为新加列，本地 client 未重生成 → 行类型用 any 兼容（CI 生成后真实存在）
+    const taskSnap = task as unknown as { modelConfigId?: string | null; model?: string | null };
+    const target = await this.modelConfigService.resolveForChat(
+      userId,
+      taskSnap.modelConfigId ?? null,
+      taskSnap.model ?? null,
+    );
     if (!target) {
       await this.prisma.agentTask.update({
         where: { id: taskId },
         data: {
           status: 'failed',
           stopReason: 'error',
-          error: '请先在「模型配置」绑定你自己的大模型 API Key，再启动自主研究。',
+          error:
+            '研究任务所用的模型不可用（配置可能已被删除）。请回到「自主研究」页顶部重新选择模型后重试。',
           finishedAt: new Date(),
         },
       });

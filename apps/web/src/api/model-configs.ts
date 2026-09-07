@@ -14,7 +14,6 @@ export function createModelConfig(data: {
   model: string;
   /** 该配置下的全部模型名（同一 Key 多模型） */
   models?: string[];
-  isDefault?: boolean;
 }) {
   return request.post<unknown, ModelConfig>('/model-configs', data);
 }
@@ -27,7 +26,6 @@ export function updateModelConfig(
     apiKey?: string;
     model?: string;
     models?: string[];
-    isDefault?: boolean;
   },
 ) {
   return request.patch<unknown, ModelConfig>(`/model-configs/${id}`, data);
