@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineOptions({ name: 'ResearchView' });
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount } from 'vue';
 import { FileText, Plus, Trash2, Loader2, BookOpen, Sparkles, Download } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
@@ -431,6 +431,12 @@ onMounted(async () => {
     await selectReport(reports.value[0].id);
   }
   await loadModelConfigs();
+});
+
+// KeepAlive 缓存：从「模型配置」页新增/删除模型后返回本页时重新拉取模型列表
+// （缓存组件不会重跑 onMounted，不刷新就会一直显示旧列表，要整页刷新才同步）
+onActivated(() => {
+  loadModelConfigs();
 });
 
 onBeforeUnmount(stopPolling);

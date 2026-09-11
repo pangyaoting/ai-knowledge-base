@@ -626,7 +626,12 @@ onMounted(async () => {
 
 // KeepAlive 缓存：切走时停 1Hz 界面时钟（倒计时不可见，纯耗电）；
 // 详情轮询/列表同步保留——它们只在有活跃任务时跑，且是后台完成通知的支撑
-onActivated(() => startClock());
+onActivated(() => {
+  startClock();
+  // 从「模型配置」页新增/删除模型后返回本页时重新拉取模型列表
+  // （缓存组件不会重跑 onMounted，不刷新就会一直显示旧列表，要整页刷新才同步）
+  loadModelConfigs();
+});
 onDeactivated(() => stopClock());
 
 onBeforeUnmount(() => {

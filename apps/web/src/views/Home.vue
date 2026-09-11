@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'HomeView' });
 
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onActivated } from 'vue';
 import { Cpu, ArrowRight } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
 import { getModelConfigs } from '@/api/model-configs';
@@ -51,6 +51,14 @@ onMounted(async () => {
     modelConfigs.value = [];
   }
   loaded.value = true;
+});
+
+// KeepAlive 缓存：从「模型配置」页增删改后返回本页时刷新数量文案
+// （缓存组件不会重跑 onMounted，不刷新会一直显示旧数量）
+onActivated(() => {
+  getModelConfigs()
+    .then((list) => (modelConfigs.value = list))
+    .catch(() => (modelConfigs.value = []));
 });
 </script>
 
