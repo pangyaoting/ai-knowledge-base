@@ -21,16 +21,12 @@ import {
   FileText,
   Layers,
   MessageSquare,
-  Coins,
-  TrendingUp,
-  BookOpen,
-  Bot,
   Brain,
   RefreshCw,
   AlertTriangle,
 } from 'lucide-vue-next';
 import Button from '@/components/ui/Button.vue';
-import { getOverview, type OverviewData, type StatsRange } from '@/api/stats';
+import { getOverview, type ModelTokenRow, type OverviewData, type StatsRange } from '@/api/stats';
 import DashboardSkeleton from '@/components/skeletons/DashboardSkeleton.vue';
 import { toast } from '@/composables/useToast';
 
@@ -363,29 +359,6 @@ const docSegments = computed(() => {
   ];
 });
 
-const researchSegments = computed(() => {
-  const s = data.value?.research.status;
-  if (!s) return [];
-  const total = Math.max(1, s.done + s.running + s.stopped + s.failed);
-  return [
-    { name: '完成', value: s.done, color: 'bg-green-500', pct: (s.done / total) * 100 },
-    { name: '进行中', value: s.running, color: 'bg-blue-500', pct: (s.running / total) * 100 },
-    { name: '已停止', value: s.stopped, color: 'bg-gray-400', pct: (s.stopped / total) * 100 },
-    { name: '失败', value: s.failed, color: 'bg-red-500', pct: (s.failed / total) * 100 },
-  ];
-});
-
-const CATEGORY_LABEL: Record<string, string> = {
-  background: '背景',
-  preference: '偏好',
-  goal: '目标',
-  general: '其他',
-};
-
-const memoryMax = computed(() =>
-  Math.max(1, ...(data.value?.memory.byCategory ?? []).map((c) => c.count)),
-);
-
 const modelMax = computed(() => Math.max(1, ...(data.value?.models ?? []).map((m) => m.tokens)));
 const modelTotal = computed(() =>
   Math.max(
@@ -393,6 +366,37 @@ const modelTotal = computed(() =>
     (data.value?.models ?? []).reduce((a, b) => a + b.tokens, 0),
   ),
 );
+
+/** 模型来源构成：与 Token 构成（甜甜圈）/消耗趋势（堆叠）同色，便于跨图对照 */
+const MODEL_SOURCE = {
+  chat: { name: '对话', color: '#3b82f6' },
+  report: { name: '研究报告', color: '#8b5cf6' },
+  agent: { name: '自主研究', color: '#14b8a6' },
+};
+
+/** 一个模型的来源构成条（只有 >0 的段；宽度按 modelMax 归一，与其他模型可比） */
+function modelSegments(m: ModelTokenRow) {
+  const segs = [
+    { ...MODEL_SOURCE.chat, value: m.chatTokens },
+    { ...MODEL_SOURCE.report, value: m.reportTokens },
+    { ...MODEL_SOURCE.agent, value: m.agentTokens },
+  ];
+  return segs.filter((s) => s.value > 0);
+}
+
+/**
+ * 模型明细文案。研究任务是"整任务累计 token"，没有消息条数，
+ * 所以"次数 / 均 token"只对对话成立，研究部分单独列出来（避免用研究 token 去除以对话次数）
+ */
+function modelMeta(m: ModelTokenRow): string {
+  const parts: string[] = [];
+  if (m.calls > 0) {
+    parts.push(`对话 ${m.calls} 次 · 均 ${fmtTokens(Math.round(m.chatTokens / m.calls))}/次`);
+  }
+  if (m.reportTokens > 0) parts.push(`报告 ${fmtTokens(m.reportTokens)}`);
+  if (m.agentTokens > 0) parts.push(`自主研究 ${fmtTokens(m.agentTokens)}`);
+  return parts.join(' · ');
+}
 
 /** 空态：还没有任何知识库与会话时给引导，而不是一排 0 */
 const isEmpty = computed(() => {
@@ -412,7 +416,7 @@ function goSessions(sessionId?: string) {
       <div class="min-w-[240px] flex-1">
         <h1 class="text-2xl font-bold tracking-tight">数据看板</h1>
         <p class="mt-1 text-sm text-muted-foreground">
-          知识库规模 · 对话活跃度 · 各模型 Token 消耗 · 研究任务效率（流式 usage 记录）
+          知识库规模 · 对话活跃度 · 各模型 Token 消耗（流式 usage 记录）
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -505,15 +509,15 @@ function goSessions(sessionId?: string) {
           <div ref="modelCardRef" class="flex flex-col rounded-lg border bg-card p-5 lg:min-h-0">
             <h3 class="text-sm font-semibold">各模型 Token 消耗</h3>
             <p class="mt-0.5 text-xs text-muted-foreground">
-              按模型归因（BYO Key：这里就是你的账单结构）· 含调用次数与环比 ·
-              仅统计记录模型名之后的对话
+              按模型归因（BYO Key：这里就是你的账单结构）· 对话 + 研究报告 + 自主研究 ·
+              仅统计记录模型名之后的数据
             </p>
             <div ref="modelBoxRef" class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
               <div
                 v-if="data.models.length === 0"
                 class="py-6 text-center text-xs text-muted-foreground"
               >
-                暂无归因数据 —— 记录模型名之后的新对话会出现在这里
+                暂无归因数据 —— 记录模型名之后的新对话与研究会出现在这里
               </div>
               <div v-for="m in data.models" :key="m.model" class="mb-4 last:mb-0">
                 <div class="flex items-baseline justify-between gap-3 text-xs">
@@ -532,16 +536,16 @@ function goSessions(sessionId?: string) {
                     </span>
                   </span>
                 </div>
-                <div class="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    class="h-full rounded-full bg-primary"
-                    :style="{ width: `${(m.tokens / modelMax) * 100}%` }"
+                <!-- 来源构成条：对话/研究报告/自主研究（与 Token 构成、消耗趋势同色） -->
+                <div class="mt-1.5 flex h-2 overflow-hidden rounded-full bg-muted">
+                  <span
+                    v-for="seg in modelSegments(m)"
+                    :key="seg.name"
+                    class="h-full shrink-0"
+                    :style="{ width: `${(seg.value / modelMax) * 100}%`, background: seg.color }"
                   />
                 </div>
-                <p class="mt-1 text-[11px] text-muted-foreground">
-                  {{ m.calls }} 次调用 · 均
-                  {{ fmtTokens(Math.round(m.tokens / Math.max(1, m.calls))) }}/次
-                </p>
+                <p class="mt-1 text-[11px] text-muted-foreground">{{ modelMeta(m) }}</p>
               </div>
             </div>
           </div>
@@ -632,92 +636,7 @@ function goSessions(sessionId?: string) {
           </div>
         </div>
 
-        <!-- ⑤ 研究与记忆 -->
-        <div class="mt-4 grid gap-4 lg:grid-cols-2">
-          <div class="rounded-lg border bg-card p-5">
-            <h3 class="text-sm font-semibold">研究任务</h3>
-            <p class="mt-0.5 text-xs text-muted-foreground">状态分布（失败 / 停止不再被藏起来）</p>
-            <div class="mt-4 flex h-2.5 overflow-hidden rounded-full bg-muted">
-              <span
-                v-for="s in researchSegments"
-                :key="s.name"
-                :class="s.color"
-                :style="{ width: `${s.pct}%` }"
-              />
-            </div>
-            <div class="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span v-for="s in researchSegments" :key="s.name">
-                <span class="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm" :class="s.color" />
-                {{ s.name }} {{ s.value }}
-              </span>
-            </div>
-            <div class="mt-4 grid grid-cols-3 gap-3">
-              <div class="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Bot class="h-3 w-3" /> 平均搜索轮数
-                </div>
-                <p class="mt-1 text-lg font-bold">{{ data.research.avgSearchRounds }}</p>
-              </div>
-              <div class="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <BookOpen class="h-3 w-3" /> 平均精读页面
-                </div>
-                <p class="mt-1 text-lg font-bold">{{ data.research.avgPagesRead }}</p>
-              </div>
-              <div class="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Coins class="h-3 w-3" /> 报告均 token
-                </div>
-                <p class="mt-1 text-lg font-bold">
-                  {{ fmtTokens(data.research.avgReportTokens) }}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div class="rounded-lg border bg-card p-5">
-            <h3 class="text-sm font-semibold">记忆系统</h3>
-            <p class="mt-0.5 text-xs text-muted-foreground">
-              模块 A 滚动摘要 + 模块 B 跨会话事实记忆
-            </p>
-            <div class="mt-3 grid grid-cols-3 gap-3">
-              <div class="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <div class="text-[11px] text-muted-foreground">启用摘要的会话</div>
-                <p class="mt-1 text-lg font-bold">{{ data.assets.sessionsWithSummary }}</p>
-              </div>
-              <div class="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <div class="text-[11px] text-muted-foreground">事实记忆</div>
-                <p class="mt-1 text-lg font-bold">{{ data.memory.total }}</p>
-              </div>
-              <div class="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <div class="text-[11px] text-muted-foreground">原文窗口</div>
-                <p class="mt-1 text-lg font-bold">3 轮</p>
-              </div>
-            </div>
-            <div v-if="data.memory.byCategory.length" class="mt-4 space-y-2">
-              <div
-                v-for="c in data.memory.byCategory"
-                :key="c.category"
-                class="flex items-center gap-2 text-xs"
-              >
-                <span class="w-14 shrink-0 text-muted-foreground">
-                  {{ CATEGORY_LABEL[c.category] ?? c.category }}
-                </span>
-                <span class="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                  <span
-                    class="block h-full rounded-full bg-primary"
-                    :style="{ width: `${(c.count / memoryMax) * 100}%` }"
-                  />
-                </span>
-                <span class="w-8 shrink-0 text-right font-medium">{{ c.count }}</span>
-              </div>
-            </div>
-            <p v-else class="mt-4 text-xs text-muted-foreground">
-              还没有事实记忆 —— 聊天中提到你的背景/偏好/目标后会自动抽取
-            </p>
-          </div>
-        </div>
-
-        <!-- ⑥ 归因明细 -->
+        <!-- ⑤ 归因明细 -->
         <div class="mt-4 grid gap-4 lg:grid-cols-2">
           <div class="rounded-lg border bg-card p-5">
             <h3 class="text-sm font-semibold">最烧 Token 的会话 Top5</h3>
@@ -784,7 +703,7 @@ function goSessions(sessionId?: string) {
           </div>
         </div>
 
-        <!-- ⑦ 最近活跃的知识库 -->
+        <!-- ⑥ 最近活跃的知识库 -->
         <div class="mt-4 rounded-lg border bg-card p-5">
           <h3 class="text-sm font-semibold">最近活跃的知识库</h3>
           <p class="mt-0.5 text-xs text-muted-foreground">

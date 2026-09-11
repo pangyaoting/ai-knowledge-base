@@ -332,7 +332,7 @@
         <div class="grow">
           <h1>数据看板</h1>
           <p class="sub">
-            知识库规模 · 对话活跃度 · 各模型 Token 消耗 · 研究任务效率（流式 usage 记录）
+            知识库规模 · 对话活跃度 · 各模型 Token 消耗（流式 usage 记录）
           </p>
           <div class="stamp" id="stamp"></div>
         </div>
@@ -355,8 +355,8 @@
         <div class="card" id="modelCard" style="display: flex; flex-direction: column; min-height: 0">
           <h3>各模型 Token 消耗</h3>
           <p class="hint">
-            按模型归因（BYO Key：这里就是你的账单结构）· 含调用次数与环比 ·
-            仅统计记录模型名之后的对话
+            按模型归因（BYO Key：这里就是你的账单结构）· 对话 + 研究报告 + 自主研究 ·
+            仅统计记录模型名之后的数据
           </p>
           <div id="modelBox" style="margin-top: 14px; flex: 1; min-height: 0"></div>
         </div>
@@ -407,23 +407,7 @@
         </div>
       </section>
 
-      <!-- ⑤ 研究与记忆 -->
-      <section class="grid k2">
-        <div class="card">
-          <h3>研究任务</h3>
-          <p class="hint">状态分布（失败/停止不再被藏起来）</p>
-          <div style="margin-top: 14px" id="researchStatus"></div>
-          <div class="mini" style="margin-top: 14px" id="researchEff"></div>
-        </div>
-        <div class="card">
-          <h3>记忆系统</h3>
-          <p class="hint">模块 A 滚动摘要 + 模块 B 跨会话事实记忆</p>
-          <div class="mini" style="margin-top: 14px" id="memoryBox"></div>
-          <div style="margin-top: 14px" id="memoryCats"></div>
-        </div>
-      </section>
-
-      <!-- ⑥ 归因明细（会话 / 资料） -->
+      <!-- ⑤ 归因明细（会话 / 资料） -->
       <section class="grid k2">
         <div class="card">
           <h3>最烧 Token 的会话 Top5</h3>
@@ -437,7 +421,7 @@
         </div>
       </section>
 
-      <!-- ⑦ 最近活跃的知识库 -->
+      <!-- ⑥ 最近活跃的知识库 -->
       <section>
         <div class="card">
           <h3>最近活跃的知识库</h3>
@@ -515,16 +499,22 @@
         const prevTotal = chatTokens * 0.76 + reportTokens * 0.9 + agentTokens * 1.1;
 
         // 注：向量化（bge-m3 / 硅基流动）走系统 key 且不记 usage → 不进"你的模型账单"；
-        // 历史对话（加列前）不记模型名 → 直接不计入，不做"未记录"灰桶
+        // 历史（加列前 chat_messages / reports / agent_tasks 的 model 为空）→ 直接不计入，不做"未记录"灰桶
+        // 每个模型 = 对话 + 研究报告 + 自主研究 三段（研究任务是整任务累计 token，没有"次数"）
+        const mk = (chat, report, agent) => ({
+          chat: Math.round(chatTokens * chat),
+          report: Math.round(reportTokens * report),
+          agent: Math.round(agentTokens * agent),
+        });
         const models = [
-          { name: 'deepseek-v4-flash', tokens: Math.round(chatTokens * 0.7), calls: 412, delta: 0.24, color: 'var(--c-model-1)' },
-          { name: 'agnes-2.5-flash', tokens: Math.round(chatTokens * 0.22), calls: 96, delta: 1.4, color: 'var(--c-model-2)' },
-          { name: 'deepseek-v4-flash-vision-exp', tokens: Math.round(chatTokens * 0.08), calls: 23, delta: -0.12, color: 'var(--c-model-3)' },
-          // 演示"模型多 → 左卡内部滚动"：下面这些可按需删除
-          { name: 'deepseek-reasoner', tokens: Math.round(chatTokens * 0.04), calls: 12, delta: 0.6, color: 'var(--c-model-4)' },
-          { name: 'Qwen/Qwen3-VL-32B', tokens: Math.round(chatTokens * 0.02), calls: 6, delta: 0, color: 'var(--c-agent)' },
-          { name: 'kimi-k2-thinking', tokens: Math.round(chatTokens * 0.015), calls: 4, delta: -0.3, color: 'var(--c-report)' },
-        ];
+          { name: 'deepseek-v4-flash', ...mk(0.64, 0.6, 0.45), calls: 412, delta: 0.24 },
+          { name: 'agnes-2.5-flash', ...mk(0.22, 0.18, 0.25), calls: 96, delta: 1.4 },
+          { name: 'deepseek-v4-flash-vision-exp', ...mk(0.09, 0, 0), calls: 23, delta: -0.12 },
+          { name: 'deepseek-reasoner', ...mk(0.03, 0.22, 0.15), calls: 12, delta: 0.6 },
+          // 演示"模型多 → 左卡内部滚动"；下面这条演示"只有研究消耗、没有对话次数"的模型
+          { name: 'Qwen/Qwen3-VL-32B', ...mk(0, 0, 0.15), calls: 0, delta: 0 },
+          { name: 'kimi-k2-thinking', ...mk(0.02, 0, 0), calls: 4, delta: -0.3 },
+        ].map((m) => ({ ...m, tokens: m.chat + m.report + m.agent }));
 
         return {
           range,
@@ -549,22 +539,6 @@
             { name: '研究报告', value: reportTokens, color: 'var(--c-report)' },
             { name: '自主研究', value: agentTokens, color: 'var(--c-agent)' },
           ],
-          research: {
-            status: { done: 5, failed: 1, stopped: 2, running: 1 },
-            avgSearchRounds: 8.2,
-            avgPages: 14.5,
-            avgReportTokens: 18000,
-          },
-          memory: {
-            sessionsWithSummary: 4,
-            total: 47,
-            cats: [
-              { name: '背景 background', value: 15, color: 'var(--c-chat)' },
-              { name: '偏好 preference', value: 12, color: 'var(--c-agent)' },
-              { name: '目标 goal', value: 8, color: 'var(--c-report)' },
-              { name: '其他 general', value: 12, color: 'var(--c-model-3)' },
-            ],
-          },
           models,
           topSessions: [
             { title: '主项目代码解析：HomeCosmos.vue', tokens: 486000, model: 'deepseek-v4-flash', msgs: 42 },
@@ -813,56 +787,23 @@
         </div>`;
       }
 
-      function renderResearch(d) {
-        const s = d.research.status;
-        const total = s.done + s.failed + s.stopped + s.running || 1;
-        const seg = [
-          { n: '完成', v: s.done, c: 'var(--green)' },
-          { n: '进行中', v: s.running, c: 'var(--c-chat)' },
-          { n: '已停止', v: s.stopped, c: 'var(--muted-2)' },
-          { n: '失败', v: s.failed, c: 'var(--red)' },
-        ];
-        return `
-          <div class="bar-track" style="height:10px">${seg.map((x) => `<span style="width:${(x.v / total) * 100}%;background:${x.c}"></span>`).join('')}</div>
-          <div class="legend" style="margin-top:10px">${seg.map((x) => `<span><i style="background:${x.c}"></i>${x.n} ${x.v}</span>`).join('')}</div>`;
-      }
-
-      function renderResearchEff(d) {
-        const r = d.research;
-        return [
-          { k: '平均搜索轮数', v: r.avgSearchRounds },
-          { k: '平均精读页面', v: r.avgPages },
-          { k: '报告均 token', v: fmtTok(r.avgReportTokens) },
-        ]
-          .map((i) => `<div class="card"><div class="muted">${i.k}</div><div class="v">${i.v}</div></div>`)
-          .join('');
-      }
-
-      function renderMemory(d) {
-        const m = d.memory;
-        return [
-          { k: '启用摘要的会话', v: m.sessionsWithSummary },
-          { k: '事实记忆', v: m.total },
-          { k: '摘要窗口', v: '3 轮' },
-        ]
-          .map((i) => `<div class="card"><div class="muted">${i.k}</div><div class="v">${i.v}</div></div>`)
-          .join('');
-      }
-
-      function renderMemoryCats(d) {
-        const total = d.memory.cats.reduce((a, b) => a + b.value, 0) || 1;
-        return `
-          <div class="bar-track" style="height:10px">
-            ${d.memory.cats.map((c) => `<span style="width:${(c.value / total) * 100}%;background:${c.color}"></span>`).join('')}
-          </div>
-          <div class="legend" style="margin-top:10px">
-            ${d.memory.cats.map((c) => `<span><i style="background:${c.color}"></i>${c.name} ${c.value}</span>`).join('')}
-          </div>`;
-      }
-
       function renderModels(d) {
         const max = Math.max(...d.models.map((m) => m.tokens), 1);
         const total = d.models.reduce((a, b) => a + b.tokens, 0) || 1;
+        const segs = (m) =>
+          [
+            { name: '对话', value: m.chat, color: 'var(--c-chat)' },
+            { name: '研究报告', value: m.report, color: 'var(--c-report)' },
+            { name: '自主研究', value: m.agent, color: 'var(--c-agent)' },
+          ].filter((s) => s.value > 0);
+        // 研究任务是"整任务累计 token"，没有消息条数 → 不参与"均 token/次"，单独列出
+        const meta = (m) => {
+          const parts = [];
+          if (m.calls) parts.push(`对话 ${m.calls} 次 · 均 ${fmtTok(Math.round(m.chat / m.calls))}/次`);
+          if (m.report) parts.push(`报告 ${fmtTok(m.report)}`);
+          if (m.agent) parts.push(`自主研究 ${fmtTok(m.agent)}`);
+          return parts.join(' · ');
+        };
         return d.models
           .map(
             (m) => `
@@ -876,11 +817,11 @@
               </span>
             </div>
             <div class="bar-track" style="margin-top:6px">
-              <span style="width:${(m.tokens / max) * 100}%;background:${m.color}"></span>
+              ${segs(m)
+                .map((s) => `<span style="width:${(s.value / max) * 100}%;background:${s.color}"></span>`)
+                .join('')}
             </div>
-            <div class="muted" style="font-size:11px;margin-top:3px">
-              ${m.calls ? `${m.calls} 次调用 · 均 ${fmtTok(Math.round(m.tokens / m.calls))}/次` : '—'}
-            </div>
+            <div class="muted" style="font-size:11px;margin-top:3px">${meta(m)}</div>
           </div>`,
           )
           .join('');
@@ -959,10 +900,6 @@
         document.getElementById('stackChart').innerHTML = renderStack(d);
         document.getElementById('hourChart').innerHTML = renderHourly(d);
         document.getElementById('donutChart').innerHTML = renderDonut(d);
-        document.getElementById('researchStatus').innerHTML = renderResearch(d);
-        document.getElementById('researchEff').innerHTML = renderResearchEff(d);
-        document.getElementById('memoryBox').innerHTML = renderMemory(d);
-        document.getElementById('memoryCats').innerHTML = renderMemoryCats(d);
         document.getElementById('modelBox').innerHTML = renderModels(d);
         document.getElementById('topSessions').innerHTML = renderTopSessions(d);
         document.getElementById('topCited').innerHTML = renderTopCited(d);

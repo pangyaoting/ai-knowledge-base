@@ -8,6 +8,13 @@ export type StatsRange = '7' | '30' | 'all';
 const SH_MS = 8 * 3600 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
 
+/**
+ * "至今"哨兵：本期查询没有上界，而上期查询要 [prevStart, start)。
+ * 用远未来日期当上界，两期就能共用同一段 SQL（不是 NULL 参数 + CAST 技巧），
+ * 避免"两份 SQL 只有 WHERE 不同、改一处忘另一处"的口径漂移。
+ */
+const OPEN_END = new Date('2999-01-01T00:00:00.000Z');
+
 interface BucketRow {
   bucket: string;
   questions: bigint;
@@ -20,10 +27,14 @@ interface ResearchBucketRow {
   agent: bigint | null;
 }
 
+/** 模型归因行：tokens = chat + report + agent 三来源合计（calls 只统计对话回答条数） */
 interface ModelRow {
   model: string | null;
   calls: bigint;
   tokens: bigint | null;
+  chat_tokens: bigint | null;
+  report_tokens: bigint | null;
+  agent_tokens: bigint | null;
 }
 
 interface HourRow {
@@ -59,7 +70,9 @@ interface KbRow {
  * 口径：
  * - 提问数 = 该用户的 user 消息数；对话 token = assistant 消息记录的流式 usage 汇总；
  * - 研究 token = reports.tokensUsed + agent_tasks.tokensUsed；
- * - 模型归因只统计「记录模型名之后」的回答（历史为 NULL → 不计入，不做"未记录"桶）；
+ * - 模型归因 = 对话回答 + 研究报告 + 自主研究三来源按模型名合并（只统计记录了模型名的行，
+ *   历史为 NULL → 不计入，不做"未记录"桶）；其中 calls 只统计对话回答条数
+ *   （研究任务是"整任务累计 token"，没有消息条数，混进去会让"均 token/次"失真）；
  * - 所有日期/小时分桶统一按 Asia/Shanghai。
  */
 @Injectable()
@@ -74,8 +87,8 @@ export class StatsService {
     const buckets = this.buckets(range);
     const bucketFmt = granularity === 'month' ? 'YYYY-MM' : 'YYYY-MM-DD';
 
-    // 注：summary / userMemories / chatMessage.model 为较新的列与模型，
-    // 本地 prisma client 未重生成时类型缺失 → 用 any 兼容（CI/部署端 generate 后真实存在）
+    // 注：userMemories 为较新的模型，本地 prisma client 未重生成时类型缺失
+    // → 用 any 兼容（CI/部署端 generate 后真实存在）
     const prismaAny = this.prisma as any;
 
     const [
@@ -84,8 +97,6 @@ export class StatsService {
       chunkCount,
       sessionCount,
       memoryCount,
-      memoryRows,
-      summarySessions,
       docStatusRows,
       rows,
       researchRows,
@@ -95,8 +106,6 @@ export class StatsService {
       sessionRows,
       citedRows,
       kbRows,
-      reportRows,
-      agentRows,
       periodChatTokens,
       prevChatTokens,
       periodReportTokens,
@@ -113,14 +122,6 @@ export class StatsService {
       this.prisma.chunk.count({ where: { document: { knowledgeBase: { ownerId: userId } } } }),
       this.prisma.chatSession.count({ where: { ownerId: userId } }),
       prismaAny.userMemory.count({ where: { ownerId: userId } }),
-      prismaAny.userMemory.groupBy({
-        by: ['category'],
-        where: { ownerId: userId },
-        _count: { _all: true },
-      }) as Promise<Array<{ category: string; _count: { _all: number } }>>,
-      prismaAny.chatSession.count({
-        where: { ownerId: userId, summary: { not: null } },
-      }) as Promise<number>,
       this.prisma.document.groupBy({
         by: ['status'],
         where: { knowledgeBase: { ownerId: userId } },
@@ -129,31 +130,11 @@ export class StatsService {
       this.messageBuckets(userId, prevStart ?? start, bucketFmt),
       this.researchBuckets(userId, prevStart ?? start, bucketFmt),
       this.hourlyQuestions(userId, start),
-      this.modelTokens(userId, start, null),
-      prevStart ? this.modelTokens(userId, start, prevStart) : Promise.resolve([]),
+      this.modelTokens(userId, start),
+      prevStart ? this.modelTokens(userId, prevStart, start) : Promise.resolve([]),
       this.topSessions(userId, start),
       this.topCited(userId, start),
       this.kbStats(userId, start),
-      this.prisma.report.groupBy({
-        by: ['status'],
-        where: { ownerId: userId, createdAt: { gte: start } },
-        _count: { _all: true },
-        _avg: { tokensUsed: true },
-      }) as unknown as Promise<
-        Array<{ status: string; _count: { _all: number }; _avg: { tokensUsed: number | null } }>
-      >,
-      this.prisma.agentTask.groupBy({
-        by: ['status'],
-        where: { ownerId: userId, createdAt: { gte: start } },
-        _count: { _all: true },
-        _avg: { searchRounds: true, pagesRead: true },
-      }) as unknown as Promise<
-        Array<{
-          status: string;
-          _count: { _all: number };
-          _avg: { searchRounds: number | null; pagesRead: number | null };
-        }>
-      >,
       this.tokenSum(userId, start, null),
       prevStart
         ? this.tokenSum(userId, start, prevStart)
@@ -189,7 +170,8 @@ export class StatsService {
             .map((r) => Number(r.questions))
             .slice(-this.periodDays(range));
 
-    // 模型归因：本期 + 上期（算环比）；历史（model 为空）不计入
+    // 模型归因：本期 + 上期（算环比）；三来源（对话/报告/自主研究）分别汇总
+    // 历史（model 为空）不计入，不做"未记录"桶
     const prevModelMap = new Map(prevModelRows.map((r) => [r.model ?? '', Number(r.tokens ?? 0)]));
     const models = modelRows.map((r) => {
       const tokens = Number(r.tokens ?? 0);
@@ -197,6 +179,9 @@ export class StatsService {
       return {
         model: r.model ?? '未知模型',
         tokens,
+        chatTokens: Number(r.chat_tokens ?? 0),
+        reportTokens: Number(r.report_tokens ?? 0),
+        agentTokens: Number(r.agent_tokens ?? 0),
         calls: Number(r.calls),
         delta: prev > 0 ? (tokens - prev) / prev : null,
       };
@@ -209,39 +194,6 @@ export class StatsService {
       else if (r.status === 'failed') docHealth.failed += n;
       else docHealth.processing += n; // pending / processing
     }
-
-    // 研究任务状态（报告 + Agent 合并）：完成 / 进行中 / 已停止 / 失败
-    const researchStatus = { done: 0, running: 0, stopped: 0, failed: 0 };
-    for (const r of reportRows) {
-      if (r.status === 'done') researchStatus.done += r._count._all;
-      else if (r.status === 'failed') researchStatus.failed += r._count._all;
-      else if (r.status === 'cancelled') researchStatus.stopped += r._count._all;
-      else researchStatus.running += r._count._all;
-    }
-    for (const r of agentRows) {
-      if (r.status === 'done') researchStatus.done += r._count._all;
-      else if (r.status === 'failed') researchStatus.failed += r._count._all;
-      else if (r.status === 'stopped') researchStatus.stopped += r._count._all;
-      else researchStatus.running += r._count._all;
-    }
-    const agentAvgSearch =
-      agentRows.reduce((a, r) => a + (r._avg.searchRounds ?? 0) * r._count._all, 0) /
-      Math.max(
-        1,
-        agentRows.reduce((a, r) => a + r._count._all, 0),
-      );
-    const agentAvgPages =
-      agentRows.reduce((a, r) => a + (r._avg.pagesRead ?? 0) * r._count._all, 0) /
-      Math.max(
-        1,
-        agentRows.reduce((a, r) => a + r._count._all, 0),
-      );
-    const reportAvgTokens =
-      reportRows.reduce((a, r) => a + (r._avg.tokensUsed ?? 0) * r._count._all, 0) /
-      Math.max(
-        1,
-        reportRows.reduce((a, r) => a + r._count._all, 0),
-      );
 
     return {
       range,
@@ -266,7 +218,6 @@ export class StatsService {
         avgChunksPerDoc: docCount > 0 ? Number((chunkCount / docCount).toFixed(1)) : 0,
         sessions: sessionCount,
         memories: memoryCount,
-        sessionsWithSummary: summarySessions,
       },
       docHealth,
       tokens: {
@@ -298,18 +249,6 @@ export class StatsService {
         cited: Number(r.cited),
         updatedAt: r.updated_at,
       })),
-      research: {
-        status: researchStatus,
-        avgSearchRounds: Number(agentAvgSearch.toFixed(1)),
-        avgPagesRead: Number(agentAvgPages.toFixed(1)),
-        avgReportTokens: Math.round(reportAvgTokens),
-      },
-      memory: {
-        total: memoryCount,
-        byCategory: memoryRows
-          .map((r) => ({ category: r.category, count: r._count._all }))
-          .sort((a, b) => b.count - a.count),
-      },
     };
   }
 
@@ -357,30 +296,44 @@ export class StatsService {
   }
 
   /**
-   * 各模型 token 消耗（只统计记录了模型名的回答）。
-   * prevStart 非空 = 取 [prevStart, start) 区间的上期数据（算环比）。
+   * 各模型 token 消耗 = 对话回答 + 研究报告 + 自主研究，三来源按模型名合并归因。
+   * - 对话：chat_messages 逐条 usage（本条回答实际使用的模型名，图片问题走视觉路由也如实记录）
+   * - 研究报告 / 自主研究：reports / agent_tasks 的模型名快照 + tokens_used（整个任务的累计值，
+   *   故按行展开后再在区间上过滤 —— 若先按模型 SUM 再过滤，续跑追加的 token 会越过区间）
+   * - 三来源分别汇总为 chat/report/agent 三段，前端画"来源构成条"
+   * - 历史（加列前 model IS NULL）不计入，不做"未记录"桶
+   * @param to 区间上界（不含）；默认"至今"哨兵（见 OPEN_END）—— 本期/上期共用一段 SQL，避免两份 SQL 漂移
    */
-  private modelTokens(userId: string, start: Date, prevStart: Date | null): Promise<ModelRow[]> {
-    return prevStart
-      ? this.prisma.$queryRaw<ModelRow[]>`
-          SELECT m.model, COUNT(*) AS calls,
-                 SUM(COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)) AS tokens
-          FROM chat_messages m
-          JOIN chat_sessions s ON s.id = m.session_id
-          WHERE s.owner_id = ${userId} AND m.role = 'assistant' AND m.model IS NOT NULL
-            AND m.created_at >= ${prevStart} AND m.created_at < ${start}
-          GROUP BY m.model
-        `
-      : this.prisma.$queryRaw<ModelRow[]>`
-          SELECT m.model, COUNT(*) AS calls,
-                 SUM(COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0)) AS tokens
-          FROM chat_messages m
-          JOIN chat_sessions s ON s.id = m.session_id
-          WHERE s.owner_id = ${userId} AND m.role = 'assistant' AND m.model IS NOT NULL
-            AND m.created_at >= ${start}
-          GROUP BY m.model
-          ORDER BY tokens DESC
-        `;
+  private modelTokens(userId: string, from: Date, to: Date = OPEN_END): Promise<ModelRow[]> {
+    return this.prisma.$queryRaw<ModelRow[]>`
+      SELECT model,
+             SUM(calls)::bigint AS calls,
+             SUM(tokens)::bigint AS tokens,
+             SUM(chat)::bigint AS chat_tokens,
+             SUM(report)::bigint AS report_tokens,
+             SUM(agent)::bigint AS agent_tokens
+      FROM (
+        SELECT m.model,
+               1 AS calls,
+               COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0) AS tokens,
+               COALESCE(m.prompt_tokens, 0) + COALESCE(m.completion_tokens, 0) AS chat,
+               0 AS report, 0 AS agent, m.created_at
+        FROM chat_messages m
+        JOIN chat_sessions s ON s.id = m.session_id
+        WHERE s.owner_id = ${userId} AND m.role = 'assistant' AND m.model IS NOT NULL
+        UNION ALL
+        SELECT r.model, 0, r.tokens_used, 0, r.tokens_used, 0, r.created_at
+        FROM reports r
+        WHERE r.owner_id = ${userId} AND r.model IS NOT NULL
+        UNION ALL
+        SELECT a.model, 0, a.tokens_used, 0, 0, a.tokens_used, a.created_at
+        FROM agent_tasks a
+        WHERE a.owner_id = ${userId} AND a.model IS NOT NULL
+      ) t
+      WHERE t.created_at >= ${from} AND t.created_at < ${to}
+      GROUP BY model
+      ORDER BY tokens DESC
+    `;
   }
 
   /** 本期对话 token 合计与提问数（供 KPI 与环比） */

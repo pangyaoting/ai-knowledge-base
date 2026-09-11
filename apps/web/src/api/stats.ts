@@ -3,6 +3,19 @@ import request from './request';
 /** 时间范围：近 7 天 / 近 30 天 / 全部（按月分桶） */
 export type StatsRange = '7' | '30' | 'all';
 
+/** 模型归因行：tokens = 对话 + 研究报告 + 自主研究 三来源合计 */
+export interface ModelTokenRow {
+  model: string;
+  tokens: number;
+  /** 三来源拆分（画来源构成条用） */
+  chatTokens: number;
+  reportTokens: number;
+  agentTokens: number;
+  /** 对话回答条数（研究任务是整任务累计 token，没有条数，不计入这里） */
+  calls: number;
+  delta: number | null;
+}
+
 export interface OverviewData {
   range: StatsRange;
   /** 服务端生成时刻（ISO）：页脚"数据更新于" */
@@ -23,7 +36,6 @@ export interface OverviewData {
     avgChunksPerDoc: number;
     sessions: number;
     memories: number;
-    sessionsWithSummary: number;
   };
   docHealth: { done: number; processing: number; failed: number };
   tokens: { chat: number; report: number; agent: number };
@@ -39,8 +51,8 @@ export interface OverviewData {
   prevDailyQuestions: number[];
   /** 24 小时提问分布（Asia/Shanghai） */
   hourly: number[];
-  /** 各模型 token 消耗（仅统计记录了模型名的回答；历史不计入） */
-  models: Array<{ model: string; tokens: number; calls: number; delta: number | null }>;
+  /** 各模型 token 消耗：对话 + 研究报告 + 自主研究，按模型名合并归因（历史无模型名的不计入） */
+  models: ModelTokenRow[];
   topSessions: Array<{
     id: string;
     title: string;
@@ -57,13 +69,6 @@ export interface OverviewData {
     cited: number;
     updatedAt: string;
   }>;
-  research: {
-    status: { done: number; running: number; stopped: number; failed: number };
-    avgSearchRounds: number;
-    avgPagesRead: number;
-    avgReportTokens: number;
-  };
-  memory: { total: number; byCategory: Array<{ category: string; count: number }> };
 }
 
 export function getOverview(range: StatsRange = '7') {
