@@ -95,12 +95,28 @@ function syncTokenRow() {
   box.style.maxHeight = `${Math.max(120, h - headH - 12)}px`;
 }
 
+/**
+ * 取（必要时重建）图表实例。
+ * 关键：容器可能被 v-if 重建（首次加载/骨架屏切换/组件重挂），
+ * 旧实例仍挂在**已卸载的 DOM** 上 → 直接 setOption 会渲染到不存在的地方，表现为整卡空白。
+ * 所以这里校验实例的容器是否仍是当前节点且在文档里，不满足就销毁重建。
+ */
+function chart(key: ChartKey, el: HTMLElement | null): ECharts | null {
+  if (!el) return null;
+  const cached = instances[key];
+  if (cached && cached.getDom() === el && cached.getDom().isConnected) return cached;
+  cached?.dispose();
+  const inst = echarts.init(el);
+  instances[key] = inst;
+  return inst;
+}
+
 function renderCharts() {
   const d = data.value;
   if (!d) return;
 
-  if (questionsChart.value) {
-    instances.questions ??= echarts.init(questionsChart.value);
+  const qInst = chart('questions', questionsChart.value);
+  if (qInst) {
     const prev = d.prevDailyQuestions;
     const series: Array<Record<string, unknown>> = [
       {
@@ -124,7 +140,7 @@ function renderCharts() {
         data: prev,
       });
     }
-    instances.questions.setOption({
+    qInst.setOption({
       tooltip: { trigger: 'axis' },
       legend: { top: 0, right: 0, itemWidth: 12, itemHeight: 8, textStyle: { fontSize: 11 } },
       grid: { left: 40, right: 12, top: 28, bottom: 26 },
@@ -132,11 +148,12 @@ function renderCharts() {
       yAxis: { type: 'value', minInterval: 1 },
       series,
     });
+    qInst.resize();
   }
 
-  if (stackChart.value) {
-    instances.stack ??= echarts.init(stackChart.value);
-    instances.stack.setOption({
+  const sInst = chart('stack', stackChart.value);
+  if (sInst) {
+    sInst.setOption({
       tooltip: { trigger: 'axis' },
       grid: { left: 46, right: 12, top: 12, bottom: 24 },
       xAxis: { type: 'category', data: d.daily.map((x) => x.key) },
@@ -168,11 +185,12 @@ function renderCharts() {
         },
       ],
     });
+    sInst.resize();
   }
 
-  if (hourlyChart.value) {
-    instances.hourly ??= echarts.init(hourlyChart.value);
-    instances.hourly.setOption({
+  const hInst = chart('hourly', hourlyChart.value);
+  if (hInst) {
+    hInst.setOption({
       tooltip: {
         trigger: 'axis',
         formatter: (p: Array<{ name: string; value: number }>) =>
@@ -195,11 +213,12 @@ function renderCharts() {
         },
       ],
     });
+    hInst.resize();
   }
 
-  if (donutChart.value) {
-    instances.donut ??= echarts.init(donutChart.value);
-    instances.donut.setOption({
+  const dInst = chart('donut', donutChart.value);
+  if (dInst) {
+    dInst.setOption({
       tooltip: {
         trigger: 'item',
         formatter: (p: { name: string; value: number; percent: number }) =>
@@ -221,6 +240,7 @@ function renderCharts() {
         },
       ],
     });
+    dInst.resize();
   }
 }
 
@@ -418,15 +438,17 @@ function goSessions(sessionId?: string) {
       </div>
     </div>
     <p v-if="updatedAt" class="-mt-4 mb-4 text-right text-[11px] text-muted-foreground">
-      数据更新于 {{ updatedAt }}
+      数据更新于 {{ updatedAt }}{{ loading ? ' · 更新中…' : '' }}
     </p>
 
-    <div v-if="loading" class="py-4">
+    <!-- 骨架屏只在首屏没有数据时显示：切范围/刷新时保留现有 DOM，
+         否则图表容器被销毁重建，ECharts 实例会渲染到已卸载的节点上（整卡空白） -->
+    <div v-if="loading && !data" class="py-4">
       <DashboardSkeleton />
     </div>
 
     <p
-      v-else-if="error"
+      v-else-if="error && !data"
       class="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
     >
       {{ error }}
