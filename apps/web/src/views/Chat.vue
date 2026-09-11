@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineOptions({ name: 'ChatView' });
 import { ref, computed, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue';
+import { useRoute } from 'vue-router';
 import {
   Menu,
   BookOpen,
@@ -177,6 +178,7 @@ const loadingSessions = ref(false);
 const useWebSearch = ref(localStorage.getItem('kb-use-web-search') === '1');
 watch(useWebSearch, (v) => localStorage.setItem('kb-use-web-search', v ? '1' : '0'));
 const sidebarOpen = ref(false); // 移动端：会话列表抽屉开关
+const route = useRoute();
 const sidebarCollapsed = ref(false); // 桌面端：会话列表侧边栏收起/展开
 const sessionSearch = ref(''); // 会话搜索关键词（标题/消息内容全文检索）
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -806,9 +808,15 @@ onActivated(async () => {
 });
 
 // 初始化：加载会话，没有就新建
+// 支持 ?session=<id> 深链（数据看板"最烧 Token 的会话"点击直达该会话）
 onMounted(async () => {
   loadModelConfigs();
   await loadSessions();
+  const deepLink = typeof route.query.session === 'string' ? route.query.session : '';
+  if (deepLink && sessions.value.some((s) => s.id === deepLink)) {
+    await selectSession(deepLink);
+    return;
+  }
   const saved = sessionStorage.getItem('chat-active-session');
   if (saved && sessions.value.some((s) => s.id === saved)) {
     await selectSession(saved);

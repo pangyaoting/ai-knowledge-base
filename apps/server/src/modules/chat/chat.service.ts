@@ -872,11 +872,14 @@ export class ChatService {
     const sourcesJson = JSON.parse(
       sanitizeControlChars(JSON.stringify({ kb: kbSources, web: webSources })),
     );
-    await this.prisma.chatMessage.create({
+    // 注：model 为新加列，本地 prisma client 未重生成 → any 兼容（CI/部署端 generate 后真实存在）
+    await (this.prisma.chatMessage as any).create({
       data: {
         sessionId,
         role: 'assistant',
         content: sanitizeControlChars(answer),
+        // 本条实际使用的模型名（图片问题会走视觉路由，所以取 target.model 而非会话绑定）
+        model: target.model,
         // JSON.parse(JSON.stringify()) 转成纯 JSON，兼容各版本 Prisma 客户端类型
         sources: sourcesJson,
         promptTokens: usage?.prompt_tokens ?? null,

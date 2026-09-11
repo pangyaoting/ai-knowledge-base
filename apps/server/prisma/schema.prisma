@@ -236,6 +236,7 @@ model ChatMessage {
   sessionId        String   @map("session_id")
   role             String // user / assistant
   content          String // 完整消息内容
+  model            String? // 本条回答实际使用的模型名（数据看板按模型归因 token；加列前历史为空 → 不计入）
   imageDataUrl     String?  @map("image_data_url") // 图片（data URL，用户消息；单图/兼容旧数据）
   imageDataUrls    String?  @map("image_data_urls") // 多图（JSON 数组字符串，用户消息）
   sources          Json? // 引用来源：[{ documentId, filename, chunkIndex, content, similarity }]
@@ -246,6 +247,7 @@ model ChatMessage {
   session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
+  @@index([model])
   @@map("chat_messages")
 }
 

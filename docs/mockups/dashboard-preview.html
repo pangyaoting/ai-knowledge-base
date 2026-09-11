@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>数据看板 · 设计预览（模拟数据）</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --border: #e5e7eb;
+        --text: #0f172a;
+        --muted: #6b7280;
+        --muted-2: #9ca3af;
+        --primary: #2563eb;
+        --green: #16a34a;
+        --red: #dc2626;
+        --amber: #d97706;
+        --c-chat: #3b82f6;
+        --c-report: #8b5cf6;
+        --c-agent: #14b8a6;
+        --c-model-1: #2563eb;
+        --c-model-2: #14b8a6;
+        --c-model-3: #f59e0b;
+        --c-model-4: #a855f7;
+        --c-unknown: #cbd5e1;
+        --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+      }
+      body.dark {
+        --bg: #0b1120;
+        --card: #111827;
+        --border: #1f2937;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --muted-2: #6b7280;
+        --c-unknown: #374151;
+        --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          14px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      .wrap {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px 20px 56px;
+      }
+      .mock-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        background: rgba(245, 158, 11, 0.12);
+        color: var(--amber);
+        padding: 3px 10px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      h1 {
+        margin: 10px 0 4px;
+        font-size: 24px;
+        letter-spacing: -0.01em;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0;
+      }
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .topbar .grow {
+        flex: 1;
+        min-width: 240px;
+      }
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--border);
+        background: var(--card);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .seg button {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .seg button.on {
+        background: var(--primary);
+        color: #fff;
+        font-weight: 600;
+      }
+      .btn {
+        border: 1px solid var(--border);
+        background: var(--card);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        box-shadow: var(--shadow);
+      }
+      .stamp {
+        color: var(--muted-2);
+        font-size: 11px;
+        margin-top: 6px;
+        text-align: right;
+      }
+      section {
+        margin-top: 18px;
+      }
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+      .k4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+      .k2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .k3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+      .card h3 {
+        margin: 0 0 2px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .card .hint {
+        color: var(--muted-2);
+        font-size: 11px;
+      }
+      .kpi-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .kpi-value {
+        margin-top: 8px;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .delta {
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 1px 7px;
+      }
+      .delta.up {
+        color: var(--green);
+        background: rgba(22, 163, 74, 0.1);
+      }
+      .delta.down {
+        color: var(--red);
+        background: rgba(220, 38, 38, 0.1);
+      }
+      .delta.warn {
+        color: var(--amber);
+        background: rgba(217, 119, 6, 0.12);
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .bar-track {
+        height: 8px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--border) 70%, transparent);
+        overflow: hidden;
+        display: flex;
+      }
+      .bar-track span {
+        display: block;
+        height: 100%;
+      }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .legend i {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        margin-right: 6px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 9px 6px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      th {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      td.num,
+      th.num {
+        text-align: right;
+      }
+      tbody tr:hover {
+        background: color-mix(in srgb, var(--primary) 5%, transparent);
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+      }
+      .split {
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: 14px;
+      }
+      .mini {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .mini .card {
+        padding: 12px 14px;
+      }
+      .mini .v {
+        font-size: 19px;
+        font-weight: 700;
+        margin-top: 4px;
+      }
+      .note {
+        margin-top: 10px;
+        border-left: 3px solid var(--primary);
+        background: color-mix(in srgb, var(--primary) 6%, transparent);
+        border-radius: 6px;
+        padding: 8px 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .empty-note {
+        color: var(--muted-2);
+        font-size: 12px;
+      }
+      svg {
+        display: block;
+        width: 100%;
+        overflow: visible;
+      }
+      .axis {
+        fill: var(--muted-2);
+        font-size: 10px;
+      }
+      .gridline {
+        stroke: var(--border);
+        stroke-width: 1;
+      }
+      .hover-title {
+        cursor: default;
+      }
+      @media (max-width: 1020px) {
+        .k4 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .k3 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 680px) {
+        .k4,
+        .k2,
+        .k3,
+        .mini {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="mock-badge">⚡ 静态预览 · 模拟数据（未接后端）</div>
+      <div class="topbar">
+        <div class="grow">
+          <h1>数据看板</h1>
+          <p class="sub">
+            知识库规模 · 对话活跃度 · 各模型 Token 消耗 · 研究任务效率（流式 usage 记录）
+          </p>
+          <div class="stamp" id="stamp"></div>
+        </div>
+        <div class="controls">
+          <div class="seg" id="rangeSeg">
+            <button data-range="7" class="on">近 7 天</button>
+            <button data-range="30">近 30 天</button>
+            <button data-range="all">全部</button>
+          </div>
+          <button class="btn" id="refreshBtn">↻ 刷新</button>
+          <button class="btn" id="themeBtn">🌙</button>
+        </div>
+      </div>
+
+      <!-- ① 环比 KPI -->
+      <section class="grid k4" id="kpiRow"></section>
+
+      <!-- ② Token 消耗（左：各模型拆分 · 右：构成在上、趋势在下；左卡高度锁定齐右列，模型多则内部滚动） -->
+      <section class="split" style="align-items: start">
+        <div class="card" id="modelCard" style="display: flex; flex-direction: column; min-height: 0">
+          <h3>各模型 Token 消耗</h3>
+          <p class="hint">
+            按模型归因（BYO Key：这里就是你的账单结构）· 含调用次数与环比 ·
+            仅统计记录模型名之后的对话
+          </p>
+          <div id="modelBox" style="margin-top: 14px; flex: 1; min-height: 0"></div>
+        </div>
+        <div id="tokenRight" style="display: grid; gap: 14px; align-content: start">
+          <div class="card">
+            <h3>Token 构成</h3>
+            <p class="hint">对话 / 研究报告 / 自主研究（免费模型的 token 同样计入）</p>
+            <div id="donutChart" style="margin-top: 10px"></div>
+          </div>
+          <div class="card">
+            <h3>Token 消耗趋势</h3>
+            <p class="hint">堆叠：对话 / 报告 / 自主研究 · 随顶部范围联动</p>
+            <div class="legend" style="margin-top: 6px">
+              <span><i style="background: var(--c-chat)"></i>对话</span>
+              <span><i style="background: var(--c-report)"></i>报告</span>
+              <span><i style="background: var(--c-agent)"></i>Agent</span>
+            </div>
+            <div id="stackChart" style="margin-top: 8px"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ③ 资产与健康 -->
+      <section class="grid k2">
+        <div class="card">
+          <h3>资产规模</h3>
+          <p class="hint">知识库 / 文档 / 切块 / 跨会话记忆</p>
+          <div class="mini" style="margin-top: 12px" id="assetsBox"></div>
+        </div>
+        <div class="card">
+          <h3>文档处理健康度</h3>
+          <p class="hint">失败文档可直接点进知识库重传（唯一能“去处理”的指标）</p>
+          <div style="margin-top: 14px" id="docHealth"></div>
+        </div>
+      </section>
+
+      <!-- ④ 活跃度趋势（两图一行，宽度充足） -->
+      <section class="grid k2">
+        <div class="card">
+          <h3>提问数趋势</h3>
+          <p class="hint">实线 = 本期 · 虚线 = 上一等长周期（对比变化）</p>
+          <div id="lineChart" style="margin-top: 10px"></div>
+        </div>
+        <div class="card">
+          <h3>提问时段分布</h3>
+          <p class="hint">24 小时（Asia/Shanghai）· 一眼看出使用习惯</p>
+          <div id="hourChart" style="margin-top: 10px"></div>
+        </div>
+      </section>
+
+      <!-- ⑤ 研究与记忆 -->
+      <section class="grid k2">
+        <div class="card">
+          <h3>研究任务</h3>
+          <p class="hint">状态分布（失败/停止不再被藏起来）</p>
+          <div style="margin-top: 14px" id="researchStatus"></div>
+          <div class="mini" style="margin-top: 14px" id="researchEff"></div>
+        </div>
+        <div class="card">
+          <h3>记忆系统</h3>
+          <p class="hint">模块 A 滚动摘要 + 模块 B 跨会话事实记忆</p>
+          <div class="mini" style="margin-top: 14px" id="memoryBox"></div>
+          <div style="margin-top: 14px" id="memoryCats"></div>
+        </div>
+      </section>
+
+      <!-- ⑥ 归因明细（会话 / 资料） -->
+      <section class="grid k2">
+        <div class="card">
+          <h3>最烧 Token 的会话 Top5</h3>
+          <p class="hint">成本归因 · 点击可进入该会话</p>
+          <div style="margin-top: 10px" id="topSessions"></div>
+        </div>
+        <div class="card">
+          <h3>被引用最多的资料 Top5</h3>
+          <p class="hint">从回答的引用来源聚合 —— “哪些文档真正进了回答”</p>
+          <div style="margin-top: 10px" id="topCited"></div>
+        </div>
+      </section>
+
+      <!-- ⑦ 最近活跃的知识库 -->
+      <section>
+        <div class="card">
+          <h3>最近活跃的知识库</h3>
+          <p class="hint">文档数 / 切块数 / 本期被问次数 / 最近更新</p>
+          <div style="margin-top: 10px" id="topKbs"></div>
+        </div>
+      </section>
+
+      <div class="note">
+        本页为<b>设计预览</b>：数据为模拟值，用于确认布局与信息层级。真实实现时——时间范围会驱动后端
+        <code>GET /stats/overview?range=7|30|all</code>，图表用 ECharts 渲染，用量统计来自
+        <code>include_usage</code> 记录的真实 token。
+      </div>
+    </div>
+
+    <script>
+      // ========== 模拟数据（固定种子，切范围数值跟着变，便于看布局） ==========
+      function series(n, base, amp, seed) {
+        let s = seed;
+        const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+        return Array.from({ length: n }, (_, i) => {
+          const wave = Math.sin((i / n) * Math.PI * 2) * amp;
+          return Math.max(0, Math.round(base + wave + (rnd() - 0.5) * amp * 0.9));
+        });
+      }
+      function labelsFor(range) {
+        const out = [];
+        const now = new Date();
+        if (range === 'all') {
+          for (let i = 5; i >= 0; i--) {
+            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+            out.push(`${d.getMonth() + 1}月`);
+          }
+          return out;
+        }
+        const n = Number(range);
+        for (let i = n - 1; i >= 0; i--) {
+          const d = new Date(now);
+          d.setDate(d.getDate() - i);
+          out.push(`${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+        }
+        return out;
+      }
+
+      const RANGE_META = {
+        7: { n: 7, kpiLabel: '近 7 日', seedQ: 21, seedT: 77 },
+        30: { n: 30, kpiLabel: '近 30 日', seedQ: 55, seedT: 133 },
+        all: { n: 6, kpiLabel: '全部（按月）', seedQ: 91, seedT: 177 },
+      };
+
+      function buildData(range) {
+        const meta = RANGE_META[range];
+        const n = meta.n;
+        const labels = labelsFor(range);
+        const scale = range === 7 ? 1 : range === 30 ? 1.6 : 5.2;
+        const questions = series(n, 11 * scale, 5 * scale, meta.seedQ);
+        const prevQuestions = questions.map((v, i) => Math.max(0, Math.round(v * (0.72 + ((i * 7) % 5) / 20))));
+        const chat = series(n, 620000 * scale, 260000 * scale, meta.seedT);
+        const report = series(n, 110000 * scale, 120000 * scale, meta.seedT + 3).map((v, i) =>
+          i % 3 === 0 ? Math.round(v * 0.4) : v,
+        );
+        const agent = series(n, 90000 * scale, 140000 * scale, meta.seedT + 9).map((v, i) =>
+          i % 4 === 0 ? 0 : v,
+        );
+        const hourly = [
+          1, 0, 0, 0, 0, 0, 2, 6, 14, 26, 31, 18, 12, 9, 21, 34, 41, 28, 19, 24, 33, 27, 12, 4,
+        ];
+        const chatTokens = chat.reduce((a, b) => a + b, 0);
+        const reportTokens = report.reduce((a, b) => a + b, 0);
+        const agentTokens = agent.reduce((a, b) => a + b, 0);
+        const qSum = questions.reduce((a, b) => a + b, 0);
+        const prevQSum = prevQuestions.reduce((a, b) => a + b, 0);
+        const tp = chatTokens * 0.62;
+        const tc = chatTokens * 0.38;
+        const prevTotal = chatTokens * 0.76 + reportTokens * 0.9 + agentTokens * 1.1;
+
+        // 注：向量化（bge-m3 / 硅基流动）走系统 key 且不记 usage → 不进"你的模型账单"；
+        // 历史对话（加列前）不记模型名 → 直接不计入，不做"未记录"灰桶
+        const models = [
+          { name: 'deepseek-v4-flash', tokens: Math.round(chatTokens * 0.7), calls: 412, delta: 0.24, color: 'var(--c-model-1)' },
+          { name: 'agnes-2.5-flash', tokens: Math.round(chatTokens * 0.22), calls: 96, delta: 1.4, color: 'var(--c-model-2)' },
+          { name: 'deepseek-v4-flash-vision-exp', tokens: Math.round(chatTokens * 0.08), calls: 23, delta: -0.12, color: 'var(--c-model-3)' },
+          // 演示"模型多 → 左卡内部滚动"：下面这些可按需删除
+          { name: 'deepseek-reasoner', tokens: Math.round(chatTokens * 0.04), calls: 12, delta: 0.6, color: 'var(--c-model-4)' },
+          { name: 'Qwen/Qwen3-VL-32B', tokens: Math.round(chatTokens * 0.02), calls: 6, delta: 0, color: 'var(--c-agent)' },
+          { name: 'kimi-k2-thinking', tokens: Math.round(chatTokens * 0.015), calls: 4, delta: -0.3, color: 'var(--c-report)' },
+        ];
+
+        return {
+          range,
+          labels,
+          kpi: {
+            today: questions[n - 1],
+            todayDelta: 0.2,
+            qSum,
+            qDelta: (qSum - prevQSum) / Math.max(1, prevQSum),
+            tokens: chatTokens + reportTokens + agentTokens,
+            tDelta: ((chatTokens + reportTokens + agentTokens) - prevTotal) / prevTotal,
+            failedDocs: 2,
+          },
+          assets: { kbs: 3, docs: 668, chunks: 12436, avgChunks: 18.6, memories: 47, sessions: 19 },
+          docHealth: { done: 666, processing: 0, failed: 2 },
+          questions,
+          prevQuestions,
+          tokens: { chat, report, agent },
+          hourly,
+          donut: [
+            { name: '对话', value: chatTokens, color: 'var(--c-chat)' },
+            { name: '研究报告', value: reportTokens, color: 'var(--c-report)' },
+            { name: '自主研究', value: agentTokens, color: 'var(--c-agent)' },
+          ],
+          research: {
+            status: { done: 5, failed: 1, stopped: 2, running: 1 },
+            avgSearchRounds: 8.2,
+            avgPages: 14.5,
+            avgReportTokens: 18000,
+          },
+          memory: {
+            sessionsWithSummary: 4,
+            total: 47,
+            cats: [
+              { name: '背景 background', value: 15, color: 'var(--c-chat)' },
+              { name: '偏好 preference', value: 12, color: 'var(--c-agent)' },
+              { name: '目标 goal', value: 8, color: 'var(--c-report)' },
+              { name: '其他 general', value: 12, color: 'var(--c-model-3)' },
+            ],
+          },
+          models,
+          topSessions: [
+            { title: '主项目代码解析：HomeCosmos.vue', tokens: 486000, model: 'deepseek-v4-flash', msgs: 42 },
+            { title: '记忆模块设计讨论', tokens: 312000, model: 'deepseek-v4-flash', msgs: 31 },
+            { title: 'RAG 检索质量排查', tokens: 268000, model: 'agnes-2.5-flash', msgs: 24 },
+            { title: '简历项目问答演练', tokens: 154000, model: 'deepseek-v4-flash', msgs: 18 },
+            { title: '（未记录模型的旧会话）', tokens: 121000, model: '历史未记录', msgs: 12 },
+          ],
+          topCited: [
+            { name: 'chat.service.ts', kb: '路线1', hits: 38 },
+            { name: 'memory-summary.service.ts', kb: '路线1', hits: 21 },
+            { name: 'HomeCosmos.vue', kb: '路线1', hits: 17 },
+            { name: 'rag.service.ts', kb: '路线1', hits: 12 },
+            { name: 'README.md', kb: '路线1', hits: 9 },
+          ],
+          topKbs: [
+            { name: '路线1', docs: 668, chunks: 12018, asked: 84, updated: '12 分钟前' },
+            { name: '面试八股', docs: 42, chunks: 386, asked: 21, updated: '昨天' },
+            { name: '前端工程化', docs: 12, chunks: 32, asked: 5, updated: '3 天前' },
+          ],
+        };
+      }
+
+      // ========== 渲染工具 ==========
+      const fmtTok = (n) =>
+        n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
+      const pct = (x) => (x >= 0 ? '+' : '') + (x * 100).toFixed(x < 0.1 ? 1 : 0) + '%';
+      const el = (html) => {
+        const t = document.createElement('template');
+        t.innerHTML = html.trim();
+        return t.content.firstElementChild;
+      };
+      const deltaPill = (v, suffix = '') => {
+        const cls = v > 0.005 ? 'up' : v < -0.005 ? 'down' : '';
+        const arrow = v > 0.005 ? '↑' : v < -0.005 ? '↓' : '·';
+        return `<span class="delta ${cls}">${arrow}${pct(Math.abs(v))}${suffix}</span>`;
+      };
+
+      function renderKpi(d) {
+        const rows = [
+          {
+            label: `${RANGE_META[d.range].kpiLabel} Token 总消耗`,
+            value: fmtTok(d.kpi.tokens),
+            delta: d.kpi.tDelta,
+            hint: '对话 + 研究报告 + 自主研究 · 较上一周期',
+            hero: true,
+          },
+          { label: '今日提问', value: d.kpi.today, delta: d.kpi.todayDelta, hint: '较昨日' },
+          {
+            label: `${RANGE_META[d.range].kpiLabel}提问`,
+            value: d.kpi.qSum,
+            delta: d.kpi.qDelta,
+            hint: '较上一周期',
+          },
+          {
+            label: '文档处理失败',
+            value: d.docHealth.failed,
+            warn: d.docHealth.failed > 0,
+            hint: d.docHealth.failed > 0 ? '点进知识库重传' : '全部正常',
+          },
+        ];
+        return rows
+          .map(
+            (r) => `<div class="card"${r.hero ? ' style="border-color:color-mix(in srgb, var(--primary) 45%, var(--border))"' : ''}>
+              <div class="kpi-label">${r.label}</div>
+              <div class="row"><span class="kpi-value">${r.value}</span>
+              ${r.warn ? '<span class="delta warn">⚠ 需处理</span>' : r.delta !== undefined ? deltaPill(r.delta) : ''}</div>
+              <div class="muted" style="margin-top:4px">${r.hint}</div>
+            </div>`,
+          )
+          .join('');
+      }
+
+      function renderAssets(d) {
+        const a = d.assets;
+        const items = [
+          { k: '知识库', v: a.kbs },
+          { k: '文档', v: a.docs },
+          { k: '文本块 Chunk', v: fmtTok(a.chunks), s: `均 ${a.avgChunks}/文档` },
+          { k: '会话', v: a.sessions },
+          { k: '跨会话事实记忆', v: a.memories, s: '条' },
+        ];
+        return items
+          .map(
+            (i) => `<div class="card"><div class="muted">${i.k}</div>
+              <div class="v">${i.v}</div>${i.s ? `<div class="muted" style="font-size:11px">${i.s}</div>` : ''}</div>`,
+          )
+          .join('');
+      }
+
+      function renderDocHealth(d) {
+        const h = d.docHealth;
+        const total = Math.max(1, h.done + h.processing + h.failed);
+        const seg = [
+          { n: '已处理', v: h.done, c: 'var(--green)' },
+          { n: '处理中', v: h.processing, c: 'var(--amber)' },
+          { n: '失败', v: h.failed, c: 'var(--red)' },
+        ];
+        return `
+          <div class="bar-track" style="height:10px">
+            ${seg.map((s) => `<span style="width:${(s.v / total) * 100}%;background:${s.c}"></span>`).join('')}
+          </div>
+          <div class="legend" style="margin-top:10px">
+            ${seg.map((s) => `<span><i style="background:${s.c}"></i>${s.n} ${s.v}</span>`).join('')}
+          </div>
+          ${h.failed > 0 ? `<div class="note">有 ${h.failed} 个文档向量化失败（常见原因：embedding 限流 / 文件解析异常）→ 可在知识库页重传。</div>` : ''}`;
+      }
+
+      function renderLine(d) {
+        const w = 520,
+          h = 190,
+          pad = { l: 34, r: 8, t: 12, b: 22 };
+        const all = [...d.questions, ...d.prevQuestions];
+        const max = Math.max(...all, 1) * 1.15;
+        const n = d.questions.length;
+        const x = (i) => pad.l + (i * (w - pad.l - pad.r)) / Math.max(1, n - 1);
+        const y = (v) => h - pad.b - (v / max) * (h - pad.t - pad.b);
+        const path = (arr) => arr.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+        const area =
+          path(d.questions) +
+          ` L${x(n - 1).toFixed(1)},${(h - pad.b).toFixed(1)} L${x(0).toFixed(1)},${(h - pad.b).toFixed(1)} Z`;
+        const gridY = [0, 0.5, 1].map((f) => {
+          const v = max * f;
+          return `<line class="gridline" x1="${pad.l}" x2="${w - pad.r}" y1="${y(v)}" y2="${y(v)}"/>
+                  <text class="axis" x="4" y="${y(v) + 3}">${Math.round(v)}</text>`;
+        });
+        const labelStep = Math.ceil(n / 7);
+        const xLabels = d.labels
+          .map((l, i) =>
+            i % labelStep === 0
+              ? `<text class="axis" x="${x(i)}" y="${h - 6}" text-anchor="middle">${l}</text>`
+              : '',
+          )
+          .join('');
+        const dots = d.questions
+          .map(
+            (v, i) =>
+              `<circle class="hover-title" cx="${x(i)}" cy="${y(v)}" r="7" fill="transparent"><title>${d.labels[i]}：${v} 次提问</title></circle>
+               <circle cx="${x(i)}" cy="${y(v)}" r="2.6" fill="var(--c-chat)"/>`,
+          )
+          .join('');
+        return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="提问数趋势">
+          ${gridY}
+          <path d="${area}" fill="var(--c-chat)" opacity="0.12"/>
+          <path d="${path(d.prevQuestions)}" fill="none" stroke="var(--muted-2)" stroke-width="1.4" stroke-dasharray="4 4"/>
+          <path d="${path(d.questions)}" fill="none" stroke="var(--c-chat)" stroke-width="2.2"/>
+          ${dots}${xLabels}
+        </svg>`;
+      }
+
+      function renderStack(d) {
+        const w = 520,
+          h = 190,
+          pad = { l: 40, r: 8, t: 12, b: 22 };
+        const n = d.labels.length;
+        const totals = d.labels.map((_, i) => d.tokens.chat[i] + d.tokens.report[i] + d.tokens.agent[i]);
+        const max = Math.max(...totals, 1) * 1.12;
+        const bw = Math.min(34, (w - pad.l - pad.r) / n - 6);
+        const x = (i) => pad.l + (i * (w - pad.l - pad.r)) / Math.max(1, n) + 3;
+        const scale = (v) => (v / max) * (h - pad.t - pad.b);
+        const parts = [
+          { key: 'chat', c: 'var(--c-chat)', label: '对话' },
+          { key: 'report', c: 'var(--c-report)', label: '研究报告' },
+          { key: 'agent', c: 'var(--c-agent)', label: '自主研究' },
+        ];
+        let bars = '';
+        d.labels.forEach((lb, i) => {
+          let yBase = h - pad.b;
+          const tip = parts.map((p) => `${p.label} ${fmtTok(d.tokens[p.key][i])}`).join(' · ');
+          parts.forEach((p) => {
+            const v = d.tokens[p.key][i];
+            if (!v) return;
+            const hh = scale(v);
+            yBase -= hh;
+            bars += `<rect class="hover-title" x="${x(i)}" y="${yBase}" width="${bw}" height="${hh}" fill="${p.c}" rx="2"><title>${lb}：${tip}</title></rect>`;
+          });
+        });
+        const gridY = [0, 0.5, 1].map((f) => {
+          const v = max * f;
+          const yy = h - pad.b - scale(v);
+          return `<line class="gridline" x1="${pad.l}" x2="${w - pad.r}" y1="${yy}" y2="${yy}"/>
+                  <text class="axis" x="4" y="${yy + 3}">${fmtTok(v)}</text>`;
+        });
+        const labelStep = Math.ceil(n / 7);
+        const xLabels = d.labels
+          .map((l, i) =>
+            i % labelStep === 0
+              ? `<text class="axis" x="${x(i) + bw / 2}" y="${h - 6}" text-anchor="middle">${l}</text>`
+              : '',
+          )
+          .join('');
+        return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Token 消耗趋势">${gridY}${bars}${xLabels}</svg>`;
+      }
+
+      function renderHourly(d) {
+        const w = 520,
+          h = 170,
+          pad = { l: 26, r: 8, t: 10, b: 20 };
+        const max = Math.max(...d.hourly, 1) * 1.1;
+        const bw = (w - pad.l - pad.r) / 24 - 3;
+        let bars = '';
+        d.hourly.forEach((v, i) => {
+          const hh = (v / max) * (h - pad.t - pad.b);
+          const x = pad.l + i * ((w - pad.l - pad.r) / 24) + 1.5;
+          bars += `<rect class="hover-title" x="${x}" y="${h - pad.b - hh}" width="${bw}" height="${hh}" rx="2" fill="var(--c-chat)" opacity="${0.35 + (v / max) * 0.65}"><title>${String(i).padStart(2, '0')}:00 — ${v} 次提问</title></rect>`;
+        });
+        const ticks = [0, 6, 12, 18, 23]
+          .map((hh) => {
+            const x = pad.l + hh * ((w - pad.l - pad.r) / 24) + bw / 2;
+            return `<text class="axis" x="${x}" y="${h - 5}" text-anchor="middle">${String(hh).padStart(2, '0')}</text>`;
+          })
+          .join('');
+        return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="提问时段分布">
+          <line class="gridline" x1="${pad.l}" x2="${w - pad.r}" y1="${h - pad.b}" y2="${h - pad.b}"/>${bars}${ticks}</svg>`;
+      }
+
+      function renderDonut(d) {
+        const total = d.donut.reduce((a, b) => a + b.value, 0) || 1;
+        const r = 54,
+          c = 2 * Math.PI * r;
+        let off = 0;
+        const arcs = d.donut
+          .map((s) => {
+            const len = (s.value / total) * c;
+            const seg = `<circle r="${r}" cx="70" cy="70" fill="none" stroke="${s.color}" stroke-width="20"
+              stroke-dasharray="${len} ${c - len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"><title>${s.name}：${fmtTok(s.value)}（${((s.value / total) * 100).toFixed(0)}%）</title></circle>`;
+            off += len;
+            return seg;
+          })
+          .join('');
+        const legend = d.donut
+          .map(
+            (s) =>
+              `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0">
+                <span class="muted"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${s.color};margin-right:6px"></i>${s.name}</span>
+                <span style="font-weight:600">${fmtTok(s.value)} <span class="muted">${((s.value / total) * 100).toFixed(0)}%</span></span>
+              </div>`,
+          )
+          .join('');
+        return `<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+          <svg viewBox="0 0 140 140" style="width:150px;flex:0 0 auto">${arcs}
+            <text x="70" y="66" text-anchor="middle" style="font-size:13px;font-weight:700;fill:var(--text)">${fmtTok(total)}</text>
+            <text x="70" y="82" text-anchor="middle" style="font-size:10px;fill:var(--muted)">tokens</text>
+          </svg>
+          <div style="flex:1;min-width:180px">${legend}</div>
+        </div>`;
+      }
+
+      function renderResearch(d) {
+        const s = d.research.status;
+        const total = s.done + s.failed + s.stopped + s.running || 1;
+        const seg = [
+          { n: '完成', v: s.done, c: 'var(--green)' },
+          { n: '进行中', v: s.running, c: 'var(--c-chat)' },
+          { n: '已停止', v: s.stopped, c: 'var(--muted-2)' },
+          { n: '失败', v: s.failed, c: 'var(--red)' },
+        ];
+        return `
+          <div class="bar-track" style="height:10px">${seg.map((x) => `<span style="width:${(x.v / total) * 100}%;background:${x.c}"></span>`).join('')}</div>
+          <div class="legend" style="margin-top:10px">${seg.map((x) => `<span><i style="background:${x.c}"></i>${x.n} ${x.v}</span>`).join('')}</div>`;
+      }
+
+      function renderResearchEff(d) {
+        const r = d.research;
+        return [
+          { k: '平均搜索轮数', v: r.avgSearchRounds },
+          { k: '平均精读页面', v: r.avgPages },
+          { k: '报告均 token', v: fmtTok(r.avgReportTokens) },
+        ]
+          .map((i) => `<div class="card"><div class="muted">${i.k}</div><div class="v">${i.v}</div></div>`)
+          .join('');
+      }
+
+      function renderMemory(d) {
+        const m = d.memory;
+        return [
+          { k: '启用摘要的会话', v: m.sessionsWithSummary },
+          { k: '事实记忆', v: m.total },
+          { k: '摘要窗口', v: '3 轮' },
+        ]
+          .map((i) => `<div class="card"><div class="muted">${i.k}</div><div class="v">${i.v}</div></div>`)
+          .join('');
+      }
+
+      function renderMemoryCats(d) {
+        const total = d.memory.cats.reduce((a, b) => a + b.value, 0) || 1;
+        return `
+          <div class="bar-track" style="height:10px">
+            ${d.memory.cats.map((c) => `<span style="width:${(c.value / total) * 100}%;background:${c.color}"></span>`).join('')}
+          </div>
+          <div class="legend" style="margin-top:10px">
+            ${d.memory.cats.map((c) => `<span><i style="background:${c.color}"></i>${c.name} ${c.value}</span>`).join('')}
+          </div>`;
+      }
+
+      function renderModels(d) {
+        const max = Math.max(...d.models.map((m) => m.tokens), 1);
+        const total = d.models.reduce((a, b) => a + b.tokens, 0) || 1;
+        return d.models
+          .map(
+            (m) => `
+          <div style="margin-bottom:14px">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12px">
+              <span style="font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</span>
+              <span style="flex:0 0 auto;display:flex;align-items:center;gap:8px">
+                ${m.delta !== undefined ? deltaPill(m.delta) : ''}
+                <b>${fmtTok(m.tokens)}</b>
+                <span class="muted" style="font-size:11px">${((m.tokens / total) * 100).toFixed(0)}%</span>
+              </span>
+            </div>
+            <div class="bar-track" style="margin-top:6px">
+              <span style="width:${(m.tokens / max) * 100}%;background:${m.color}"></span>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:3px">
+              ${m.calls ? `${m.calls} 次调用 · 均 ${fmtTok(Math.round(m.tokens / m.calls))}/次` : '—'}
+            </div>
+          </div>`,
+          )
+          .join('');
+      }
+
+      function renderTopSessions(d) {
+        const max = Math.max(...d.topSessions.map((s) => s.tokens), 1);
+        return `<table><thead><tr><th>会话</th><th>模型</th><th class="num">Token</th></tr></thead><tbody>
+          ${d.topSessions
+            .map(
+              (s) => `<tr>
+                <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${s.title}<span class="muted"> · ${s.msgs} 条</span></td>
+                <td class="muted" style="font-size:12px">${s.model}</td>
+                <td class="num" style="min-width:120px">
+                  <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">
+                    <span style="flex:1;max-width:70px"><span class="bar-track" style="height:6px"><span style="width:${(s.tokens / max) * 100}%;background:var(--c-chat)"></span></span></span>
+                    <span style="font-weight:600">${fmtTok(s.tokens)}</span>
+                  </div>
+                </td></tr>`,
+            )
+            .join('')}
+        </tbody></table>`;
+      }
+
+      function renderTopCited(d) {
+        const max = Math.max(...d.topCited.map((c) => c.hits), 1);
+        return `<table><thead><tr><th>资料</th><th>知识库</th><th class="num">被引用</th></tr></thead><tbody>
+          ${d.topCited
+            .map(
+              (c) => `<tr><td>${c.name}</td><td class="muted" style="font-size:12px">${c.kb}</td>
+              <td class="num"><span style="display:inline-flex;align-items:center;gap:8px">
+                <span class="bar-track" style="height:6px;width:60px;display:inline-flex"><span style="width:${(c.hits / max) * 100}%;background:var(--c-report)"></span></span>
+                <b>${c.hits}</b></span></td></tr>`,
+            )
+            .join('')}
+        </tbody></table>`;
+      }
+
+      function renderTopKbs(d) {
+        return `<table><thead><tr><th>知识库</th><th class="num">文档</th><th class="num">Chunk</th><th class="num">本期被问</th><th>最近更新</th></tr></thead><tbody>
+          ${d.topKbs
+            .map(
+              (k) => `<tr><td><span class="dot" style="background:var(--c-chat)"></span>${k.name}</td>
+              <td class="num">${k.docs}</td><td class="num">${fmtTok(k.chunks)}</td>
+              <td class="num">${k.asked}</td><td class="muted" style="font-size:12px">${k.updated}</td></tr>`,
+            )
+            .join('')}
+        </tbody></table>`;
+      }
+
+      // ========== 装配 ==========
+      let currentRange = '7';
+
+      /**
+       * 左卡（各模型 Token 消耗）高度锁定为右列两卡之和：
+       * 模型条目少 → 卡片与右侧齐平（不高不矮）；条目多 → 卡片高度不变，列表内部滚动。
+       */
+      function syncTokenRow() {
+        const card = document.getElementById('modelCard');
+        const right = document.getElementById('tokenRight');
+        const box = document.getElementById('modelBox');
+        if (!card || !right || !box) return;
+        const h = right.offsetHeight; // 右列（构成 + 趋势）自然高度
+        card.style.height = h + 'px';
+        const headH = box.getBoundingClientRect().top - card.getBoundingClientRect().top;
+        box.style.maxHeight = Math.max(140, h - headH - 16) + 'px';
+        box.style.overflowY = 'auto';
+      }
+
+      function render(range) {
+        const d = buildData(range);
+        document.getElementById('kpiRow').innerHTML = renderKpi(d);
+        document.getElementById('assetsBox').innerHTML = renderAssets(d);
+        document.getElementById('docHealth').innerHTML = renderDocHealth(d);
+        document.getElementById('lineChart').innerHTML = renderLine(d);
+        document.getElementById('stackChart').innerHTML = renderStack(d);
+        document.getElementById('hourChart').innerHTML = renderHourly(d);
+        document.getElementById('donutChart').innerHTML = renderDonut(d);
+        document.getElementById('researchStatus').innerHTML = renderResearch(d);
+        document.getElementById('researchEff').innerHTML = renderResearchEff(d);
+        document.getElementById('memoryBox').innerHTML = renderMemory(d);
+        document.getElementById('memoryCats').innerHTML = renderMemoryCats(d);
+        document.getElementById('modelBox').innerHTML = renderModels(d);
+        document.getElementById('topSessions').innerHTML = renderTopSessions(d);
+        document.getElementById('topCited').innerHTML = renderTopCited(d);
+        document.getElementById('topKbs').innerHTML = renderTopKbs(d);
+        syncTokenRow();
+        stamp();
+      }
+
+      function stamp() {
+        const t = new Date();
+        const p = (x) => String(x).padStart(2, '0');
+        document.getElementById('stamp').textContent =
+          `数据更新于 ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}（真实实现：60s 缓存，刷新按钮穿透缓存）`;
+      }
+
+      document.getElementById('rangeSeg').addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        document.querySelectorAll('#rangeSeg button').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+        currentRange = btn.dataset.range;
+        render(currentRange);
+      });
+      document.getElementById('refreshBtn').addEventListener('click', () => render(currentRange));
+      window.addEventListener('resize', syncTokenRow);
+      document.getElementById('themeBtn').addEventListener('click', (e) => {
+        document.body.classList.toggle('dark');
+        e.target.textContent = document.body.classList.contains('dark') ? '☀️' : '🌙';
+      });
+
+      render('7');
+    </script>
+  </body>
+</html>
