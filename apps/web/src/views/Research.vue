@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button.vue';
 import Input from '@/components/ui/Input.vue';
 import DocPreviewDrawer from '@/components/DocPreviewDrawer.vue';
 import ListSkeleton from '@/components/skeletons/ListSkeleton.vue';
+import AiBadge from '@/components/common/AiBadge.vue';
 import ResearchModelPicker, {
   type SelectedModel,
 } from '@/components/research/ResearchModelPicker.vue';
@@ -346,6 +347,9 @@ function renderReportContent(content: string): string {
     (_m, n: string) =>
       `<a class="report-src-ref" data-src-num="${n}" href="javascript:void(0)">[来源${n}]</a>`,
   );
+  // NUL 是故意用作"代码块占位哨兵"的控制字符（markdown 渲染前替换、渲染后还原），
+  // 不是误写 → 显式豁免 no-control-regex（详见 docs/部署运维/42-线上问题排查实录）
+  // eslint-disable-next-line no-control-regex
   return replaced.replace(/\u0000SRCCODE(\d+)\u0000/g, (_m, i: string) => codes[Number(i)]);
 }
 
@@ -684,6 +688,10 @@ onBeforeUnmount(stopPolling);
 
           <!-- 完成：报告正文 + 来源 -->
           <div v-else-if="current.content" class="mx-auto max-w-6xl px-4 py-6">
+            <!-- 报告为 AI 生成内容 → 正文上方显式标识（生成合成内容标识办法） -->
+            <div class="mb-2 flex items-center gap-2">
+              <AiBadge label="AI 生成报告 · 请自行核实" />
+            </div>
             <div
               class="markdown-body rounded-lg border bg-card px-5 py-4"
               @click="handleReportClick"

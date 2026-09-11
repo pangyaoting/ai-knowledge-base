@@ -3,6 +3,7 @@ defineOptions({ name: 'AgentReportView' });
 
 import { computed, ref } from 'vue';
 import { ChevronRight, ExternalLink } from 'lucide-vue-next';
+import AiBadge from '@/components/common/AiBadge.vue';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import { copyText } from '@/utils/clipboard';
 import type { AgentTask } from '@/types/research-agent';
@@ -74,6 +75,11 @@ function toggleAllSections() {
 
 <template>
   <div class="mx-auto max-w-6xl px-4 py-6">
+    <!-- 研究结论为 AI 生成内容 → 报告顶部显式标识（生成合成内容标识办法） -->
+    <div class="mb-3 flex items-center gap-2">
+      <AiBadge label="AI 生成研究结论 · 请自行核实" />
+    </div>
+
     <!-- 摘要卡片（含全部展开/收起） -->
     <div
       v-if="props.task.summary"

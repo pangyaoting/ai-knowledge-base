@@ -1,8 +1,9 @@
 # 40 · ICP备案与域名上线实战（aiknowbase.cn）
 
-> 一句话：域名买好了（aiknowbase.cn，2026-09，腾讯云），实名也过了，这篇记录**从域名到 HTTPS 上线的完整链路**——
-> 为什么大陆服务器必须备案、备案每一步在腾讯云哪里点、备完怎么解析怎么上 HTTPS，
-> 以及全程的坑清单。备案通过后照这篇能把 http://IP 换成 https://aiknowbase.cn。
+> 一句话：域名买好了（aiknowbase.cn，2026-09，腾讯云），实名、注册局复核、**ICP 备案全部通过**，
+> 这篇记录**从域名到 HTTPS 上线的完整链路**——为什么大陆服务器必须备案、备案每一步在腾讯云哪里点、
+> 备完怎么解析怎么上 HTTPS、以及**上线后必须补的合规动作**（备案号展示 / 公安联网备案 / AI 生成标识 / 隐私政策）。
+> 状态：备案 ✅ 通过 → 解析 + HTTPS + 合规改造见 §五、§八、§九。
 
 ---
 
@@ -13,9 +14,10 @@
 | 09-xx | 腾讯云买域名 aiknowbase.cn（勾选自动续费 + 禁止转移锁 + 禁止更新锁） | ✅ 已付款锁定 |
 | 09-xx | 域名实名信息模板审核（身份核实，快） | ✅ 通过 |
 | 09-xx | 域名注册局复核（命名 + 实名复核，几分钟~1 天） | ✅ 状态"正常" |
-| 09-xx | **提交 ICP 备案**（本文档） | ⏳ 1~2 周 |
-| 备案通过后 | DNSPod 解析 A 记录 → 159.75.52.172 | ⏳ |
-| 解析生效后 | Let's Encrypt 免费 HTTPS（certbot） | ⏳ |
+| 09-xx | 提交 ICP 备案（本文档 §四） | ✅ 通过（粤ICP备2026135674号-1） |
+| 备案通过后 | DNSPod 解析 A 记录 → 159.75.52.172（@ 与 www） | ⏳ 见 §九① |
+| 解析生效后 | Let's Encrypt 免费 HTTPS（certbot，webroot 模式） | ⏳ 见 §九③ |
+| 上线后 30 日内 | **公安联网备案**（beian.mps.gov.cn，免费） | ⏳ 见 §八② |
 
 ---
 
@@ -29,7 +31,10 @@
 | 在哪办 | 腾讯云买域名时 | 自动 | 腾讯云控制台"网站备案" |
 | 不过的后果 | 不能解析 | 不能解析 | 域名解析到大陆 IP 会被阻断 |
 
-> 还有个"公安联网备案"（全国互联网安全管理服务平台）：个人小站一般**备案通过后 30 天内**在公安平台补一个登记即可，免费、简单，但很多个人站没做也不影响使用——本项目可做可不做，先用 ICP 备案即可。
+> **还有第四个：公安联网备案**（全国互联网安全管理服务平台 beian.mps.gov.cn）。
+> ⚠️ 勘误：本文早前写的"个人小站可做可不做"**不准确** —— 《计算机信息网络国际联网安全保护管理办法》
+> （公安部 33 号令）第 11/12 条要求，联网单位应自网络正式联通之日起 **30 日内**到所在地公安机关办理备案，
+> 个人网站同样适用。免费、线上办、几分钟填完，**上线后 30 天内务必补**（见 §八②）。
 
 ---
 
@@ -95,25 +100,33 @@
 
 ## 五、备案通过后：解析 + HTTPS
 
+### 5.0 先核对一件容易翻车的事：www 是否也在备案域名列表里
+备案时若只填了 `aiknowbase.cn` 而没填 `www.aiknowbase.cn`，**www 解析出去就是未备案域名**（会被拦）。
+到腾讯云备案控制台核对"域名列表"，缺了就办"变更备案"补上，再解析 www。
+
 ### 5.1 DNSPod 解析（腾讯云域名控制台 → 解析）
 ```
 类型  主机记录  记录值           TTL
 A     @        159.75.52.172    600
 A     www      159.75.52.172    600
 ```
+解析生效验证：`nslookup aiknowbase.cn` → 再 `curl -I http://aiknowbase.cn`（能出 301/200 即通）。
 
-### 5.2 Let's Encrypt 免费证书（服务器上跑）
-```bash
-# 先确保 nginx 有 80 的 server 块指向域名（certbot 要验证 80 端口）
-apt install -y certbot python3-certbot-nginx
-certbot --nginx -d aiknowbase.cn -d www.aiknowbase.cn
-# 自动改 nginx 配置加 443 + 自动续期（Let's Encrypt 证书 90 天，certbot 定时任务自动续）
-```
+### 5.2 nginx 换成域名 + 上 HTTPS
+仓库 `deploy/nginx.conf` 已改成**生产模板**（80 只做 ACME 校验并 301 跳 HTTPS；443 带证书、
+HSTS、`/assets` 强缓存、`/avatars` no-store、`/api` 反代含 SSE 关缓冲）。服务器上照 §九②③ 执行。
 
-### 5.3 收尾
-- 网站底部展示备案号并链接到 `https://beian.miit.gov.cn`（法规要求）
-- nginx 把 http 跳 https、/api SSE、/assets 缓存规则在 443 server 块里保持一致
-- README / 简历更新为正式域名
+要点：
+- **80 端口要永久放行**（轻量云控制台防火墙 + ufw 两处）：certbot 每 90 天续期仍走 80 校验。
+- nginx < 1.25.1 用 `listen 443 ssl http2;`，≥ 1.25.1 用 `listen 443 ssl;` + `http2 on;`。
+- `proxy_buffering off` 等 SSE 配置**必须**保留在 443 的 server 块里，否则对话不再逐字输出。
+
+### 5.3 收尾（代码侧已完成，见 §八）
+- ✅ 页脚展示备案号并链接 `beian.miit.gov.cn`（`apps/web/src/config/site.ts` + `Layout.vue`）
+- ✅ AI 生成内容显式标识（`components/common/AiBadge.vue`，挂在对话回答 / 研究报告 / 自主研究报告）
+- ✅ 隐私政策 + 用户协议页（`/privacy`、`/terms`，游客可访问，页脚有入口）
+- ⏳ 公安联网备案号（办完填 `POLICE_BEIAN` 即自动出现在页脚）
+- ⏳ README / 简历里的 `http://IP` 换成 `https://aiknowbase.cn`
 
 ---
 
@@ -128,6 +141,9 @@ certbot --nginx -d aiknowbase.cn -d www.aiknowbase.cn
 | 备案期间就解析域名 | 未备案域名指向大陆 IP 会被阻断 | **备案通过前不解析**，继续用 http://IP |
 | 忘记证书续期 | Let's Encrypt 90 天 | certbot 自动续期即可，别手动删 |
 | 忘记底部备案号 | 抽查不达标 | 备案通过后加上 |
+| 只为首次签发放行 80 | certbot 90 天后续期校验失败 → 证书过期、站点打不开 | 防火墙/安全组**永久**放行 80 |
+| www 没一起备案 | www 解析出去被拦 | 备案域名列表补 www（变更备案） |
+| 换服务器 IP 忘了变更备案 | 解析到未备案 IP → 被阻断 | 换 IP/接入商时同步办"变更备案" |
 
 ---
 
@@ -144,3 +160,70 @@ nginx (443 TLS) ── certbot 证书
     ▼
 pm2: kb-server + PostgreSQL + Redis（和 docs/39 完全一致，只多了一层域名和 TLS）
 ```
+
+---
+
+## 八、合规清单（备案通过后必须补的，别只做技术上线）
+
+域名能访问 ≠ 合规。以下 6 条逐项对照，**前 4 条是法规硬要求**：
+
+| # | 要求 | 依据 | 落实 |
+|---|---|---|---|
+| ① | **主页底部中央标明备案编号，并链接工信部备案系统** | 《非经营性互联网信息服务备案管理办法》第 13 条 | ✅ 页脚已展示 `粤ICP备2026135674号-1` 并链接 beian.miit.gov.cn（`apps/web/src/config/site.ts`，改号只动这一处） |
+| ② | **公安联网备案**（上线后 30 日内） | 公安部 33 号令第 11/12 条 | ⏳ 到 beian.mps.gov.cn 登记 → 拿到编号填 `POLICE_BEIAN`，页脚自动出现 |
+| ③ | **AI 生成内容显式标识** | 《人工智能生成合成内容标识办法》（**2025-09-01 施行**） | ✅ `AiBadge.vue` 挂在三处生成内容：对话回答（含流式中）、研究报告正文上方、自主研究结论顶部；页脚另有站级提示 |
+| ④ | **个人信息处理告知同意** | 《个人信息保护法》 | ✅ 新增 `/privacy` + `/terms`（游客可访问，页脚入口）；注册收集邮箱、上传文档、BYO Key 存储等逐项披露，含"内容会发给哪些第三方"表 |
+| ⑤ | 非经营性 | 个人备案不得从事经营性活动 | ✅ 无广告、无收费、无商城；页脚与协议均标注"个人非经营性学习项目" |
+| ⑥ | 内容自查 | 互联网信息服务相关法规 | ⏳ 保持抽查习惯；用户协议已列禁止行为（违法内容、涉密、攻击、绕过限流） |
+
+### 关于第三方披露（隐私政策里那张表不是凑数，是代码事实）
+- 文档**向量化**走**系统 Key 的硅基流动** → 文档文本片段会离开本站服务器，必须披露；
+- 检索**重排**同样发给硅基流动（问题 + 命中片段）；
+- **生成回答/报告**发给**用户自己配置的模型服务商**（BYO Key，用用户自己的账号与费用）；
+- 联网检索关键词发给 Tavily；邮箱验证码走 SMTP 服务商。
+> 教程类项目最容易在这里踩坑：只写"我们重视你的隐私"，却不说文档片段会发给第三方 —— 那属于**告知不实**。
+
+### 边界：生成式 AI 备案（个人办不了，要说清）
+面向公众提供生成式 AI 服务，《生成式人工智能服务管理暂行办法》第 17 条对"具有舆论属性或社会动员能力"的服务
+有安全评估 + 算法备案要求，而**算法备案/大模型备案的主体必须是企业**，个人无法办理。
+本项目的安全姿态：**个人非经营性学习项目 + BYO Key（用户自己的账号与额度）+ 不面向不特定公众提供服务**，
+并在显式标识、协议、隐私政策里如实说明。若要真正对外公开运营，需要企业主体另行备案 —— 这条不能靠"没人查"侥幸。
+
+---
+
+## 九、备案通过后的操作清单（照着做）
+
+```bash
+# ① 核对 www 已备案 → DNSPod 加两条 A 记录（@ 与 www → 159.75.52.172），然后
+nslookup aiknowbase.cn
+
+# ② 换 nginx 配置（模板已含域名/HTTPS/HSTS/SSE）
+sudo cp /opt/kb/ai-knowledge-base/deploy/nginx.conf /etc/nginx/sites-available/kb
+sudo ln -sf /etc/nginx/sites-available/kb /etc/nginx/sites-enabled/kb
+sudo nginx -t && sudo systemctl reload nginx
+curl -I http://aiknowbase.cn            # 期望 301（跳 https）
+
+# ③ 申请证书（webroot 模式：不用停 nginx，续期也走这条）
+sudo apt install -y certbot
+sudo mkdir -p /var/www/certbot
+sudo certbot certonly --webroot -w /var/www/certbot \
+     -d aiknowbase.cn -d www.aiknowbase.cn --email 你的邮箱 --agree-tos
+sudo nginx -t && sudo systemctl reload nginx
+curl -I https://aiknowbase.cn           # 期望 200
+sudo certbot renew --dry-run            # 确认自动续期链路可用
+
+# ④ 放行端口（轻量云控制台"防火墙" + 系统防火墙，80/443 都要**永久**放行）
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+
+# ⑤ 上线后自检
+#    · 对话页回答是否逐字流式（SSE 没被缓冲）
+#    · 换头像是否立刻生效（/avatars no-store）
+#    · 页脚是否出现备案号、点击跳到 beian.miit.gov.cn
+#    · 手机浏览器打开是否"锁头"正常、无混合内容告警
+
+# ⑥ 30 日内：beian.mps.gov.cn 办公安联网备案 → 编号填进 apps/web/src/config/site.ts 的 POLICE_BEIAN
+```
+
+> ⚠️ 上线前记得改 `apps/web/src/config/site.ts` 里的 `CONTACT_EMAIL` —— 现在写的是占位
+> `contact@aiknowbase.cn`，法条要求提供**有效**联系方式，留一个不收信的邮箱等于没提供（建议用备案填的邮箱）。
+

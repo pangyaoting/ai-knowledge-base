@@ -71,6 +71,19 @@ const router = createRouter({
           name: 'model-configs',
           component: () => import('@/views/ModelConfigs.vue'),
         },
+        {
+          // 合规页：未登录也必须能看（注册前就要能读到隐私政策）
+          path: 'privacy',
+          name: 'privacy',
+          component: () => import('@/views/Privacy.vue'),
+          meta: { public: true },
+        },
+        {
+          path: 'terms',
+          name: 'terms',
+          component: () => import('@/views/Terms.vue'),
+          meta: { public: true },
+        },
       ],
     },
     {
@@ -84,11 +97,14 @@ const router = createRouter({
 });
 
 // 全局前置守卫
+/** 已登录也**不**跳走的公开页：404 + 两份合规文本（登录后点页脚隐私政策不能被弹回首页） */
+const PUBLIC_ALWAYS = new Set(['not-found', 'privacy', 'terms']);
+
 router.beforeEach((to) => {
   const auth = useAuthStore();
 
-  // 已登录用户访问登录/注册页，重定向到首页（404 页除外：任何状态下都应展示 404）
-  if (to.meta.public && auth.isLoggedIn && to.name !== 'not-found') {
+  // 已登录用户访问登录/注册页，重定向到首页（合规页与 404 除外：任何状态下都应展示）
+  if (to.meta.public && auth.isLoggedIn && !PUBLIC_ALWAYS.has(String(to.name))) {
     return { name: 'home' };
   }
 

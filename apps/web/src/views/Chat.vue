@@ -19,6 +19,7 @@ import ChatMessageItem from '@/components/chat/ChatMessageItem.vue';
 import ChatThinkingBar from '@/components/chat/ChatThinkingBar.vue';
 import ChatMessageInput from '@/components/chat/ChatMessageInput.vue';
 import ChatKbPickerModal from '@/components/chat/ChatKbPickerModal.vue';
+import AiBadge from '@/components/common/AiBadge.vue';
 import { toast } from '@/composables/useToast';
 import { confirmDialog } from '@/composables/useConfirm';
 import {
@@ -944,6 +945,10 @@ onBeforeUnmount(() => {
                 @click="handleStreamClick"
                 v-html="renderMarkdown(streamContent)"
               />
+              <!-- 流式生成中的回答同样标注"AI 生成"（生成合成内容显式标识） -->
+              <div v-if="streamContent" class="mt-1.5">
+                <AiBadge />
+              </div>
               <div
                 v-if="streamSources.kb.length || streamSources.web.length"
                 class="mt-2 text-xs text-muted-foreground"

@@ -4,6 +4,7 @@ defineOptions({ name: 'ChatMessageItem' });
 import { FileText, Copy, GitBranch } from 'lucide-vue-next';
 import { computed } from 'vue';
 import ChatSourcePanel from './ChatSourcePanel.vue';
+import AiBadge from '@/components/common/AiBadge.vue';
 import { renderMarkdown, getCopyCode } from '@/utils/markdown';
 import { copyText } from '@/utils/clipboard';
 import { toast } from '@/composables/useToast';
@@ -158,11 +159,13 @@ const hasAnySources = (s: ChatMessage['sources']) => sourcesKb(s).length > 0 || 
       </template>
       <!-- 助手消息：Markdown -->
       <div v-else class="markdown-body px-1" @click="handleMessageClick" v-html="msgHtml" />
-      <!-- 操作条：复制（提问/回答）+ 分支（回答）；一直显示，提问右对齐 -->
+      <!-- 操作条：复制（提问/回答）+ 分支（回答）；一直显示，提问右对齐。
+           回答行首挂"AI 生成"显式标识（《人工智能生成合成内容标识办法》）。 -->
       <div
         class="mt-1.5 flex items-center gap-1"
         :class="props.msg.role === 'user' ? 'justify-end' : 'justify-start'"
       >
+        <AiBadge v-if="props.msg.role === 'assistant'" class="mr-1" />
         <button
           class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           title="复制整条消息"

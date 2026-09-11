@@ -5,6 +5,7 @@ import { Brain, LogOut, ChevronDown, Settings, Menu, Sun, Moon } from 'lucide-vu
 import { useAuthStore } from '@/stores/auth';
 import { useTheme } from '@/composables/useTheme';
 import Button from '@/components/ui/Button.vue';
+import { ICP_BEIAN, POLICE_BEIAN, SITE_DOMAIN } from '@/config/site';
 
 const router = useRouter();
 const route = useRoute();
@@ -14,6 +15,9 @@ const { isDark, toggleTheme } = useTheme();
 
 const menuOpen = ref(false); // 用户菜单
 const mobileNavOpen = ref(false); // 移动端导航面板
+
+/** 页脚版权年份（不用在模板里 new Date()：Vue 模板只放行白名单全局，脚本里算更直观） */
+const year = new Date().getFullYear();
 
 /**
  * P1-1 点外关闭：header 用了 backdrop-blur，会形成 containing block，
@@ -173,8 +177,9 @@ async function handleLogout() {
             <Moon v-else class="h-4 w-4" />
           </button>
 
-          <!-- 用户菜单：点头像/名称弹出 个人中心 + 退出 -->
-          <div class="relative">
+          <!-- 用户菜单：点头像/名称弹出 个人中心 + 退出（未登录时不渲染：
+               合规页允许游客访问，游客看到一个"?"头像很奇怪） -->
+          <div v-if="auth.isLoggedIn" class="relative">
             <button
               class="flex max-w-[180px] items-center gap-1.5 rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               @click.stop="toggleMenu"
@@ -267,5 +272,41 @@ async function handleLogout() {
         class="absolute -bottom-40 left-1/6 h-96 w-[30rem] rounded-full bg-blue-600/10 blur-3xl dark:bg-blue-600/20 animate-float-slow"
       />
     </div>
+
+    <!-- 页脚：工信部要求备案编号在**主页底部中央位置**展示并链接备案系统（第 13 条），
+         公安联网备案号同样在办完后展示；AI 生成内容提示也在这里做站级告知 -->
+    <footer class="mt-10 border-t">
+      <div
+        class="container flex flex-col items-center gap-2 py-6 text-center text-[11px] text-muted-foreground"
+      >
+        <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5">
+          <a
+            :href="ICP_BEIAN.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-foreground"
+          >
+            {{ ICP_BEIAN.number }}
+          </a>
+          <a
+            v-if="POLICE_BEIAN"
+            :href="POLICE_BEIAN.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-foreground"
+          >
+            {{ POLICE_BEIAN.number }}
+          </a>
+          <RouterLink to="/privacy" class="transition-colors hover:text-foreground">
+            隐私政策
+          </RouterLink>
+          <RouterLink to="/terms" class="transition-colors hover:text-foreground">
+            用户协议
+          </RouterLink>
+        </div>
+        <p>© {{ year }} {{ SITE_DOMAIN }} · 个人非经营性学习项目</p>
+        <p>站内回答与报告均由 AI 生成，仅供参考，请自行核实；不构成任何专业意见</p>
+      </div>
+    </footer>
   </div>
 </template>
