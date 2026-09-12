@@ -124,6 +124,16 @@ A     www      159.75.52.172    600
 > 证书不存在时 `nginx -t` 直接失败 → 新配置装不上 → 80 也没有 `/.well-known/acme-challenge/`
 > → certbot 校验拿 404 → 永远签不出证书（先有鸡还是先有蛋）。
 
+**本服务器实况（2026-09 核对，别再照抄 docs/02 的通用路径）**：
+
+| 项 | 实际值 |
+|---|---|
+| nginx 版本 | **1.18.0** → 只能用 `listen 443 ssl http2;`（`http2 on;` 是 ≥1.25.1 的写法，1.18 会报错） |
+| 站点配置 | `/etc/nginx/sites-available/kb` → `sites-enabled/kb`（**没有 default 站点**，不用删） |
+| 前端根目录 | **`/opt/kb/ai-knowledge-base/apps/web/dist`** —— 不是 `/var/www/kb-web`（服务器上没这个目录）。指向项目内 dist 的好处：CI 每次部署重构完即生效，不需要额外 copy |
+| 头像目录 | `/opt/kb/ai-knowledge-base/uploads/avatars/`（与后端 `AVATAR_DIR` 一致） |
+| 后端 | pm2 进程名 `kb-server`，跑 `apps/server/dist/main.js`；`sudo -i` 后 PATH 缺 npm 全局 bin，先 `export PATH="$PATH:$(npm prefix -g)/bin"` 再用 pm2 |
+
 要点：
 - **80 端口要永久放行**（轻量云控制台防火墙 + ufw 两处）：certbot 每 90 天续期仍走 80 校验。
 - nginx < 1.25.1 用 `listen 443 ssl http2;`，≥ 1.25.1 用 `listen 443 ssl;` + `http2 on;`。
@@ -209,10 +219,15 @@ pm2: kb-server + PostgreSQL + Redis（和 docs/39 完全一致，只多了一层
 
 ```bash
 # ══════════════════════════════════════════════════════════════════════════
-# ① 解析前先核对：www 是否也在备案域名列表里（缺了就先去腾讯云备案控制台办变更备案）
-#    DNSPod → 域名 → 解析 → 添加两条 A 记录：
-#      @     A   159.75.52.172   TTL 600
-#      www   A   159.75.52.172   TTL 600
+# ① 解析：DNSPod → 域名 → 解析 → 添加记录
+#    主机记录  类型  记录值            TTL
+#    @         A     159.75.52.172     600
+#    www       A     159.75.52.172     600   ← ⚠️ 仅当 www 也在备案域名列表里才加！
+#
+#    www 的坑：只备案了主域名时，解析 www 出去 = 未备案域名会被拦；更麻烦的是
+#    下面 certbot 若带上 -d www.aiknowbase.cn，而 www 解析不通 → **整条签发命令失败**
+#    （certbot 要求所有 -d 域名都通过校验，一个失败就一张证书都拿不到）。
+#    所以策略：**先只上主域名**；www 确认已备案后，用 --expand 追加（见 ④ 备注）。
 # ══════════════════════════════════════════════════════════════════════════
 nslookup aiknowbase.cn 8.8.8.8        # 期望返回 159.75.52.172
 
@@ -237,12 +252,16 @@ curl -I http://aiknowbase.cn                         # 期望 200
 # ══════════════════════════════════════════════════════════════════════════
 sudo apt update && sudo apt install -y certbot
 sudo mkdir -p /var/www/certbot
+# 只签主域名（www 确认已备案后：把下面命令换成同一个命令 + --expand -d www.aiknowbase.cn）
 sudo certbot certonly --webroot -w /var/www/certbot \
-     -d aiknowbase.cn -d www.aiknowbase.cn \
+     -d aiknowbase.cn \
      --email 1701132825@qq.com --agree-tos --no-eff-email
 # 期望输出：Successfully received certificate.
 #   Certificate is saved at: /etc/letsencrypt/live/aiknowbase.cn/fullchain.pem
 sudo ls /etc/letsencrypt/live/aiknowbase.cn/         # 必须有 fullchain.pem + privkey.pem
+# 以后 www 备案通过要补上（会自动扩成同一张证书，不用重签）：
+#   sudo certbot certonly --webroot -w /var/www/certbot --expand \
+#        -d aiknowbase.cn -d www.aiknowbase.cn --email 1701132825@qq.com --agree-tos
 
 # ══════════════════════════════════════════════════════════════════════════
 # ⑤ 证书就位后再换完整配置（443 + 80 自动 301），此刻 nginx -t 才会通过
