@@ -21,7 +21,6 @@ export const SITE_DOMAIN = 'aiknowbase.cn';
 
 /**
  * 隐私政策/用户协议里的联系方式（个人信息权利行使、投诉、注销申请都走这里）。
- * ⚠️ 换成你**真实可收件**的邮箱再上线 —— 法条要求提供有效联系方式，写一个不收信的地址等于没提供。
- * （备案时管局也会核验邮箱，建议就用备案填的那个。）
+ * 法条要求提供**有效**联系方式 → 用真实可收件的邮箱（与备案填写的邮箱保持一致最省事）。
  */
-export const CONTACT_EMAIL = 'contact@aiknowbase.cn';
+export const CONTACT_EMAIL = '1701132825@qq.com';

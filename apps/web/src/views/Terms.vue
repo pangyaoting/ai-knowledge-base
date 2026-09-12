@@ -137,7 +137,10 @@ const UPDATED = '2026-09-11';
         <h2 class="mb-2 text-base font-semibold">九、法律适用与联系方式</h2>
         <p>
           本协议适用中华人民共和国法律。争议应先友好协商；协商不成，提交开发者所在地有管辖权的人民法院解决。
-          联系方式：<span class="font-medium">{{ CONTACT_EMAIL }}</span
+          联系方式：<a
+            :href="`mailto:${CONTACT_EMAIL}`"
+            class="font-medium text-primary hover:underline"
+            >{{ CONTACT_EMAIL }}</a
           >。
         </p>
       </section>

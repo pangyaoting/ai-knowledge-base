@@ -113,13 +113,23 @@ A     www      159.75.52.172    600
 解析生效验证：`nslookup aiknowbase.cn` → 再 `curl -I http://aiknowbase.cn`（能出 301/200 即通）。
 
 ### 5.2 nginx 换成域名 + 上 HTTPS
-仓库 `deploy/nginx.conf` 已改成**生产模板**（80 只做 ACME 校验并 301 跳 HTTPS；443 带证书、
-HSTS、`/assets` 强缓存、`/avatars` no-store、`/api` 反代含 SSE 关缓冲）。服务器上照 §九②③ 执行。
+仓库有两份配置，**必须按顺序用**（顺序错了会卡在"证书签不出来"）：
+
+| 文件 | 用途 | 何时用 |
+|---|---|---|
+| `deploy/nginx-http-only.conf` | 只有 80：站点先在域名上跑起来 + 提供 ACME 校验目录 | 签证书**之前**（也用于证书过期时应急回滚） |
+| `deploy/nginx.conf` | 完整生产配置：443 证书 + HSTS + 80 自动 301 + 缓存/SSE | 证书签好**之后** |
+
+> 为什么不能直接上完整配置：它的 443 段引用 `/etc/letsencrypt/live/aiknowbase.cn/fullchain.pem`，
+> 证书不存在时 `nginx -t` 直接失败 → 新配置装不上 → 80 也没有 `/.well-known/acme-challenge/`
+> → certbot 校验拿 404 → 永远签不出证书（先有鸡还是先有蛋）。
 
 要点：
 - **80 端口要永久放行**（轻量云控制台防火墙 + ufw 两处）：certbot 每 90 天续期仍走 80 校验。
 - nginx < 1.25.1 用 `listen 443 ssl http2;`，≥ 1.25.1 用 `listen 443 ssl;` + `http2 on;`。
 - `proxy_buffering off` 等 SSE 配置**必须**保留在 443 的 server 块里，否则对话不再逐字输出。
+- HSTS 模板里先给 `max-age=300`：`certbot renew --dry-run` 通过后再提到一年（下发长有效期后浏览器会
+  在有效期内拒绝 HTTP，续期一旦出问题连应急退路都没了）。
 
 ### 5.3 收尾（代码侧已完成，见 §八）
 - ✅ 页脚展示备案号并链接 `beian.miit.gov.cn`（`apps/web/src/config/site.ts` + `Layout.vue`）
@@ -193,37 +203,101 @@ pm2: kb-server + PostgreSQL + Redis（和 docs/39 完全一致，只多了一层
 
 ## 九、备案通过后的操作清单（照着做）
 
-```bash
-# ① 核对 www 已备案 → DNSPod 加两条 A 记录（@ 与 www → 159.75.52.172），然后
-nslookup aiknowbase.cn
+> 全部命令都可直接复制粘贴执行（变量只有两个：服务器 IP `159.75.52.172`、邮箱 `1701132825@qq.com`）。
+> **顺序不能换**：先 80（`nginx-http-only.conf`）→ 签证书 → 再 443（`nginx.conf`）。
+> 反过来装 443 会因为证书文件还不存在而 `nginx -t` 失败，certbot 走 80 校验也拿不到 404 目录，直接卡死。
 
-# ② 换 nginx 配置（模板已含域名/HTTPS/HSTS/SSE）
-sudo cp /opt/kb/ai-knowledge-base/deploy/nginx.conf /etc/nginx/sites-available/kb
+```bash
+# ══════════════════════════════════════════════════════════════════════════
+# ① 解析前先核对：www 是否也在备案域名列表里（缺了就先去腾讯云备案控制台办变更备案）
+#    DNSPod → 域名 → 解析 → 添加两条 A 记录：
+#      @     A   159.75.52.172   TTL 600
+#      www   A   159.75.52.172   TTL 600
+# ══════════════════════════════════════════════════════════════════════════
+nslookup aiknowbase.cn 8.8.8.8        # 期望返回 159.75.52.172
+
+# ══════════════════════════════════════════════════════════════════════════
+# ② 放行端口（**先放行再签证书**，否则 ACME 校验被防火墙挡掉）
+#    腾讯云轻量：控制台 → 防火墙 → 添加规则 TCP 80、TCP 443（永久）
+# ══════════════════════════════════════════════════════════════════════════
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw status
+
+# ══════════════════════════════════════════════════════════════════════════
+# ③ 先装「只有 80」的最小配置：站点在域名上先跑起来 + 提供 ACME 校验目录
+# ══════════════════════════════════════════════════════════════════════════
+cd /opt/kb/ai-knowledge-base
+sudo rm -f /etc/nginx/sites-enabled/default          # 关掉 nginx 默认站点，避免抢 80
+sudo cp deploy/nginx-http-only.conf /etc/nginx/sites-available/kb
 sudo ln -sf /etc/nginx/sites-available/kb /etc/nginx/sites-enabled/kb
 sudo nginx -t && sudo systemctl reload nginx
-curl -I http://aiknowbase.cn            # 期望 301（跳 https）
+curl -I http://aiknowbase.cn                         # 期望 200
 
-# ③ 申请证书（webroot 模式：不用停 nginx，续期也走这条）
-sudo apt install -y certbot
+# ══════════════════════════════════════════════════════════════════════════
+# ④ 签证书（webroot 模式：不用停 nginx；续期也自动走这条）
+# ══════════════════════════════════════════════════════════════════════════
+sudo apt update && sudo apt install -y certbot
 sudo mkdir -p /var/www/certbot
 sudo certbot certonly --webroot -w /var/www/certbot \
-     -d aiknowbase.cn -d www.aiknowbase.cn --email 你的邮箱 --agree-tos
+     -d aiknowbase.cn -d www.aiknowbase.cn \
+     --email 1701132825@qq.com --agree-tos --no-eff-email
+# 期望输出：Successfully received certificate.
+#   Certificate is saved at: /etc/letsencrypt/live/aiknowbase.cn/fullchain.pem
+sudo ls /etc/letsencrypt/live/aiknowbase.cn/         # 必须有 fullchain.pem + privkey.pem
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑤ 证书就位后再换完整配置（443 + 80 自动 301），此刻 nginx -t 才会通过
+# ══════════════════════════════════════════════════════════════════════════
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/kb
 sudo nginx -t && sudo systemctl reload nginx
-curl -I https://aiknowbase.cn           # 期望 200
-sudo certbot renew --dry-run            # 确认自动续期链路可用
+curl -I http://aiknowbase.cn                         # 期望 301 → https://
+curl -I https://aiknowbase.cn                        # 期望 200
 
-# ④ 放行端口（轻量云控制台"防火墙" + 系统防火墙，80/443 都要**永久**放行）
-sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+# ══════════════════════════════════════════════════════════════════════════
+# ⑥ 验证证书与自动续期（这一步别省：续期坏了 90 天后站点直接打不开）
+# ══════════════════════════════════════════════════════════════════════════
+echo | openssl s_client -connect aiknowbase.cn:443 -servername aiknowbase.cn 2>/dev/null \
+  | openssl x509 -noout -subject -dates              # 看颁发者 + 有效期
+sudo certbot renew --dry-run                         # 期望 Congratulations, all simulated renewals succeeded
+systemctl list-timers | grep -i certbot              # 确认有自动续期定时器
 
-# ⑤ 上线后自检
-#    · 对话页回答是否逐字流式（SSE 没被缓冲）
-#    · 换头像是否立刻生效（/avatars no-store）
-#    · 页脚是否出现备案号、点击跳到 beian.miit.gov.cn
-#    · 手机浏览器打开是否"锁头"正常、无混合内容告警
+# ══════════════════════════════════════════════════════════════════════════
+# ⑦ 上线自检（curl 能过的，浏览器再走一遍）
+# ══════════════════════════════════════════════════════════════════════════
+curl -sI https://aiknowbase.cn | grep -i strict-transport   # HSTS 头存在
+curl -s -o /dev/null -w 'privacy=%{http_code}\n' https://aiknowbase.cn/privacy   # 200（游客可访问）
+curl -s -o /dev/null -w 'terms=%{http_code}\n'   https://aiknowbase.cn/terms     # 200
+curl -s -o /dev/null -w 'api=%{http_code}\n'     https://aiknowbase.cn/api/docs  # Swagger
+# 浏览器手测三件事：
+#   · 对话页回答是否**逐字流式**输出（SSE 没被缓冲 → 否则是 proxy_buffering 没生效）
+#   · 换头像是否立刻生效（/avatars no-store 生效 → 否则看到旧图）
+#   · 页脚是否出现「粤ICP备2026135674号-1」且点击跳到 beian.miit.gov.cn；手机端是否"锁头"无混合内容告警
 
-# ⑥ 30 日内：beian.mps.gov.cn 办公安联网备案 → 编号填进 apps/web/src/config/site.ts 的 POLICE_BEIAN
+# ══════════════════════════════════════════════════════════════════════════
+# ⑧ 稳定运行几天后：把 HSTS 从 300 秒提到一年
+#    （deploy/nginx.conf 里 max-age=300 → 31536000，改完 reload；别在续期验证前就改）
+# ══════════════════════════════════════════════════════════════════════════
+sudo nano /etc/nginx/sites-available/kb && sudo nginx -t && sudo systemctl reload nginx
+
+# ══════════════════════════════════════════════════════════════════════════
+# ⑨ 上线后 30 日内：公安联网备案（免费）
+#    beian.mps.gov.cn 注册 → 网站备案 → 填域名/服务器信息 → 拿到「粤公网安备 xxxxxxxx 号」
+#    然后把编号填进 apps/web/src/config/site.ts 的 POLICE_BEIAN，页脚会自动多一行
+# ══════════════════════════════════════════════════════════════════════════
 ```
 
-> ⚠️ 上线前记得改 `apps/web/src/config/site.ts` 里的 `CONTACT_EMAIL` —— 现在写的是占位
-> `contact@aiknowbase.cn`，法条要求提供**有效**联系方式，留一个不收信的邮箱等于没提供（建议用备案填的邮箱）。
+### 排障速查（这几条最容易遇到）
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 装完 `nginx.conf` 报 `cannot load certificate ... No such file` | 跳过了 ③④，证书还没签 | 先装 `nginx-http-only.conf` → 签证书 → 再换完整配置 |
+| certbot 报 `Timeout during connect` / 403 | 80 没放行（云防火墙），或 `server_name` 没写域名 | ② 放行 80；确认 server_name 是 `aiknowbase.cn www.aiknowbase.cn` |
+| `curl http://域名` 返回 nginx 默认页 | `sites-enabled/default` 还在抢 80 | `sudo rm -f /etc/nginx/sites-enabled/default` 后 reload |
+| 证书签好但浏览器仍提示不安全 | 只签了主域名、访问的是 www（或反之） | 两个域名写在同一条 `-d` 命令里重签 |
+| 站点能开但对话不逐字出字 | 443 段漏了 `proxy_buffering off` | 对照 `deploy/nginx.conf` 的 `/api/` 段补齐后 reload |
+| 换了头像还是旧图 | `/avatars/` 的 alias 目录与后端写入目录不一致，或缺 no-store | 对齐 `AVATAR_DIR`（`<项目根>/uploads/avatars`） |
+| 90 天后站点突然打不开 | 续期失败（80 被关/证书目录被删） | `sudo certbot renew --force-renewal`，并保持 80 永久放行 |
+
+> 邮箱：合规文本里的联系邮箱与备案/证书邮箱统一用 **1701132825@qq.com**
+> （已写入 `apps/web/src/config/site.ts` 的 `CONTACT_EMAIL`；想换成域名邮箱改这一行即可）。
+
 

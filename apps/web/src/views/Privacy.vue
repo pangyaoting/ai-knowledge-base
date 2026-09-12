@@ -203,8 +203,10 @@ const UPDATED = '2026-09-11';
         <h2 class="mb-2 text-base font-semibold">八、政策变更与联系方式</h2>
         <p>
           政策如有实质变更，会在本页面更新生效日期并站内提示。任何疑问、投诉或权利行使请求，请联系：
-          <span class="font-medium">{{ CONTACT_EMAIL }}</span
-          >。
+          <a :href="`mailto:${CONTACT_EMAIL}`" class="font-medium text-primary hover:underline">{{
+            CONTACT_EMAIL
+          }}</a>
+          。
         </p>
       </section>
     </div>
