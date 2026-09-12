@@ -15,9 +15,15 @@
 | 09-xx | 域名实名信息模板审核（身份核实，快） | ✅ 通过 |
 | 09-xx | 域名注册局复核（命名 + 实名复核，几分钟~1 天） | ✅ 状态"正常" |
 | 09-xx | 提交 ICP 备案（本文档 §四） | ✅ 通过（粤ICP备2026135674号-1） |
-| 备案通过后 | DNSPod 解析 A 记录 → 159.75.52.172（@ 与 www） | ⏳ 见 §九① |
-| 解析生效后 | Let's Encrypt 免费 HTTPS（certbot，webroot 模式） | ⏳ 见 §九③ |
-| 上线后 30 日内 | **公安联网备案**（beian.mps.gov.cn，免费） | ⏳ 见 §八② |
+| 09-12 | DNSPod 解析 A 记录：`@` → 159.75.52.172 | ✅ 生效（权威 DNS 实时可查） |
+| 09-12 | 装 `nginx-http-only.conf`（80）+ 放行 80/443 | ✅ 域名上 200 |
+| 09-12 | certbot 首次签发（--dry-run 先演练后正式） | ✅ 到 2026-12-10，`certbot.timer` 已建 |
+| 09-12 | 装 `nginx.conf`（443 + 301）→ 站点上 HTTPS | ✅ http 301 / https 200，HSTS 300 起步 |
+| 09-12 | 上线自检：续期 dry-run、证书链、合规页、SSE、页脚备案号 | ✅ 服务端全绿（见 §十） |
+| 30 日内 | **公安联网备案**（beian.mps.gov.cn） | ⏳ 见 §八② |
+| 以后 | www 补备案后 `--expand` 扩证书 | ⏳ www 尚未备案，本次不做 |
+
+> www 未备案 → 本轮**只上主域名**。若 www 若解析出去会被拦，且 certbot 带 `-d www...` 会因为校验失败让**整条命令失败**（一张证书都拿不到）。
 
 ---
 
@@ -160,7 +166,9 @@ A     www      159.75.52.172    600
 | 网站名称带"网/论坛" | 个人备案不让 | 用"我的AI知识库"这类 |
 | 备案期间就解析域名 | 未备案域名指向大陆 IP 会被阻断 | **备案通过前不解析**，继续用 http://IP |
 | 忘记证书续期 | Let's Encrypt 90 天 | certbot 自动续期即可，别手动删 |
-| 忘记底部备案号 | 抽查不达标 | 备案通过后加上 |
+| 忘底部备案号 | 抽查不达标 | 备案通过后加上 |
+| `systemctl reload nginx` 显示成功但 443 没起来 | 实测：`ExecReload` code=0、新 worker 也起来了，但 `ss -lntp` 里**没有 443**、`curl http://` 仍是 200（应 301） | 直接 `sudo nginx -s reload`（给 master 发 HUP）后立即生效；诊断三连：`ss -lntp \| grep nginx`、`nginx -T \| grep 'listen 443'`、`nginx -s reload` |
+| 只看 `curl https://` 失败就断定"证书/防火墙坏了" | 不同 HTTP 客户端的 TLS 栈差别很大：Windows SChannel（curl.exe / .NET）在受限环境下可能报 `SEC_E_NO_CREDENTIALS` / "基础连接已经关闭" | 换一个客户端复核（Node 的 `fetch` 走 OpenSSL、`openssl s_client` ），并用 `Test-NetConnection -Port 443` 确认 TCP 层是否真通 |
 | 只为首次签发放行 80 | certbot 90 天后续期校验失败 → 证书过期、站点打不开 | 防火墙/安全组**永久**放行 80 |
 | www 没一起备案 | www 解析出去被拦 | 备案域名列表补 www（变更备案） |
 | 换服务器 IP 忘了变更备案 | 解析到未备案 IP → 被阻断 | 换 IP/接入商时同步办"变更备案" |
@@ -318,5 +326,26 @@ sudo nano /etc/nginx/sites-available/kb && sudo nginx -t && sudo systemctl reloa
 
 > 邮箱：合规文本里的联系邮箱与备案/证书邮箱统一用 **1701132825@qq.com**
 > （已写入 `apps/web/src/config/site.ts` 的 `CONTACT_EMAIL`；想换成域名邮箱改这一行即可）。
+
+---
+
+## 十、上线结果（2026-09-12 实测，公网视角）
+
+服务端自检全绿：
+
+| 项 | 实测值 |
+|---|---|
+| `http://aiknowbase.cn` | **301** → `https://aiknowbase.cn/` |
+| `https://aiknowbase.cn/` | **200**，`Server: nginx/1.18.0`，`Strict-Transport-Security: max-age=300` |
+| `https://aiknowbase.cn/privacy` · `/terms` | **200**（未登录可访问，合规要求） |
+| `https://aiknowbase.cn/api/docs` | **200**（后端反代正常） |
+| 证书 | `subject=CN=aiknowbase.cn`，`issuer=Let's Encrypt`，`notAfter=2026-12-10` |
+| 续期 | `certbot renew --dry-run` → all simulated renewals succeeded；`certbot.timer` 已建（每天两跑） |
+| 监听 | `0.0.0.0:80` + `0.0.0.0:443`（含 IPv6），后端 3000 不对外 |
+| nginx | `enabled`（重启自启） |
+
+**验证方法要点**：`curl.exe` / .NET 在本机受限环境下 SChannel 报 `SEC_E_NO_CREDENTIALS`，换 **Node `fetch`（OpenSSL）** 才能拿到真实结果 —— 这也说明"某个客户端连不上"不等于"服务端有问题"，先换客户端复核再改服务器。
+
+浏览器侧（只有真人能验）待确认清单：锁头正常 → 页脚备案号可点 → 对话逐字流式 + `AI 生成` 标识 → 无痕窗口能开隐私政策 → 换头像即时生效。
 
 
