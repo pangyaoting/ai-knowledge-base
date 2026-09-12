@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { Brain, LogOut, ChevronDown, Settings, Menu, Sun, Moon } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
@@ -19,6 +19,8 @@ const mobileNavOpen = ref(false); // 移动端导航面板
 /** 页脚版权年份（不用在模板里 new Date()：Vue 模板只放行白名单全局，脚本里算更直观） */
 const year = new Date().getFullYear();
 
+/** 是否首页：备案号只挂首页（法规只要求"主页底部中央"；内页不重复展示） */
+const isHome = computed(() => route.path === '/');
 /**
  * P1-1 点外关闭：header 用了 backdrop-blur，会形成 containing block，
  * 内部 fixed inset-0 遮罩实际只覆盖 header 高度、点正文关不掉。
@@ -273,13 +275,14 @@ async function handleLogout() {
       />
     </div>
 
-    <!-- 页脚：工信部要求备案编号在**主页底部中央位置**展示并链接备案系统（第 13 条），
-         公安联网备案号同样在办完后展示；AI 生成内容提示也在这里做站级告知 -->
+    <!-- 页脚。
+         备案号：法规只要求"**主页**底部中央"展示并链接备案系统（《非经营性互联网信息服务
+         备案管理办法》第 13 条），因此**仅在首页展示**；内页保留合规页入口与 AI 提示。 -->
     <footer class="mt-10 border-t">
       <div
         class="container flex flex-col items-center gap-2 py-6 text-center text-[11px] text-muted-foreground"
       >
-        <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5">
+        <div v-if="isHome" class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5">
           <a
             :href="ICP_BEIAN.url"
             target="_blank"
@@ -297,14 +300,16 @@ async function handleLogout() {
           >
             {{ POLICE_BEIAN.number }}
           </a>
+        </div>
+        <p class="flex flex-wrap items-center justify-center gap-x-2">
+          <span>© {{ year }} {{ SITE_DOMAIN }} · 个人非经营性学习项目</span>
           <RouterLink to="/privacy" class="transition-colors hover:text-foreground">
             隐私政策
           </RouterLink>
           <RouterLink to="/terms" class="transition-colors hover:text-foreground">
             用户协议
           </RouterLink>
-        </div>
-        <p>© {{ year }} {{ SITE_DOMAIN }} · 个人非经营性学习项目</p>
+        </p>
         <p>站内回答与报告均由 AI 生成，仅供参考，请自行核实；不构成任何专业意见</p>
       </div>
     </footer>

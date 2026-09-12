@@ -279,6 +279,15 @@ async function handleSubmit() {
               {{ loading ? '注册中...' : '完成注册' }}
             </Button>
           </div>
+
+          <!-- 个人信息告知同意：注册即收集邮箱，需在提交前可读到两份文本（《个人信息保护法》告知义务） -->
+          <p class="text-center text-xs leading-relaxed text-muted-foreground">
+            点击"完成注册"即表示你已阅读并同意
+            <RouterLink to="/terms" class="text-primary hover:underline">《用户协议》</RouterLink>
+            与
+            <RouterLink to="/privacy" class="text-primary hover:underline">《隐私政策》</RouterLink>
+            （含邮箱等信息的使用说明）
+          </p>
         </form>
       </CardContent>
 
