@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useTheme } from '@/composables/useTheme';
 import Button from '@/components/ui/Button.vue';
 import { ICP_BEIAN, POLICE_BEIAN, SITE_DOMAIN } from '@/config/site';
+import { DEMO_ACCOUNT } from '@/config/demo';
 
 const router = useRouter();
 const route = useRoute();
@@ -21,6 +22,14 @@ const year = new Date().getFullYear();
 
 /** 是否首页：备案号只挂首页（法规只要求"主页底部中央"；内页不重复展示） */
 const isHome = computed(() => route.path === '/');
+
+/** 当前登录的是不是「只读演示账号」→ 顶部显示一条说明，免得审核员以为"按钮坏了" */
+const isDemoAccount = computed(
+  () =>
+    !!DEMO_ACCOUNT &&
+    !!auth.user?.email &&
+    auth.user.email.toLowerCase() === DEMO_ACCOUNT.email.toLowerCase(),
+);
 /**
  * P1-1 点外关闭：header 用了 backdrop-blur，会形成 containing block，
  * 内部 fixed inset-0 遮罩实际只覆盖 header 高度、点正文关不掉。
@@ -255,6 +264,13 @@ async function handleLogout() {
     <!-- 页面内容（KeepAlive 缓存：对话/自主研究/报告/首页缓存，切导航再回来状态不丢、不重建）
          （不用 Transition：out-in 串行处理大组件树（对话页）在低配设备上切换明显卡顿，直接切换最快） -->
     <main class="relative">
+      <!-- 只读演示账号提示条：审核员点按钮被 403 时，一眼知道是"演示限制"而不是"网站坏了" -->
+      <div
+        v-if="isDemoAccount"
+        class="border-b border-primary/20 bg-primary/5 px-4 py-1.5 text-center text-[11px] text-muted-foreground"
+      >
+        只读演示账号：可浏览知识库、对话、研究报告与数据看板；上传/新建/修改与 AI 功能已关闭
+      </div>
       <RouterView v-slot="{ Component }">
         <KeepAlive :include="['ChatView', 'ResearchAgentView', 'ResearchView', 'HomeView']">
           <component :is="Component" />

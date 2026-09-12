@@ -103,7 +103,12 @@
 | 模型 Key | 用户侧加密存库；平台 Key 在服务器 .env | ✅ 仓库里绝不能出现任何 `sk-` |
 | 服务器 .env | `/opt/kb/ai-knowledge-base/.env`（CI 自动备份到 /opt/kb/.env.bak） | ✅ |
 | 防火墙 | 只开 22/80/443（nginx 反向代理，3000 不对外） | ✅ |
-| HTTPS | 未配（IP+HTTP，"不安全"提示） | 可选：域名+备案+Let's Encrypt |
+| **HTTPS** | ✅ **已配**（2026-09-12）：Let's Encrypt 证书 + 80→443 301 跳转 + HSTS；`certbot.timer` 自动续期（dry-run 已验证） | 续期依赖 80 端口**永久**放行，别关 |
+| **域名与备案** | ✅ 域名 `aiknowbase.cn`（DNS：DNSPod → 159.75.52.172）；ICP 备案 `粤ICP备2026135674号-1` 已在**首页页脚**公示；公安联网备案已提交审核 | 备案信息变更（换 IP/接入商）要同步办变更备案 |
+| **日志留存** | ✅ 已按《互联网安全保护技术措施规定》（公安部 82 号令）做到 ≥60 日：`pm2-logrotate`（retain 60 / 10M / compress）+ nginx logrotate（`rotate 60`） | 复查时能拿出留存证据；磁盘 46G 可用，够用 |
+| **pm2 开机自启** | ✅ `pm2-root.service` enabled（`pm2 startup systemd` + `pm2 save`） | 服务器重启后 `kb-server` 自动恢复，不再需要人工 `pm2 start` |
+| SSE 反代 | ✅ 443 段保留 `proxy_buffering off` 等配置 | 改 nginx 时别漏，否则对话不再逐字输出 |
+| 已知非致命噪音 | BullMQ 偶发 `Missing key for job N. moveToDelayed`（任务被删除/停止与重试的竞态，库内部），错误日志最后出现在 09-05，`unstable restarts = 0` | 频繁复发时再排查，不影响服务 |
 
 ---
 

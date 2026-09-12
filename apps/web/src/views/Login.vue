@@ -12,6 +12,7 @@ import CardFooter from '@/components/ui/CardFooter.vue';
 import Input from '@/components/ui/Input.vue';
 import Label from '@/components/ui/Label.vue';
 import Button from '@/components/ui/Button.vue';
+import { DEMO_ACCOUNT } from '@/config/demo';
 
 const router = useRouter();
 const route = useRoute();
@@ -43,6 +44,14 @@ async function handleSubmit() {
     loading.value = false;
   }
 }
+
+/** 一键体验：填入演示账号并直接登录（公安备案审核员 / 访客用，账号只读） */
+async function handleDemoLogin() {
+  if (!DEMO_ACCOUNT) return;
+  form.email = DEMO_ACCOUNT.email;
+  form.password = DEMO_ACCOUNT.password;
+  await handleSubmit();
+}
 </script>
 
 <template>
@@ -68,6 +77,29 @@ async function handleSubmit() {
       </CardHeader>
 
       <CardContent>
+        <!-- 演示/审核体验入口：账号为**只读**（服务端 DEMO_READONLY_EMAILS 拦截写操作），
+             给公安联网备案审核员、面试官一键进屋看真实数据用 -->
+        <div
+          v-if="DEMO_ACCOUNT"
+          class="mb-4 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-xs"
+        >
+          <p class="font-medium text-primary">🔍 审核 / 访客体验（只读）</p>
+          <p class="mt-1 text-muted-foreground">{{ DEMO_ACCOUNT.note }}</p>
+          <p class="mt-1.5 font-mono text-[11px] text-muted-foreground">
+            账号 {{ DEMO_ACCOUNT.email }} · 密码 {{ DEMO_ACCOUNT.password }}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class="mt-2 w-full"
+            :disabled="loading"
+            @click="handleDemoLogin"
+          >
+            一键体验（免输入，直接进入）
+          </Button>
+        </div>
+
         <form class="space-y-4" @submit.prevent="handleSubmit">
           <div
             v-if="errorMsg"

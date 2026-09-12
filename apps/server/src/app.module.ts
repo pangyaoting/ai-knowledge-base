@@ -14,6 +14,7 @@ import { ResearchModule } from './modules/research/research.module';
 import { ResearchAgentModule } from './modules/research-agent/research-agent.module';
 import { ModelsModule } from './modules/models/models.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { DemoReadonlyGuard } from './common/guards/demo-readonly.guard';
 
 @Module({
   imports: [
@@ -37,6 +38,9 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
   providers: [
     // 全局 JWT 守卫：所有接口默认需要登录，用 @Public() 标记公开接口
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // 演示/审核只读账号：必须排在 JwtAuthGuard **之后**（依赖它先把 user 挂到 request 上）。
+    // 未配置 DEMO_READONLY_EMAILS 时该守卫完全空转。
+    { provide: APP_GUARD, useClass: DemoReadonlyGuard },
     // 全局限流守卫
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
