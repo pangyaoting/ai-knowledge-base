@@ -5,7 +5,7 @@
  *   中央位置标明其备案编号，并将备案编号链接到信息产业部备案管理系统网址"。
  *   完整格式：`<省简称>ICP备<8 位编号>号-<网站序号>`（网站序号从 -1 起，同一主体备案多个网站依次递增）。
  * - 公安联网备案号：ICP 备案通过后 **30 日内**到"全国互联网安全管理服务平台"登记（公安部 33 号令
- *   第 11/12 条），办完拿到编号填进 POLICE_BEIAN —— 同样要求在页脚展示；没办就保持 null（不渲染）。
+ *   第 11/12 条），办完拿到编号填进 POLICE_BEIAN —— 同样要求在页脚展示。
  */
 export const ICP_BEIAN = {
   /** 广东省通信管理局核发 */
@@ -13,8 +13,15 @@ export const ICP_BEIAN = {
   url: 'https://beian.miit.gov.cn',
 } as const;
 
-/** 公安联网备案（beian.mps.gov.cn 办理）；办完填 { number: '粤公网安备 440xxxxxxxxxxxxx号', url: '...' } */
-export const POLICE_BEIAN: { number: string; url: string } | null = null;
+/**
+ * 公安联网备案（全国互联网安全管理服务平台 beian.mps.gov.cn 办理）。
+ * 2026-09-12 通过 —— 与 ICP 备案号一并展示在首页页脚，同样要求**可点击**跳到查询页。
+ * 平台上若给的是别的查询链接，替换 url 即可（编号里的数字部分就是查询页的 code）。
+ */
+export const POLICE_BEIAN: { number: string; url: string } | null = {
+  number: '粤公网安备44098202441209号',
+  url: 'https://beian.mps.gov.cn/#/query/webSearch?code=44098202441209',
+};
 
 /** 正式域名（备案通过的域名，页脚展示用；www 需与主域名一起备案才能解析） */
 export const SITE_DOMAIN = 'aiknowbase.cn';
