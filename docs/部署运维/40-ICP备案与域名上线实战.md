@@ -154,7 +154,7 @@ A     www      159.75.52.172    600
 - ✅ AI 生成内容显式标识（`components/common/AiBadge.vue`，挂在对话回答 / 研究报告 / 自主研究报告）
 - ✅ 隐私政策 + 用户协议页（`/privacy`、`/terms`，游客可访问；注册页提交前有告知同意链接）
 - ✅ 公安联网备案号已展示：`粤公网安备44098202441209号`（与 ICP 备案号并列在首页页脚，可点跳查询页）
-- ⏳ README / 简历里的 `http://IP` 换成 `https://aiknowbase.cn`（README 已更新线上地址）
+- ✅ README 已更新线上地址 `https://aiknowbase.cn`；简历/作品集里的链接记得同步（仓库外）
 
 ---
 
